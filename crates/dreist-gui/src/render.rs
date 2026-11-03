@@ -431,7 +431,7 @@ impl<'s> Renderer<'s> {
         let st = self.style(c);
         let f = self.colour_attr(st, fill);
         let b = self.colour_attr(st, border);
-        let g = self.gradient(c, fill, None);
+        let g = self.gradient(c, fill, f, None);
         self.default_fill_gradient(p, c, f, g, b, shadow);
     }
 
@@ -443,12 +443,24 @@ impl<'s> Renderer<'s> {
     /// `<fill>GradientTo` colour (`colFillGradientTo`,
     /// `colAltFillGradientTo`), top to bottom, or left to right with
     /// `enumGradientDirection="Horizontal"`. `adjust` changes the end colour
-    /// as the fill was changed (hover).
-    pub fn gradient(&self, c: &Ctrl, fill: &str, adjust: Option<&dyn Fn(Colour) -> Colour>) -> Option<Gradient> {
+    /// as the fill was changed (hover). Without an end colour,
+    /// `realGradientShade` shades `base` (the drawn fill) towards its end:
+    /// darkened by the factor when positive, lightened when negative (so
+    /// one inherited value suits every fill colour).
+    pub fn gradient(&self, c: &Ctrl, fill: &str, base: Colour, adjust: Option<&dyn Fn(Colour) -> Colour>) -> Option<Gradient> {
         let st = self.style(c);
-        let to = opt_colour(self.styles, st, c, &format!("{fill}GradientTo"))?;
+        let to = match opt_colour(self.styles, st, c, &format!("{fill}GradientTo")) {
+            Some(to) => adjust.map(|f| f(to)).unwrap_or(to),
+            None => {
+                let k = opt_f32(self.styles, st, c, "realGradientShade", 0.0);
+                if k.abs() < 1e-4 {
+                    return None;
+                }
+                if k > 0.0 { base.darken(k) } else { base.lighten(-k) }
+            }
+        };
         let horizontal = opt_raw(self.styles, st, c, "enumGradientDirection").is_some_and(|v| v.trim().eq_ignore_ascii_case("horizontal"));
-        Some(Gradient { to: adjust.map(|f| f(to)).unwrap_or(to), horizontal })
+        Some(Gradient { to, horizontal })
     }
 
     /// A dash pattern (`len_key` px dashes, `gap_key` px gaps, the gap
@@ -644,7 +656,7 @@ impl<'s> Renderer<'s> {
             fill = hover(fill);
             border = border.darken(0.4);
         }
-        let grad = self.gradient(c, fill_attr, if c.hover { Some(&hover) } else { None });
+        let grad = self.gradient(c, fill_attr, fill, if c.hover { Some(&hover) } else { None });
         self.default_fill_gradient(p, c, fill, grad, border, true);
         let s = self.styles;
         let sh = opt_f32(s, st, c, "realStripHeight", 0.0);
@@ -753,12 +765,16 @@ impl<'s> Renderer<'s> {
         self.draw_text(p, c, tr, &c.text, "colText");
         let text = self.styles.colour(st, "colText", std_col("StandardControlText"));
         let border = self.styles.colour(st, "colBorder", std_col("StandardControlBorder"));
-        let aw = b.h * 0.4;
+        // Opt-in: `realPopupArrowSize` (× the height, default 0.4) and
+        // `optPopupDivider` (default true: the line left of the arrow).
+        let aw = b.h * opt_f32(self.styles, st, c, "realPopupArrowSize", 0.4);
         let ax = arrow_x + b.h * 0.5 - aw * 0.5;
         let ay = b.y + b.h * 0.5 - aw * 0.5;
         p.fill_polygon(&[(ax, ay), (ax + aw, ay), (ax + aw * 0.5, ay + aw)], text);
-        let lx = arrow_x.floor() + 0.5;
-        p.line(lx, b.y, lx, b.y + b.h, border, 1.0);
+        if opt_bool(self.styles, st, c, "optPopupDivider", true) {
+            let lx = arrow_x.floor() + 0.5;
+            p.line(lx, b.y, lx, b.y + b.h, border, 1.0);
+        }
     }
 
     /// [re:5eb27d] (only with a checkbox style).
@@ -823,33 +839,36 @@ impl<'s> Renderer<'s> {
         }
         let (cx, cy) = (b.x + b.w * 0.5, b.y + b.h * 0.5);
         // Opt-in face: a disc inside the ring (`realFaceInset` from its inner
-        // edge, default 1) in `colFace` (gradient `colFaceGradientTo`) framed
-        // in `colFaceBorder`.
+        // edge, default 1; negative covers the ring) in `colFace` (gradient
+        // `colFaceGradientTo`) framed in `colFaceBorder`,
+        // `realFaceBorderWidth` (default 1) wide.
         if let Some(face) = opt_colour(s, st, c, "colFace") {
             let r = b.inset(thick + opt_f32(s, st, c, "realFaceInset", 1.0));
             if r.w > 0.0 {
                 if let Some(path) = tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h).and_then(tiny_skia::PathBuilder::from_oval) {
-                    p.fill_path_opt(&path, face, self.gradient(c, "colFace", None));
+                    p.fill_path_opt(&path, face, self.gradient(c, "colFace", face, None));
                 }
                 if let Some(fb) = opt_colour(s, st, c, "colFaceBorder") {
-                    p.stroke_ellipse(r.inset(0.5), fb, 1.0);
+                    let fw = opt_f32(s, st, c, "realFaceBorderWidth", 1.0).max(0.0);
+                    p.stroke_ellipse(r.inset(fw / 2.0), fb, fw);
                 }
             }
         }
         // Opt-in pointer (`optPointer`, in place of the value dot): a line in
         // `colPointer` (default colAltBorder), `realPointerWidth` (default 2)
         // wide, from `realPointerStart` × the radius (default 0, the centre)
-        // to `realPointerInset` (default 1) inside the ring.
-        if opt_bool(s, st, c, "optPointer", false) {
+        // to `realPointerInset` (default 1) inside the ring; `optPointerDot`
+        // keeps the value dot too.
+        let pointer = opt_bool(s, st, c, "optPointer", false);
+        if pointer {
             let col = opt_colour(s, st, c, "colPointer").unwrap_or(dot_out);
             let end = (b.w * 0.5 - thick - opt_f32(s, st, c, "realPointerInset", 1.0)).max(0.0);
             let start = end * opt_f32(s, st, c, "realPointerStart", 0.0).clamp(0.0, 1.0);
             let a = angle.to_radians();
             let (dx, dy) = (a.cos(), a.sin());
             p.line(cx + dx * start, cy + dy * start, cx + dx * end, cy + dy * end, col, opt_f32(s, st, c, "realPointerWidth", 2.0));
-            return;
         }
-        if b.w > 32.0 && b.h > 32.0 {
+        if b.w > 32.0 && b.h > 32.0 && (!pointer || opt_bool(s, st, c, "optPointerDot", false)) {
             let rad = cx - ring.x;
             let a = angle.to_radians();
             let half = thick * 0.5;
@@ -944,6 +963,7 @@ impl<'s> Renderer<'s> {
             p.fill_rounded(track, radius, [true; 4], back);
             let lit = if flip { RectF::new(i, 0.0, w as f32 - 2.0 * i, hy + hs / 2.0) } else { RectF::new(i, hy + hs / 2.0, w as f32 - 2.0 * i, (h as f32 - hy - hs / 2.0).max(0.0)) };
             p.fill_rounded(lit, radius, [true; 4], hl);
+            self.track_decor(p, c, track, radius, true);
             self.draw_handle(p, c, handle, RectF::new(0.0, hy, w as f32, hs), true);
         } else {
             let i = (h as f32 * inset).round();
@@ -952,7 +972,30 @@ impl<'s> Renderer<'s> {
             p.fill_rounded(track, radius, [true; 4], back);
             let lit = if flip { RectF::new(hx + hs / 2.0, i, (w as f32 - hx - hs / 2.0).max(0.0), h as f32 - 2.0 * i) } else { RectF::new(0.0, i, hx + hs / 2.0, h as f32 - 2.0 * i) };
             p.fill_rounded(lit, radius, [true; 4], hl);
+            self.track_decor(p, c, track, radius, false);
             self.draw_handle(p, c, handle, RectF::new(hx, 0.0, hs, h as f32), false);
+        }
+    }
+
+    /// Opt-in track decoration of sliders, pan and range sliders: a groove
+    /// along the middle of the track in `colGroove`, `realGrooveWidth`
+    /// (default 2) wide, ending `realGrooveInset` (default 3) from its ends,
+    /// and a 1 px frame in `colTrackBorder`.
+    fn track_decor(&self, p: &mut Painter, c: &Ctrl, track: RectF, radius: f32, vertical: bool) {
+        let st = self.style(c);
+        let s = self.styles;
+        if let Some(g) = opt_colour(s, st, c, "colGroove") {
+            let gw = opt_f32(s, st, c, "realGrooveWidth", 2.0).max(0.0);
+            let gi = opt_f32(s, st, c, "realGrooveInset", 3.0).max(0.0);
+            let r = if vertical {
+                RectF::new((track.x + (track.w - gw) / 2.0).round(), track.y + gi, gw, track.h - 2.0 * gi)
+            } else {
+                RectF::new(track.x + gi, (track.y + (track.h - gw) / 2.0).round(), track.w - 2.0 * gi, gw)
+            };
+            p.fill_rect(r, g);
+        }
+        if let Some(b) = opt_colour(s, st, c, "colTrackBorder") {
+            p.stroke_rounded(track.inset(0.5), (radius - 0.5).max(0.0), [true; 4], b, 1.0);
         }
     }
 
@@ -969,8 +1012,10 @@ impl<'s> Renderer<'s> {
 
     /// Draw a slider handle in `r` (the cap's rect; round handles are
     /// `r`'s square): round, a colAltBorder ring around colAltFill; a
-    /// cap, colAltFill framed in colAltBorder with a grip line across its
-    /// middle (`realHandleRounding`, default 1, rounds its corners).
+    /// cap, colAltFill (gradient `colAltFillGradientTo`) framed in
+    /// colAltBorder with `intGripLines` (default 1) grip lines 2 px apart
+    /// across its middle in `colGrip` (default colAltBorder);
+    /// `realHandleRounding` (default 1) rounds its corners.
     fn draw_handle(&self, p: &mut Painter, c: &Ctrl, handle: Handle, r: RectF, vertical: bool) {
         let st = self.style(c);
         let s = self.styles;
@@ -984,15 +1029,31 @@ impl<'s> Renderer<'s> {
                 p.fill_ellipse(hr.inset((hs * 0.125).ceil()), handle_fill);
             }
             Handle::Rect(_) => {
+                // `realHandleInset`: the cap narrower than the control, px
+                // off each side across the travel.
+                let hi = opt_f32(s, st, c, "realHandleInset", 0.0).max(0.0);
+                let r = if vertical { RectF::new(r.x + hi, r.y, r.w - 2.0 * hi, r.h) } else { RectF::new(r.x, r.y + hi, r.w, r.h - 2.0 * hi) };
                 let rounding = opt_f32(s, st, c, "realHandleRounding", 1.0).max(0.0).min(r.w.min(r.h) / 2.0);
-                p.fill_rounded(r, rounding, [true; 4], handle_fill);
+                match self.gradient(c, "colAltFill", handle_fill, None) {
+                    Some(g) => {
+                        if let Some(path) = crate::paint::rounded_rect_path(r, rounding, [true; 4]) {
+                            p.fill_path_gradient(&path, handle_fill, Gradient { horizontal: !vertical && g.horizontal, ..g });
+                        }
+                    }
+                    None => p.fill_rounded(r, rounding, [true; 4], handle_fill),
+                }
                 p.stroke_rounded(r.inset(0.5), rounding, [true; 4], handle_ring, 1.0);
-                if vertical {
-                    let y = (r.y + r.h / 2.0).floor() + 0.5;
-                    p.line(r.x + 2.0, y, r.x + r.w - 2.0, y, handle_ring, 1.0);
-                } else {
-                    let x = (r.x + r.w / 2.0).floor() + 0.5;
-                    p.line(x, r.y + 2.0, x, r.y + r.h - 2.0, handle_ring, 1.0);
+                let grip = opt_colour(s, st, c, "colGrip").unwrap_or(handle_ring);
+                let n = opt_f32(s, st, c, "intGripLines", 1.0).round().max(0.0) as i32;
+                for k in 0..n {
+                    let off = (k as f32 - (n - 1) as f32 / 2.0) * 2.0;
+                    if vertical {
+                        let y = (r.y + r.h / 2.0 + off).floor() + 0.5;
+                        p.line(r.x + 2.0, y, r.x + r.w - 2.0, y, grip, 1.0);
+                    } else {
+                        let x = (r.x + r.w / 2.0 + off).floor() + 0.5;
+                        p.line(x, r.y + 2.0, x, r.y + r.h - 2.0, grip, 1.0);
+                    }
                 }
             }
         }
@@ -1071,11 +1132,13 @@ impl<'s> Renderer<'s> {
         if vertical {
             p.fill_rounded(RectF::new(i, 0.0, w - 2.0 * i, h), radius, [true; 4], back);
             p.fill_rect(RectF::new(i, a, w - 2.0 * i, b - a), hl);
+            self.track_decor(p, c, RectF::new(i, 0.0, w - 2.0 * i, h), radius, true);
             p.line(0.0, mid.floor() + 0.5, w, mid.floor() + 0.5, mark, 1.0);
             self.draw_handle(p, c, handle, RectF::new(0.0, pos, w, hs), true);
         } else {
             p.fill_rounded(RectF::new(0.0, i, w, h - 2.0 * i), radius, [true; 4], back);
             p.fill_rect(RectF::new(a, i, b - a, h - 2.0 * i), hl);
+            self.track_decor(p, c, RectF::new(0.0, i, w, h - 2.0 * i), radius, false);
             p.line(mid.floor() + 0.5, 0.0, mid.floor() + 0.5, h, mark, 1.0);
             self.draw_handle(p, c, handle, RectF::new(pos, 0.0, hs, h), false);
         }
@@ -1110,12 +1173,14 @@ impl<'s> Renderer<'s> {
         if vertical {
             p.fill_rounded(RectF::new(i, 0.0, w - 2.0 * i, h), radius, [true; 4], back);
             p.fill_rect(RectF::new(i, a, w - 2.0 * i, b - a), hl);
+            self.track_decor(p, c, RectF::new(i, 0.0, w - 2.0 * i, h), radius, true);
             for v in [lo, hi] {
                 self.draw_handle(p, c, handle, RectF::new(0.0, pos(v), w, hs), true);
             }
         } else {
             p.fill_rounded(RectF::new(0.0, i, w, h - 2.0 * i), radius, [true; 4], back);
             p.fill_rect(RectF::new(a, i, b - a, h - 2.0 * i), hl);
+            self.track_decor(p, c, RectF::new(0.0, i, w, h - 2.0 * i), radius, false);
             for v in [lo, hi] {
                 self.draw_handle(p, c, handle, RectF::new(pos(v), 0.0, hs, h), false);
             }
@@ -1746,5 +1811,91 @@ mod tests {
         // The neutral values draw exactly as plain text.
         assert_eq!(with("realTextScaleX", "1"), plain);
         assert_eq!(with("realLetterSpacing", "0"), plain);
+    }
+
+    #[test]
+    fn slider_grooves_frames_caps_and_grips() {
+        let base = [COLOURS, &[("enumHandleShape", "Rect"), ("realHandleLength", "15"), ("colFillHighlight", "0, 0, 0, 0")]].concat();
+        let deco = [
+            &base[..],
+            &[
+                ("colGroove", "255, 0, 255, 255"),
+                ("colTrackBorder", "0, 0, 255, 255"),
+                ("colGrip", "255, 255, 0, 255"),
+                ("intGripLines", "2"),
+                ("realHandleInset", "3"),
+                ("colAltFillGradientTo", "0, 0, 0, 255"),
+            ],
+        ]
+        .concat();
+        let s = sheet(&[("Plain", "CtrlStyle", &base), ("Deco", "CtrlStyle", &deco)]);
+        let mut c = ctrl("CtrlSlider", "Plain", 15, 75, &[("realTrackInset", "0")]);
+        c.value = 1.0;
+        let plain = draw(&s, &c);
+        c.style = "Deco".into();
+        let deco = draw(&s, &c);
+        assert_ne!(plain, deco);
+        assert_eq!(px(&deco, 15, 7, 50), [255, 0, 255], "groove in the middle");
+        assert_eq!(px(&deco, 15, 0, 50), [0, 0, 255], "track frame");
+        assert_eq!(px(&deco, 15, 1, 7), [40, 40, 40], "the cap is inset across");
+        let yellow = |px: &[u8]| px.chunks(4).filter(|p| p[..3] == [255, 255, 0]).count();
+        assert!(yellow(&deco) >= 2 * 4, "two grip lines");
+        // The cap's gradient: lighter at its top than at its bottom.
+        assert!(px(&deco, 15, 4, 2)[1] > px(&deco, 15, 4, 12)[1]);
+        // Pan and range sliders take the groove too.
+        for class in ["CtrlPanSlider", "CtrlRangeSlider"] {
+            let a = draw(&s, &ctrl(class, "Plain", 75, 12, &[]));
+            let b = draw(&s, &ctrl(class, "Deco", 75, 12, &[]));
+            assert_ne!(a, b, "{class}");
+        }
+    }
+
+    #[test]
+    fn gradient_shades_follow_the_fill() {
+        let s = sheet(&[
+            ("Shade", "CtrlStyle", &[("colFill", "200, 200, 200, 255"), ("optDrawBorder", "false"), ("realGradientShade", "1")]),
+            ("Light", "CtrlStyle", &[("colFill", "100, 100, 100, 255"), ("optDrawBorder", "false"), ("realGradientShade", "-1")]),
+        ]);
+        let d = draw(&s, &ctrl("CtrlPanel", "Shade", 10, 20, &[]));
+        assert!(px(&d, 10, 5, 0)[0] > 190 && px(&d, 10, 5, 19)[0] < 110, "darkened to half");
+        let l = draw(&s, &ctrl("CtrlPanel", "Light", 10, 20, &[]));
+        assert!(px(&l, 10, 5, 19)[0] > 160);
+    }
+
+    #[test]
+    fn popup_arrows_and_dividers() {
+        let st = [("colFill", "0, 0, 0, 255"), ("colBorder", "255, 255, 255, 255"), ("colText", "0, 255, 0, 255")];
+        let s = sheet(&[("P", "CtrlStyle", &st), ("Q", "CtrlStyle", &[&st[..], &[("optPopupDivider", "false"), ("realPopupArrowSize", "0.2")]].concat())]);
+        let a = draw(&s, &ctrl("CtrlPopupButton", "P", 60, 20, &[]));
+        let b = draw(&s, &ctrl("CtrlPopupButton", "Q", 60, 20, &[]));
+        assert_eq!(px(&a, 60, 40, 10), [255, 255, 255], "divider");
+        assert_eq!(px(&b, 60, 40, 10), [0, 0, 0], "no divider");
+        let green = |px: &[u8]| px.chunks(4).filter(|p| p[1] > 128 && p[0] < 64).count();
+        assert!(green(&b) > 0 && green(&b) < green(&a), "smaller arrow");
+    }
+
+    #[test]
+    fn knob_face_rings_and_pointer_dots() {
+        let k = [
+            COLOURS,
+            &[
+                ("optPointer", "true"),
+                ("colPointer", "255, 0, 255, 255"),
+                ("colFace", "200, 200, 200, 255"),
+                ("realFaceInset", "-8"),
+                ("colFaceBorder", "0, 0, 255, 255"),
+                ("realFaceBorderWidth", "4"),
+            ],
+        ]
+        .concat();
+        let kd = [&k[..], &[("optPointerDot", "true")]].concat();
+        let s = sheet(&[("K", "CtrlStyle", &k), ("KD", "CtrlStyle", &kd)]);
+        let mut c = ctrl("CtrlKnob", "K", 40, 40, &[]);
+        c.value = 0.5;
+        let a = draw(&s, &c);
+        assert_eq!(px(&a, 40, 20, 1), [0, 0, 255], "the face's border covers the ring");
+        c.style = "KD".into();
+        let b = draw(&s, &c);
+        assert_ne!(a, b, "the dot is drawn too");
     }
 }
