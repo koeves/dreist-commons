@@ -41,8 +41,9 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
     cargo fmt --all --check
     UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
 
-Apps depend on a pinned revision of this repository and override it with a local checkout for
-development (see each app's README).
+Apps depend on a pinned revision of this repository (`git`, `rev`) and override it with a local
+checkout for development through a `[patch]` in `~/Documents/projects/.cargo/config.toml` (see
+each app's README).
 
 ## Licence
 
