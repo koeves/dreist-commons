@@ -194,19 +194,21 @@ impl Node for AutoFilter {
             let pc = self.pitch + self.env[i];
             let f = ((pc + 10.0).abs() - (pc - 10.0).abs()) * 0.5;
             let f = f.exp2();
+            // One coefficient for both channels, FM from the left input
+            // (one exp2 call and one 0.24 clamp per sample in the original).
+            let w = (fm5 * inp[0][i] * f * w0 + f * w0) * 0.5;
+            let wc = ((w.abs() + 0.24) - (w - 0.24).abs()) * 0.5;
+            // `ms_sin_tab + 0x1000` indexed by `floor(wc·2048)` directly
+            // (no table-centre offset; wc is clamped to 0..0.24).
+            let v = wc * 2048.0;
+            let iv = v.floor();
+            let j = 1024 + iv as usize;
+            let g = ((st[j + 1] - st[j]) * (v - iv) + st[j]) * 4.0;
+            let t = (k * g * g) / 6.0;
+            let (kd, gg) = (k - t, g - t);
             let mut y = [0.0f32; 2];
             for c in 0..2 {
                 let x = inp[c][i];
-                let w = (fm5 * f * w0 * x + f * w0) * 0.5;
-                let wc = ((w.abs() + 0.24) - (w - 0.24).abs()) * 0.5;
-                // `ms_sin_tab + 0x1000` indexed by `floor(wc·2048)` directly
-                // (no table-centre offset; wc is clamped to 0..0.24).
-                let v = wc * 2048.0;
-                let iv = v.floor();
-                let j = 1024 + iv as usize;
-                let g = ((st[j + 1] - st[j]) * (v - iv) + st[j]) * 4.0;
-                let t = (k * g * g) / 6.0;
-                let (kd, gg) = (k - t, g - t);
                 let bp = self.bp[c];
                 self.lp[c] += sat(bp) * gg;
                 let lp = self.lp[c];
