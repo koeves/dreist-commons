@@ -171,35 +171,16 @@ impl<'s> Renderer<'s> {
     /// The header logo with the master level ([re:2f6a08]
     /// [re:4a9597] / [re:a75af4] draw a 3 px frame inset 1.5 and the
     /// product mark in colFill, then again in colAltFill at the master
-    /// level's alpha, `overlayAlpha` = min(level·0.75, 1)). The port's mark
-    /// is a "D": a stem and a bowl.
+    /// level's alpha, `overlayAlpha` = min(level·0.75, 1)). The mark is the
+    /// profile's [`logo_mark`](dreist_formats::profile::Profile::logo_mark).
     fn logo_meter(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let (w, h) = (c.rect.w as f32, c.rect.h as f32);
         let draw = |p: &mut Painter, col: Colour| {
             p.stroke_rect(RectF::new(1.5, 1.5, w - 3.0, h - 3.0), col, 3.0);
-            p.fill_polygon(&[(9.0, 9.0), (16.0, 9.0), (16.0, 41.0), (9.0, 41.0)], col);
-            p.fill_polygon(
-                &[
-                    (18.0, 9.0),
-                    (28.0, 9.0),
-                    (36.0, 13.0),
-                    (41.0, 20.0),
-                    (41.0, 30.0),
-                    (36.0, 37.0),
-                    (28.0, 41.0),
-                    (18.0, 41.0),
-                    (18.0, 34.0),
-                    (27.0, 34.0),
-                    (32.0, 31.0),
-                    (34.0, 27.0),
-                    (34.0, 23.0),
-                    (32.0, 19.0),
-                    (27.0, 16.0),
-                    (18.0, 16.0),
-                ],
-                col,
-            );
+            for poly in dreist_formats::profile::get().logo_mark {
+                p.fill_polygon(poly, col);
+            }
         };
         draw(p, self.styles.colour(st, "colFill", Colour::rgba(255, 255, 0, 255)));
         let a = c.attr("overlayAlpha").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);

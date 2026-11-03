@@ -127,6 +127,9 @@ pub struct Profile {
     pub ui_family: &'static str,
     /// The icon font (`<icon_family>.ttf` in the UI resources' `Fonts`).
     pub icon_family: &'static str,
+    /// The header logo's product mark: filled polygons in the logo's
+    /// 50 × 50 box (inside its 3 px frame).
+    pub logo_mark: &'static [&'static [(f32, f32)]],
     /// Settings folder name (`~/Library/Application Support/<name>`,
     /// `%APPDATA%\<name>`).
     pub settings_dir: &'static str,
@@ -165,6 +168,29 @@ pub fn plain_project(path: &Path) -> Option<(Node, bool)> {
     crate::Project::load(path).ok().map(|p| (p.raw, false))
 }
 
+/// Dreist's logo mark, a "D": a stem and a bowl.
+pub const DREIST_LOGO_MARK: &[&[(f32, f32)]] = &[
+    &[(9.0, 9.0), (16.0, 9.0), (16.0, 41.0), (9.0, 41.0)],
+    &[
+        (18.0, 9.0),
+        (28.0, 9.0),
+        (36.0, 13.0),
+        (41.0, 20.0),
+        (41.0, 30.0),
+        (36.0, 37.0),
+        (28.0, 41.0),
+        (18.0, 41.0),
+        (18.0, 34.0),
+        (27.0, 34.0),
+        (32.0, 31.0),
+        (34.0, 27.0),
+        (34.0, 23.0),
+        (32.0, 19.0),
+        (27.0, 16.0),
+        (18.0, 16.0),
+    ],
+];
+
 /// The workspace's reference profile: Dreist's names and menu. Its
 /// resources are looked up in a Dreist checkout next to this repository
 /// (`../dreist`), so this workspace's tests draw Dreist's UI.
@@ -174,6 +200,7 @@ pub const BASE: Profile = Profile {
     theme: "Dreist",
     ui_family: "Dreist Sans",
     icon_family: "Dreist-Icons",
+    logo_mark: DREIST_LOGO_MARK,
     settings_dir: "Dreist",
     legacy_settings_dirs: &[],
     settings_env: "DREIST_SETTINGS_DIR",
