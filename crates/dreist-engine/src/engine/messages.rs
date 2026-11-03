@@ -753,7 +753,9 @@ impl Dreist {
     /// [re:f8581c]): coarse / fine tune so the sample's BPM
     /// (metadata, else the length guess) plays at the tempo: semitones =
     /// 12·log2(tempo/BPM), coarse = semitones/24 + 0.5 (unquantised), fine
-    /// = the remainder past the nearest semitone ·0.5 + 0.5. The editor
+    /// = the remainder past the nearest semitone ·0.5 + 0.5, taken from the
+    /// unclamped coarse value (beyond ±12 semitones fine keeps the
+    /// fraction; [disasm] of the binary's routine). The editor
     /// hears of both (0x1c8; port: `automation_out`).
     fn tune_layer(&mut self, e: i32, p: i32, l: i32) {
         let Some(layer) = self.layer_mut(e, p, l) else { return };
@@ -762,11 +764,19 @@ impl Dreist {
         if tempo <= 0.0 || (tempo - src).abs() < 1e-6 {
             return;
         }
-        let semis = (tempo / src).ln() * 17.312_34;
-        let coarse = (semis / 24.0 + 0.5).clamp(0.0, 1.0);
-        let s = (coarse - 0.5) * 24.0;
-        let r = if s < 0.0 { (s - 0.5).trunc() } else { (s + 0.5).trunc() };
-        let fine = ((s - r) * 0.5 + 0.5).clamp(0.0, 1.0);
+        let ratio = (tempo / src).abs();
+        if ratio == 0.0 {
+            return;
+        }
+        // In double, as the binary: semitones = 12·log2(ratio); the
+        // normalised pitch (−12 − x)/(−12 − 12) in float; fine from the
+        // unclamped coarse value. Both are clamped only when stored.
+        let semis = (ratio as f64).ln() * 17.312339006067457;
+        let coarse_u = (-12.0f32 - semis as f32) / (-12.0f32 - 12.0);
+        let s = (coarse_u as f64 - 0.5) * 24.0;
+        let r = (s + if s < 0.0 { -0.5 } else { 0.5 }) as i32 as f64;
+        let fine = (((s - r) * 0.5 + 0.5) as f32).clamp(0.0, 1.0);
+        let coarse = coarse_u.clamp(0.0, 1.0);
         for (par, v) in [(dreist_formats::LayerParam::CoarseTune, coarse), (dreist_formats::LayerParam::FineTune, fine)] {
             self.set_layer_param(e, p, l, par as i32, 0, v);
             let m = Message::new(id::SET_LAYER_PARAMETER, &[e, p, l], &[par as u8 as f32, v, 0.0]);
