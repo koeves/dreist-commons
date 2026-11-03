@@ -204,28 +204,26 @@ mod tests {
         assert_eq!(super::hotspot(&dir, "NoSuchCursor"), (2, 2));
     }
 
-    /// Every image cursor the GUI and editor code asks for is drawn
-    /// (`assets/dreist/Cursors`).
+    /// Every image cursor the GUI code asks for is drawn (the app's
+    /// `Cursors`; each app's editor checks its own).
     #[test]
     fn every_named_cursor_has_an_image() {
         let dir = dreist_formats::paths::ui_dir().join("Cursors");
         if !dir.is_dir() {
             return;
         }
-        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut names = Vec::new();
-        for src in ["dreist-gui/src", "dreist-editor/src"] {
-            for e in std::fs::read_dir(crates.join(src)).unwrap().flatten() {
-                let text = std::fs::read_to_string(e.path()).unwrap_or_default();
-                for call in text.split("Cursor::image(").skip(1) {
-                    let args = call.split(')').next().unwrap_or("");
-                    names.extend(args.split('"').skip(1).step_by(2).filter(|n| !n.is_empty() && !n.contains(['{', ' '])).map(str::to_string));
-                }
+        for e in std::fs::read_dir(src).unwrap().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            for call in text.split("Cursor::image(").skip(1) {
+                let args = call.split(')').next().unwrap_or("");
+                names.extend(args.split('"').skip(1).step_by(2).filter(|n| !n.is_empty() && !n.contains(['{', ' '])).map(str::to_string));
             }
         }
         names.sort();
         names.dedup();
-        assert!(names.len() > 8, "{names:?}");
+        assert!(!names.is_empty());
         for n in names {
             assert!(dir.join(format!("{n}.png")).is_file(), "no cursor image {n}");
         }

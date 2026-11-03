@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-editor", "crates/dreist-testkit"]
+members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-testkit"]
 
 [workspace.package]
 edition = "2024"

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- `dreist-editor` moved out: each app owns its editor (Dreist's `dreist-editor`, Einst's
+  `einst-editor`), so their screens can differ. The profile loses the editor-only fields
+  (`about`, `settings_dir`, `legacy_settings_dirs`, `settings_env`, `open_also`,
+  `effect_menu`, `read_document`, `read_project`) and `open_extensions`, `plain_document`,
+  `plain_project`.
+
+### Features
+
+- The header logo's mark comes from the profile (`Profile::logo_mark`).
+
 ## [0.1.0] - 2026-11-03
 
 First release: the crates Dreist and Einst share, moved out of Dreist beta 1 and renamed

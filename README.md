@@ -1,9 +1,8 @@
 # dreist-commons
 
 The shared crates of **Dreist** (a Rust rebuild of FXpansion Geist2) and **Einst** (a rebuild of
-Geist v1 on top of them). Each app is a thin repository that depends on these crates and plugs in
-its own names, resources, file family, effect menu, document readers and effect nodes through an
-app profile.
+Geist v1 on top of them). Each app depends on these crates, plugs in its names, resources, file
+family and effect nodes through an app profile, and brings its own editor.
 
 | Crate | Role |
 |---|---|
@@ -11,7 +10,6 @@ app profile.
 | `dreist-dsp` | sampler voice DSP and the effect nodes; `fx::install_factory` lets an app supply its own nodes |
 | `dreist-engine` | engine runtime: step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
 | `dreist-gui` | skin-driven GUI toolkit (tiny-skia, baseview) |
-| `dreist-editor` | the editor panels driving the engine through commands; `screens` runs the screen goldens |
 | `dreist-testkit` | golden fingerprints and allocation counting for tests |
 
 `vendor/` holds patched `baseview` (re-entrancy guard for modal dialogs) and
@@ -19,16 +17,15 @@ app profile.
 
 ## The app profile
 
-    dreist_formats::profile::install(&PROFILE);            // names, resources, files, menu, readers
+    dreist_formats::profile::install(&PROFILE);            // names, resources, files, logo
     dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's own effect nodes
 
-`Profile` holds the product name and About text, the default theme, the UI and icon font
-families, the settings folder (and earlier names migrated on first launch) and its override
-variable, where the UI graphics and the factory data are found (environment override, bundle
-folder, development folders), the extension family the app saves (`LEGACY` `.geist*`, `DREIST`
-`.dreist*`, `EINST` `.einst*`; every app opens all three), extra Open-dialog extensions, the
-effect menu and the document/project readers. Without an installed profile, `BASE` (Dreist's)
-applies.
+`Profile` holds the product name, the default theme, the UI and icon font families, the
+header logo's mark, where the UI graphics and the factory data are found (environment override,
+bundle folder, development folders) and the extension family the app saves (`LEGACY` `.geist*`,
+`DREIST` `.dreist*`, `EINST` `.einst*`; every app opens all three). Without an installed
+profile, `BASE` (Dreist's) applies. The editor (panels, dialogs, settings, effect menu, document
+readers) is each app's own.
 
 ## Development
 
@@ -53,7 +50,7 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
 ## Related projects
 
 - [dreist-commons](https://github.com/koeves/dreist-commons): the shared library (formats, DSP,
-  engine, GUI, editor) that both apps are built on.
+  engine, GUI toolkit) that both apps are built on.
 - [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild, an app on dreist-commons.
 - [Einst](https://github.com/koeves/einst): the Geist v1 rebuild, an app on dreist-commons.
 

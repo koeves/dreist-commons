@@ -1,16 +1,15 @@
 //! The app profile: what an app built on these crates (Dreist, Einst)
-//! supplies — names, theme, settings folder, where its resources live, the
-//! file extensions it saves, its effect menu and how it reads documents.
+//! supplies to them — names, theme, fonts, logo, where its resources live
+//! and the file extensions it saves. Each app's editor holds the rest
+//! (About text, settings folder, effect menu, document readers).
 //!
 //! An app calls [`install`] once at start-up, before opening any window or
 //! document; until then (and in this workspace's own tests) [`get`] returns
 //! [`BASE`]. The effect nodes have their own hook in
 //! `dreist_dsp::fx::install_factory`.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
-
-use crate::Node;
 
 /// Where one set of resources is found: `env` (an override), then
 /// `Contents/Resources/<bundle_dir>` of the bundle holding this code (or
@@ -80,14 +79,6 @@ pub const EINST: Extensions = Extensions { project: "einst", kit: "einstkit", en
 /// Every family; every app opens all of them.
 pub const FAMILIES: [Extensions; 3] = [LEGACY, DREIST, EINST];
 
-/// The Open dialog's extensions: projects of every family (the app's own
-/// first), then the profile's [`Profile::open_also`].
-pub fn open_extensions() -> Vec<&'static str> {
-    let mut v = extensions_of(DocKind::Project);
-    v.extend(get().open_also);
-    v
-}
-
 /// Short legacy kit extension, also opened as a kit.
 pub const LEGACY_KIT_SHORT: &str = "gkit";
 
@@ -119,8 +110,6 @@ pub fn extensions_of(kind: DocKind) -> Vec<&'static str> {
 pub struct Profile {
     /// Product name (window titles, menus, dialogs).
     pub product: &'static str,
-    /// The About text.
-    pub about: &'static str,
     /// The default skin theme (`Skin/Styles/<theme>.style`).
     pub theme: &'static str,
     /// The stylesheets' text family, drawn with Liberation Sans.
@@ -130,14 +119,6 @@ pub struct Profile {
     /// The header logo's product mark: filled polygons in the logo's
     /// 50 × 50 box (inside its 3 px frame).
     pub logo_mark: &'static [&'static [(f32, f32)]],
-    /// Settings folder name (`~/Library/Application Support/<name>`,
-    /// `%APPDATA%\<name>`).
-    pub settings_dir: &'static str,
-    /// Earlier settings folder names: the first one found is moved to
-    /// [`Profile::settings_dir`] when that does not exist yet.
-    pub legacy_settings_dirs: &'static [&'static str],
-    /// Environment variable naming a separate settings folder.
-    pub settings_env: &'static str,
     /// UI graphics: `Skin/`, `Fonts/`, [re:038bdf], `Metronomes/`.
     pub ui: Resources,
     /// Factory data: `Effects/`, `Effect Chains/`, `Pattern Templates/`,
@@ -145,27 +126,6 @@ pub struct Profile {
     pub factory: Resources,
     /// The extension family the app saves.
     pub save: Extensions,
-    /// Further extensions the Open dialog offers besides projects (files
-    /// `read_project` turns into a project).
-    pub open_also: &'static [&'static str],
-    /// The effect types offered in effect menu category `c` (0..6), in menu order.
-    pub effect_menu: fn(usize) -> Vec<usize>,
-    /// A document file's root element (the editor's part loads); `None`
-    /// when it cannot be read.
-    pub read_document: fn(&Path) -> Option<Node>,
-    /// A project to open and whether it was converted from another format
-    /// (a converted project is saved through Save As).
-    pub read_project: fn(&Path) -> Option<(Node, bool)>,
-}
-
-/// The document as stored.
-pub fn plain_document(path: &Path) -> Option<Node> {
-    Node::parse(&std::fs::read_to_string(path).ok()?).ok()
-}
-
-/// The project as stored.
-pub fn plain_project(path: &Path) -> Option<(Node, bool)> {
-    crate::Project::load(path).ok().map(|p| (p.raw, false))
 }
 
 /// Dreist's logo mark, a "D": a stem and a bowl.
@@ -196,21 +156,13 @@ pub const DREIST_LOGO_MARK: &[&[(f32, f32)]] = &[
 /// (`../dreist`), so this workspace's tests draw Dreist's UI.
 pub const BASE: Profile = Profile {
     product: "Dreist",
-    about: "Dreist: drum sampler, sequencer and performance instrument. Native for macOS and Windows, written in Rust.",
     theme: "Dreist",
     ui_family: "Dreist Sans",
     icon_family: "Dreist-Icons",
     logo_mark: DREIST_LOGO_MARK,
-    settings_dir: "Dreist",
-    legacy_settings_dirs: &[],
-    settings_env: "DREIST_SETTINGS_DIR",
     ui: Resources { env: "DREIST_UI", bundle_dir: "Dreist", dev_dirs: &[concat!(env!("CARGO_MANIFEST_DIR"), "/../../../dreist/assets/ui")] },
     factory: Resources { env: "DREIST_RESOURCES", bundle_dir: "Factory", dev_dirs: &[concat!(env!("CARGO_MANIFEST_DIR"), "/../../../dreist/assets/factory")] },
     save: DREIST,
-    open_also: &[],
-    effect_menu: crate::params::effect_menu,
-    read_document: plain_document,
-    read_project: plain_project,
 };
 
 static PROFILE: OnceLock<&'static Profile> = OnceLock::new();
