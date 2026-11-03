@@ -3,28 +3,28 @@
 //!
 //! [re:7ed671] lays out 8
 //! [re:4fd51c]s (`EngineSelector.skin`) with 1 px spacing.
-//! `SetEngineIndex` [re:873bf1] labels each with its number; `SelectEngine`
+//! [re:873bf1] labels each with its number; selecting one
 //! [re:a570ec] turns on `StateIndicator` and `EngineSelectionButton` of the
 //! chosen one and posts `e_selectEngine` (0x41). Mute/Solo/PatternPower post
-//! 0x8c/0x8d/0xa8 for that engine (`DoSendMessage` [re:c7d50e]).
+//! 0x8c/0x8d/0xa8 for that engine ([re:c7d50e]).
 //!
-//! Transport and master controls ([re:46c9b4] lambdas):
-//! - GlobalGain ($_0 [re:3f9657]) posts `e_setMasterChannelGain` 0xa5; a
-//!   double click ($_1 [re:dd3107]) resets it to 0 dB (0.7937) when the
+//! Transport and master controls ([re:46c9b4] callbacks):
+//! - GlobalGain ([re:3f9657]) posts `e_setMasterChannelGain` 0xa5; a
+//!   double click ([re:dd3107]) resets it to 0 dB (0.7937) when the
 //!   option `DoubleClickResets` (default on) is set, else opens a text edit
-//!   in dB ("Master Level", `DecibelsConversion`). It follows
+//!   in dB ("Master Level", decibel text). It follows
 //!   `e_updateMasterGain` 0x192.
-//! - PanicButton ($_7 [re:f41aad]) `e_panic` 0x12; the engine answers with the
+//! - PanicButton ([re:f41aad]) `e_panic` 0x12; the engine answers with the
 //!   play and record buttons off (0x1d4 / 0x1d5).
-//! - SongButton ($_18 [re:e49218]) `e_songSetActive` 0x117 [on, false];
-//!   LoopButton ($_19 [re:e3d5c1]) `e_songSetInternalLoopActive` 0x120 [on];
-//!   RestartButton ($_20 [re:7dd0f4]) `e_returnToZero` 0x1d.
+//! - SongButton ([re:e49218]) `e_songSetActive` 0x117 [on, false];
+//!   LoopButton ([re:e3d5c1]) `e_songSetInternalLoopActive` 0x120 [on];
+//!   RestartButton ([re:7dd0f4]) `e_returnToZero` 0x1d.
 //! - `e_songStateChanged` 0x1f6 / learn state 0x132: Song on = song
 //!   active, Loop on = internal loop on; Restart is enabled in learn mode or
 //!   with the song active, Loop in learn mode or with the song active and
-//!   no host loop (the song sequencer's vtable at [re:3a88f8]: +0x30
-//!   `IsActive`, +0x38 `IsInternalLoopEnabled`, +0x40 `IsHostLoopEnabled`).
-//! - OptionsButton ($_6 [re:d718a1]) opens the transport options: check
+//!   no host loop (the song sequencer's state queries, [re:3a88f8]: active,
+//!   internal loop enabled, host loop enabled).
+//! - OptionsButton ([re:d718a1]) opens the transport options: check
 //!   items for the options `PatternEditorFollow` (default off; editor
 //!   message 0x18c), `PadSelectionFollowsMIDI` (on) and
 //!   `EngineSelectionFollowsMIDI` (off) (both posted as
@@ -35,10 +35,10 @@
 //!   (stored under the same key, read with default off; 0x2a) and "Wait
 //!   for MIDI input when recording" (`WaitForMIDI`, off; 0x29); the
 //!   metronome volume slider (0x24) and the "Metronome output..." sub menu
-//!   (Master and Sub output 1–31, `EAudioOutputs` 1..=32; 0x25).
+//!   (Master and Sub output 1–31, output locations 1..=32; 0x25).
 //! - MetroButton follows the document's `Metronome Mute`.
-//! - Indicators (`ATC_Tick` [re:8ae44a]): MIDIIndi lights for 10 ticks when a
-//!   block carried MIDI (`WasMidiMessageRecieved`), VoiceIndi for 10 ticks
+//! - Indicators (timer tick [re:8ae44a]): MIDIIndi lights for 10 ticks when a
+//!   block carried MIDI, VoiceIndi for 10 ticks
 //!   after `e_updateVoiceStolen` 0x18a.
 
 use dreist_engine::binding::id;
@@ -60,14 +60,14 @@ pub struct Header {
     options: Option<Vec<usize>>,
     menu: u8,
     /// Indicator countdowns in timer ticks ([re:f5d1f8] MIDI,
-    /// +0x294 voices).
+    /// voices).
     midi_ticks: u32,
     voice_ticks: u32,
     /// The controls `sync` sets.
     named: dreist_gui::app::PathCache,
 }
 
-/// Indicator hold (`ATC_Tick`: 10 ticks of the 1/30 s timer).
+/// Indicator hold (10 ticks of the 1/30 s timer).
 const INDICATOR_TICKS: u32 = 10;
 const GAIN_EDIT: &str = "GlobalGainEdit";
 
@@ -127,7 +127,7 @@ pub fn preroll_index(name: &str) -> usize {
     PREROLL_NAMES.iter().position(|n| *n == name).unwrap_or(0)
 }
 
-/// Options menu items (order as $_6 adds them; the slider is item 13, the
+/// Options menu items (order as the original adds them; the slider is item 13, the
 /// sub menu 14).
 fn options_items(model: &Model) -> Vec<String> {
     let o = crate::options::Options::load();
@@ -150,7 +150,7 @@ fn options_items(model: &Model) -> Vec<String> {
     items
 }
 
-/// The metronome output sub menu: `EAudioOutputs` 1..=32 by long name.
+/// The metronome output sub menu: output locations 1..=32 by long name.
 fn output_items(model: &Model) -> Vec<String> {
     let cur = metronome(model).and_then(|n| n.attr("OutputLocation")).map(dreist_engine::Route::from_name).unwrap_or(dreist_engine::Route::Master);
     (1..=32)
@@ -279,7 +279,7 @@ impl Header {
         set("VoiceIndi", &|c| c.on = voice);
     }
 
-    /// An Options menu pick ([re:4139f8] $_6 lambdas): write the
+    /// An Options menu pick ([re:4139f8]): write the
     /// option and tell the engine / editor.
     fn option_chosen(&mut self, app: &mut App, model: &mut Model, menu: u8, index: usize, out: &mut Vec<Command>) {
         let mut o = crate::options::Options::load();

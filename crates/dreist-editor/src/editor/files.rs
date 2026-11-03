@@ -4,7 +4,7 @@
 use crate::*;
 
 impl Editor {
-    /// Header "File" menu ([re:4139f8] $_21 [re:3ce6a1]): Open
+    /// Header "File" menu ([re:4139f8] [re:3ce6a1]): Open
     /// Preset, Open Recent ▸ (when there are recent presets), Open Engine,
     /// Open Kit, Open others... ▸ (Pad, Pattern Bank, Pattern, Mappings);
     /// Save Preset / As..., Save Engine / As..., Save Kit / As..., Save
@@ -128,8 +128,8 @@ impl Editor {
     /// [re:bd68bd] → [re:442dbb]
     /// for the selected engine's current pattern. With option `AutoMIDICC`
     /// (default on) graphs that have data but no MIDI binding get one on a
-    /// free CC of the engine's channel (`GetFreeCCIndex` [re:1e3bfb]: 1..127
-    /// without bindings, skipping 7 and 10; `AddNewBindingOnExport`
+    /// free CC of the engine's channel ([re:1e3bfb]: 1..127
+    /// without bindings, skipping 7 and 10;
     /// [re:1579c8]).
     pub fn save_pattern_midi(&mut self, path: &std::path::Path) -> bool {
         let cur = self.model.current_pattern(self.model.engine);
@@ -137,7 +137,7 @@ impl Editor {
     }
 
     /// Pattern `cur` of the current engine as a MIDI file
-    /// (`SavePatternAsMIDI`; also the pattern key's drag-out file).
+    /// (also the pattern key's drag-out file).
     pub fn save_pattern_midi_of(&mut self, path: &std::path::Path, cur: usize) -> bool {
         use dreist_engine::binding::{Message, id};
         let e = self.model.engine;
@@ -248,7 +248,7 @@ impl Editor {
         Some(out)
     }
 
-    /// A Guru 1 swing template (`ConvertGuru1SwingTemplateToGridSwingTemplate`)
+    /// A Guru 1 swing template converted to a grid swing template and
     /// saved as `<user swing folder>/<file stem>.swingtemplate`; failures
     /// alert.
     pub fn import_guru_swing(&mut self, file: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -277,7 +277,7 @@ impl Editor {
 
     /// Load a part file into the document and rebuild the engine.
     pub(crate) fn open_part(&mut self, part: project::Part, file: &std::path::Path) -> bool {
-        // Guru files ([re:dda000] → `DoLoadGuru*OnPath`).
+        // Guru files ([re:dda000] → the Guru loaders).
         if let Some(k) = guru::kind(file) {
             let e = self.model.engine;
             let cur = self.model.current_pattern(e);

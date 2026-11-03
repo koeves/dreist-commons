@@ -4,11 +4,11 @@
 //!   edges show the left / right cursor ([re:808270]
 //!   [re:b27152], [re:632a19]); elsewhere
 //!   the arrow (the app resets it on every move).
-//! - Pattern grid (multi tool, `SetCursorFromToolOnMouseMove` [re:e7cf89]):
+//! - Pattern grid (multi tool, [re:e7cf89]):
 //!   NotAllowed / Selection / ResizeRightThin / Multi.
-//! - Song body (`GetCursorForOperation` [re:01ad57]): the cursor of the
+//! - Song body ([re:01ad57]): the cursor of the
 //!   operation a press would start.
-//! - Drag: the drop target's `DragMove` sets the source's drag cursor
+//! - Drag: the drop target's drag-move sets the source's drag cursor
 //!   ([re:e544c2]). The original renders pad and
 //!   pattern ghosts ([re:cb8024]: the pad at 65 %
 //!   over an arrow with a swap / copy / move sign); the port uses the

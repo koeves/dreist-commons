@@ -6,7 +6,7 @@
 //! picks the engine whose 64 pads fill the 4×16 Matrix of latching
 //! `DefaultButtonStyle` buttons (0x2d `e_setModulationSourceTrigger`
 //! [engine, pad] [slot, on]); a pad shows its name, or its number while the
-//! name is default (`UpdatePads` [re:4f398b]). Right click on a pad offers
+//! name is default ([re:4f398b]). Right click on a pad offers
 //! Select all / none for this engine or all engines (lambda [re:dc35c9]).
 //!
 //! Port: the original is a [re:eee2e8] attached to the Trigger

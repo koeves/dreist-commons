@@ -1,12 +1,12 @@
-//! [re:fb882e] (Filter; `InitializePorts` [re:007df0],
-//! `Voice::UpdateCoeffs` [re:9c301b], `Voice::ProcessBuffer` [re:04067e]):
+//! [re:fb882e] (Filter; port setup [re:007df0],
+//! coefficient update [re:9c301b], processing [re:04067e]):
 //! 3rd-order high-pass (one-pole + Chamberlin 2-pole) and a 12 dB/oct RBJ
 //! low-pass, each switchable, with a wet/dry mix.
 
 use super::biquad::Biquad;
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
-/// [re:f2c879] voices start their anti-denormal offset at 1e-8 (`CreateVoice`).
+/// [re:f2c879] voices start their anti-denormal offset at 1e-8 (at construction).
 pub const DENORMAL: f32 = 1e-8;
 
 pub struct SslFilter {
@@ -61,7 +61,7 @@ impl Node for SslFilter {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:2f591b]: coefficients, keys and filter history
+    /// Reset [re:2f591b]: coefficients, keys and filter history
     /// cleared, recomputed next block (the voice's denormal offset runs on).
     fn reset(&mut self) {
         self.first = true;

@@ -3,8 +3,8 @@
 //! `MultiModeDistortion::*` ([re:b49436]..[re:84df0c]), [re:b019ad]
 //! ([re:6a42db]..[re:d97c2a]) and the ring-mod oscillators ([re:c8aa5e]).
 //!
-//! [re:2e09a0] corrects its steps with [re:031640]/`ms_ramp`, but
-//! those tables live in `__common` and nothing in the binary fills them, so
+//! [re:2e09a0] corrects its steps with [re:031640] and a ramp table, but
+//! those tables are uninitialised and nothing in the original fills them, so
 //! at runtime they are zero: the oscillators reduce to naive waveforms whose
 //! steps land a few samples after the phase wraps. That is what is ported.
 
@@ -102,7 +102,7 @@ impl Default for TubeState {
 }
 
 /// [re:b019ad]: triode stage from a load-line table solved at
-/// `SetSampleRate`, with grid-bias feedback and output coupling.
+/// sample-rate setup, with grid-bias feedback and output coupling.
 pub struct Tube {
     table: Box<[f32; 1999]>,
     k_in: f32,
@@ -257,7 +257,7 @@ pub struct Osc {
     phase: f32,
     sign: f32,
     hp: f32,
-    /// Pulse width (+0x354) and the width history ring (+0x374, 0.5s).
+    /// Pulse width and the width history ring (0.5s).
     pw: f32,
     ring_pw: [f32; 4],
 }
@@ -284,8 +284,8 @@ impl Default for Osc {
 }
 
 impl Osc {
-    /// `init(mode, f, true)`: reset, then five settling ticks for the
-    /// saw (0), square (1, via `tickSqrPwm`) and triangle (3) shapes.
+    /// Settling init: reset, then five settling ticks for the
+    /// saw (0), square (1, via [`Self::tick_sqr_pwm`]) and triangle (3) shapes.
     pub fn init(&mut self, mode: u32, f: f32) {
         *self = Osc::default();
         let fc = ((f + 1.0).abs() - (f - 1.0).abs()) * 0.5;
@@ -295,7 +295,7 @@ impl Osc {
                     self.tick_saw(fc);
                 }
                 1 => {
-                    // tickSqrPwm(f, 0, 0.5) before the first transition only
+                    // A pulse tick (f, 0, 0.5) before the first transition only
                     // advances the phase.
                     self.phase += fc;
                 }
@@ -307,8 +307,8 @@ impl Osc {
         }
     }
 
-    /// `init(mode, f, true)` for the ring modulator's shapes: 0 saw, 1 pulse
-    /// (`tickSqrPwm(f, 0, 0.5)`), 2 parabola (`tickPrb(f, 0)`), 3 triangle;
+    /// Settling init for the ring modulator's shapes: 0 saw, 1 pulse
+    /// (pulse tick with (f, 0, 0.5)), 2 parabola (parabola tick with (f, 0)), 3 triangle;
     /// other modes only reset.
     pub fn init_exact(&mut self, mode: u32, f: f32) {
         match mode {
@@ -331,12 +331,12 @@ impl Osc {
         }
     }
 
-    /// Phase of the sine/noise readers that share the saw phase (+0x348).
+    /// Phase of the sine/noise readers that share the saw phase.
     pub fn phase_saw_mut(&mut self) -> &mut f32 {
         &mut self.phase_saw
     }
 
-    /// `tickPrb(f, &)` [re:fae61a]: integrated saw, smoothed by the previous
+    /// Parabola tick [re:fae61a]: integrated saw, smoothed by the previous
     /// increment (×8 gain).
     pub fn tick_prb(&mut self, f: f32) -> f32 {
         let i = self.ring_idx;
@@ -359,7 +359,7 @@ impl Osc {
         self.acc
     }
 
-    /// `tickSqrPwm(f, pw, &)` [re:d08eff]: pulse with width `pw`.
+    /// Pulse tick [re:d08eff]: pulse with width `pw`.
     pub fn tick_sqr_pwm(&mut self, f: f32, pw: f32) -> f32 {
         let i = self.ring_idx;
         let old = self.ring_pw[i];
@@ -574,7 +574,7 @@ impl MultiModeDistortion {
         }
     }
 
-    /// `Initialize(drive, type01)`.
+    /// Setup with `(drive, type01)`.
     pub fn init(&mut self, drive: f32, type01: f32) {
         self.target = drive;
         let t = type01 * 32.0;

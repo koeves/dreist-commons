@@ -81,10 +81,10 @@ fn draw_learn(l: &learn::Learn, r: &dreist_gui::render::Renderer, p: &mut dreist
 
 impl Editor {
     /// Collapse panel notifications.
-    /// - Effect panels ([re:375f19] $_19 collapse start / $_20
+    /// - Effect panels ([re:375f19] collapse start /
     ///   expand end): hide / show ActiveButton, NextPresetButton,
     ///   LastPresetButton and the knobs' labeller (the OutputKnob's parent).
-    /// - [re:ebb236] $_19 collapse end / $_20 expand
+    /// - [re:ebb236] collapse end / expand
     ///   end: hide / show every child of the panel.
     pub(crate) fn collapse_notification(&mut self, path: &[usize], iconic: bool, end: bool) {
         let parent_is = |app: &App, n: &str| path.split_last().and_then(|(_, p)| app.ctrl(p)).is_some_and(|c| c.name == n);
@@ -193,7 +193,7 @@ impl Editor {
                 self.convertor.show(p);
                 changed = true;
             }
-            // Pattern › Export as audio ([re:6f2709] lambda $_17 0xdb90):
+            // Pattern › Export as audio ([re:6f2709]):
             // stop playback, render the selected engine's pattern with the
             // export options to "<pattern name>.wav", then show the file.
             if std::mem::take(&mut self.patmenu.export) {
@@ -246,7 +246,7 @@ impl Editor {
             if let Some(sg) = &mut self.song {
                 changed |= sg.handle(&mut self.app, &mut self.model, ev, &mut self.outbox);
                 // Header Retro (`e_grabRetroRecording` 0x23 → the song
-                // panel's `ApplyRetroRecordToTracks`).
+                // panel's retro record onto its tracks).
                 // With the song off it grabs the pattern retro buffer.
                 if let UiEvent::Clicked { name, .. } = ev {
                     if name == "RetroButton" {
@@ -402,7 +402,7 @@ impl Editor {
         }
         // Pointer feedback (cursors, drop-target highlights) changes no
         // document state: no undo bookkeeping.
-        // [re:ed3c05] $_28 / $_29 (enter / leave a layer
+        // [re:ed3c05] (enter / leave a layer
         // knob): `e_highlightTransmodSource` 0x8 with the parameter's
         // modulation bit field, 0 on leave ([re:d0938a]
         //  [re:3be554] outlines the modulating Src buttons).
@@ -451,7 +451,7 @@ impl Editor {
             }
             return;
         }
-        // The drag is over: `DragExit` / `DragEnded` end the pad flash loops.
+        // The drag is over: drag exit / drag end end the pad flash loops.
         if matches!(ev, UiEvent::Dropped { .. } | UiEvent::Mouse { kind: dreist_gui::app::MouseKind::Up, .. }) {
             self.pads.end_drag_flash();
             self.set_drop_highlights(None, None);
@@ -499,7 +499,7 @@ impl Editor {
         for r in self.take_requests(n) {
             changed |= self.run_request(r);
         }
-        // `HandlePadMessage`: pad edits apply to every selected pad.
+        // Pad edits apply to every selected pad.
         let extra = multipad::fan_out(&self.model, &self.outbox[n..]);
         self.outbox.extend(extra);
         for c in &self.outbox[n..] {

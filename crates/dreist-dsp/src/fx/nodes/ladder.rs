@@ -1,12 +1,12 @@
 //! The ladder-filter effects (all dual-mono, `ModIn` = own channel):
-//! [re:408b3e] (Three Oh! Three, kind 31; `ProcessBuffer` [re:9f5684],
-//! `process_tb303` [re:1ceba5]), [re:b3c4dd] (Hoover, kind 32;
-//! [re:393f55], `process` [re:492081]) and [re:5c35cf] (Grandad, kind 33;
+//! [re:408b3e] (Three Oh! Three, kind 31; processing [re:9f5684],
+//! TB303 processing [re:1ceba5]), [re:b3c4dd] (Hoover, kind 32;
+//! [re:393f55], processing [re:492081]) and [re:5c35cf] (Grandad, kind 33;
 //! [re:4817d5]) and [re:96b293] (Child Genius, kind 35; [re:2b6fa1],
-//! `process_prodigy_asym` [re:da1055]). Four one-pole stages through [re:554bd9] lookup tables
+//! asymmetric Prodigy processing [re:da1055]). Four one-pole stages through [re:554bd9] lookup tables
 //! (mooglim/transisterlim or otalim), resonance feedback through otalim1,
-//! a mode matrix mixing the input and stage outputs (`set_mode` [re:9409c2],
-//! `set_mode_juno106` [re:f4c7e8], `SetModeMoog4` [re:69cf3b]), an otalim output
+//! a mode matrix mixing the input and stage outputs (mode setup [re:9409c2],
+//! Juno mode setup [re:f4c7e8], Moog mode setup [re:69cf3b]), an otalim output
 //! stage and a 10 Hz DC blocker.
 
 use super::math::sat;
@@ -34,8 +34,8 @@ fn gcoef(w: f32) -> f32 {
     (((w * 0.393442 + -0.131474) * w + 0.111105) * w + 0.991549) * w
 }
 
-/// `set_mode` / `set_mode_juno106` table (24 modes; Juno mode 0 falls
-/// through into mode 1 in the binary).
+/// Mode table of the standard and Juno mode setups (24 modes; Juno mode 0
+/// falls through into mode 1 in the original).
 const MODES: [[f32; 5]; 24] = [
     [0.0, -1.0, 0.0, -0.0, 0.0],
     [0.0, -0.0, 1.0, -0.0, 0.0],
@@ -63,7 +63,7 @@ const MODES: [[f32; 5]; 24] = [
     [1.0, -2.0, 4.0, -4.0, 0.0],
 ];
 
-/// `SetModeMoog4` (22 modes).
+/// Moog mode setup (22 modes).
 pub const MOOG_MODES: [[f32; 5]; 22] = [
     [0.0, 0.0, 1.0, 0.0, 0.0],
     [0.0, 0.0, 0.0, 0.0, 1.0],
@@ -101,7 +101,7 @@ pub enum Kind {
 struct Voice {
     alt: f32,
     m: [f32; 5],
-    /// Integrators (TB303 0x168.., Juno 0x158.., Moog 0x164..).
+    /// Integrators (TB303, Juno, Moog).
     st: [f32; 4],
     /// Stage outputs y0..y4.
     y: [f32; 5],
@@ -114,7 +114,7 @@ struct Voice {
     drive: f32,
     out: f32,
     res: f32,
-    /// Prodigy: feedback low-pass (0x15c) and noise seed (0x1b4).
+    /// Prodigy: feedback low-pass and noise seed.
     fb_lp: f32,
     seed: u32,
 }
@@ -161,7 +161,7 @@ impl Voice {
         self.dc -= a;
     }
 
-    /// `process_tb303` (sat = mooglim / transisterlim) and Juno `process`
+    /// TB303 processing (sat = mooglim / transisterlim) and Juno processing
     /// (same stages; y0 gets a slight square term).
     fn ladder(&mut self, kind: Kind, x: f32, g: f32, k: f32, k_hp: f32) {
         let a = analog();
@@ -310,7 +310,7 @@ impl Voice {
                     let w = warp(v);
                     let g = gcoef(w);
                     let k = (((w * -0.28608 + -0.0808209) * w + -0.0635353) * w + 1.00175) * self.res;
-                    // process_prodigy_asym.
+                    // Asymmetric Prodigy processing.
                     let (ga, gb) = (g * 0.74, g * 0.26);
                     let dx = self.drive * x[i] - self.hp;
                     self.hp = k_dc * dx + self.hp;

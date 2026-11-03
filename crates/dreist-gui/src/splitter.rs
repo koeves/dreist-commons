@@ -1,30 +1,30 @@
 //! [re:e58107]: two panels either side of a draggable bar.
 //!
-//! - `Serialize` [re:c25b4d]: `optIsVertical` (default true: panels stacked
+//! - Loading [re:c25b4d]: `optIsVertical` (default true: panels stacked
 //!   top / bottom), `intMinSize0/1` (0), `intMaxSize0/1` (−1),
 //!   `optSnapCollapse0/1` (true), `intSplitterDim` (5),
 //!   `optDbClkCollapse1` (true), `optSplitterIsLocked` (false),
 //!   `strAutoSaveName`, `optIsUserDraggable` (true), `intSplitPosition`.
-//! - `GetClampedSplitterPosition` [re:e205e3]: with `total` = size − bar,
+//! - Clamping [re:e205e3]: with `total` = size − bar,
 //!   past `total − min1` the position stops there, or snaps to `total`
 //!   (panel 1 collapsed) beyond `total − min1/2` when `optSnapCollapse1`;
 //!   below `min0` it stops at `min0`, or snaps to 0 below `min0/2` when
 //!   `optSnapCollapse0`; then at most `intMaxSize0` (−1 none).
 //!   `intMaxSize1` is never used.
-//! - The bar ([re:e1f523]): mouse down ($_0 [re:a99e57]) unless
-//!   locked keeps the position; `OnMouseMove` [re:f5f6a3] (draggable only)
-//!   moves it by the pointer's travel, clamped; mouse up / `OnMouseLButtonUp`
+//! - The bar ([re:e1f523]): mouse down ([re:a99e57]) unless
+//!   locked keeps the position; mouse move [re:f5f6a3] (draggable only)
+//!   moves it by the pointer's travel, clamped; mouse up
 //!   [re:623bfb] writes the position to the registry under `strAutoSaveName`;
-//!   double click ($_2 [re:7c6fcb], not locked) `InvertCollapseStatus`
+//!   double click ([re:7c6fcb], not locked) inverts the collapse state
 //!   [re:621671]: at either end → back to the saved position, else save it
 //!   and go to the end (`optDbClkCollapse1`) or 0, clamped and animated
-//!   (`SetSplitterPosition` [re:500207]: 250 ms Linear bounds animation).
-//!   Enter ($_3 [re:3d5de1], not locked, draggable): up / down cursor when
-//!   vertical, left / right otherwise; exit ($_4): arrow.
+//!   ([re:500207]: 250 ms Linear bounds animation).
+//!   Enter ([re:3d5de1], not locked, draggable): up / down cursor when
+//!   vertical, left / right otherwise; exit: arrow.
 //! - [re:9e9841]: the bar's style background,
 //!   then (thin side > 3 px) seven 4×4 dots 6 px apart, centred, in the
 //!   style's colAltBorder (default white).
-//! - `Editor::open` [re:468d3b] → `ReadStateFromRegistry` [re:a605da]: a saved
+//! - Opening the editor [re:468d3b] → reading the saved state [re:a605da]: a saved
 //!   position ≥ 0 is clamped and applied.
 
 use crate::ctrl::{Ctrl, Rect};
@@ -67,7 +67,7 @@ fn length(c: &Ctrl) -> i32 {
     if vertical(c) { c.rect.h } else { c.rect.w }
 }
 
-/// `GetClampedSplitterPosition`.
+/// The clamped bar position.
 pub fn clamp(c: &Ctrl, p: i32) -> i32 {
     let total = length(c) - dim(c);
     let (min0, min1) = (c.attr_i32("intMinSize0", 0), c.attr_i32("intMinSize1", 0));
@@ -91,7 +91,7 @@ pub fn set_position(c: &mut Ctrl, p: i32) {
     c.layout_splitter();
 }
 
-/// `InvertCollapseStatus`: the position to animate to (remembers the
+/// Inverting the collapse state: the position to animate to (remembers the
 /// current one when collapsing).
 pub fn invert_collapse(c: &mut Ctrl) -> i32 {
     let (p, end) = (position(c), length(c));
@@ -103,7 +103,7 @@ pub fn invert_collapse(c: &mut Ctrl) -> i32 {
     clamp(c, if c.attr_bool("optDbClkCollapse1", true) { end } else { 0 })
 }
 
-/// A running `SetSplitterPosition` animation.
+/// A running bar position animation.
 #[derive(Clone, Debug)]
 pub struct Anim {
     pub path: Vec<usize>,
@@ -112,7 +112,7 @@ pub struct Anim {
     pub start: std::time::Instant,
 }
 
-/// Animation length (`SetSplitterPosition`, Linear).
+/// Animation length (Linear).
 pub const ANIM_MS: f32 = 250.0;
 
 #[cfg(test)]

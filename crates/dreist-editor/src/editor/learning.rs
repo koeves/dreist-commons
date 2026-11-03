@@ -32,7 +32,7 @@ impl Editor {
 
     pub(crate) fn binding_message(&mut self, m: &dreist_engine::binding::Message) {
         let v = m.value[0];
-        // MIDI follow (`DoStartNote` → [re:ea55ac] / `SelectPad`).
+        // MIDI follow (note start → [re:ea55ac] / pad selection).
         let (e, pad) = (m.index[0], m.index[1]);
         match m.kind {
             dreist_engine::binding::id::UPDATE_ENGINE_SELECTION_CHANGED if (0..model::ENGINES as i32).contains(&e) => {
@@ -64,7 +64,7 @@ impl Editor {
             let Some(p) = find(self, b.scope, b.control) else { return };
             let cur = self.app.ctrl(&p).map(|c| c.on).unwrap_or(false);
             match m.kind {
-                // Set from the value (`HandleMessage`: SetState(v ≥ 0.5)).
+                // Set from the value (on when v ≥ 0.5).
                 0x1c5..=0x1c7 | 0x1cd | 0x1ce | 0x15c..=0x15e => click(self, p, v >= 0.5),
                 // Flip (0x1bc–0x1be).
                 0x1bc..=0x1be => click(self, p, !cur),
@@ -73,7 +73,7 @@ impl Editor {
                     let n = (v.clamp(0.0, 1.0) * 1023.0 + 1.0).floor() as u32;
                     self.handle(&UiEvent::TextCommitted { path: p, name: b.control.into(), text: n.to_string() });
                 }
-                // `SelectItemWithNormalizedFloat`: round(v·(n − 1)).
+                // The popup item round(v·(n − 1)).
                 0x1b3 => {
                     let n = dreist_engine::pattern::RESOLUTION_NAMES.len();
                     let index = (v.clamp(0.0, 1.0) * (n - 1) as f32).round() as usize;

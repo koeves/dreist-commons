@@ -1,11 +1,11 @@
 //! Pattern as a standard MIDI file ([re:448650],
-//! `AddNoteToPattern` [re:ac7c09], `AddCCToPattern` [re:cfb56a],
-//! `AddStepGraphsToPattern` [re:f59d20], [re:eb804f]
+//! notes [re:ac7c09], CCs [re:cfb56a],
+//! step graphs [re:f59d20], [re:eb804f]
 //! [re:d92ff4]). See the dreist-re GUI notes (File menu › Save Pattern As MIDI).
 
 use crate::pattern::{LANES, PatternData, Swing, lane};
 
-/// Ticks per quarter note (`WriteMidiFile` writes division 0x1e0).
+/// Ticks per quarter note (the file's division is 0x1e0).
 pub const PPQ: u32 = 480;
 /// One tick in QN: the note-shortening and CC-reset step (0.0020833).
 const TICK: f64 = 1.0 / 480.0;
@@ -20,9 +20,9 @@ pub struct Export<'a> {
     /// [re:01dbd2].
     pub tempo_mult: f64,
     pub swing: &'a Swing,
-    /// Engine swing depth (+0xab8).
+    /// Engine swing depth.
     pub swing_depth: f64,
-    /// Per pad: no layer with audio plays gated (layer +0x35c < 2), so tied
+    /// Per pad: no layer with audio plays gated (playback mode < 2), so tied
     /// steps are not merged.
     pub one_shot: &'a [bool],
     /// Option `AutoMIDICC` (default on): graphs with data but no MIDI
@@ -50,7 +50,7 @@ fn to7(v: f32) -> u8 {
     ((x + if x < 0.0 { -0.5 } else { 0.5 }) as i32).clamp(0, 127) as u8
 }
 
-/// `ConvertNormalisedValueToRepeats`.
+/// Normalised value to repeat count.
 fn repeats(v: f32) -> u32 {
     (v * 7.0 + 1.0).floor().max(0.0) as u32
 }
@@ -61,8 +61,8 @@ fn gcd(a: u32, b: u32) -> u32 {
 
 /// The notes and CCs of the export, before writing. `cc_for(pad, lane,
 /// allocate)` returns the CC of the lane's MIDI binding on the engine's
-/// channel, or with `allocate` a new one (`GetFreeCCIndex` /
-/// `AddNewBindingOnExport`; None when all are taken).
+/// channel, or with `allocate` a new one (the first free CC;
+/// None when all are taken).
 fn collect(x: &Export, cc_for: &mut dyn FnMut(usize, usize, bool) -> Option<u8>, rng: &mut dyn FnMut() -> f32) -> (Vec<Note>, Vec<(f64, u8, u8)>) {
     let p = x.pattern;
     let steps = p.steps.max(1);
@@ -119,7 +119,7 @@ fn collect(x: &Export, cc_for: &mut dyn FnMut(usize, usize, bool) -> Option<u8>,
                     }
                 }
             }
-            // AddStepGraphsToPattern, just before the note.
+            // Step graphs, just before the note.
             let at = (start - 0.001).max(0.0);
             for l in (1..LANES).filter(|&l| cc_lane(l)) {
                 let cc = cc_for(pad, l, false).or_else(|| (x.auto_cc && has_graph_data(track, l)).then(|| cc_for(pad, l, true)).flatten());
@@ -165,7 +165,7 @@ fn has_graph_data(t: &crate::pattern::TrackData, l: usize) -> bool {
     t.steps.iter().any(|s| (s.lanes[l] - d.lanes[l]).abs() >= 1e-6)
 }
 
-/// `AddNoteToPattern`: earlier notes of the same pitch that the new one
+/// Adding a note: earlier notes of the same pitch that the new one
 /// starts inside are shortened a tick at a time.
 fn add_note(notes: &mut Vec<Note>, pitch: u8, vel: u8, start: f64, dur: f64) {
     for n in notes.iter_mut().rev().filter(|n| n.pitch == pitch) {
@@ -213,7 +213,7 @@ pub fn export(x: &Export, cc_for: &mut dyn FnMut(usize, usize, bool) -> Option<u
     }
     evs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
     let mut trk = Vec::new();
-    // WriteTempo / WriteTimeSignature at 0.
+    // Tempo / time signature at 0.
     let us = (60_000_000.0 / x.bpm.max(1.0)) as u32;
     trk.extend([0x00, 0xff, 0x51, 0x03, (us >> 16) as u8, (us >> 8) as u8, us as u8]);
     let den_pow = x.time_sig.1.max(1).trailing_zeros() as u8;
@@ -348,7 +348,7 @@ pub fn read(bytes: &[u8]) -> Option<Vec<Vec<Event>>> {
     Some(tracks)
 }
 
-/// `StepPattern::MIDILoadInfo` (0x28 bytes).
+/// A MIDI file's load info.
 #[derive(Debug, Clone, Copy)]
 struct LoadInfo {
     note: bool,
@@ -370,12 +370,12 @@ const MAX_STEPS: i32 = 1024;
 /// ([re:3ce638]) as a `StepPattern` node named
 /// `name`, plus its step count. `cc_lanes(cc)` lists the (track, lane)
 /// targets of MIDI-channel-1 CC bindings through 0xd9
-/// (`GetCCBindingsWithMessageType`).
+/// (by message type).
 pub fn import(bytes: &[u8], name: &str, cc_lanes: &dyn Fn(u8) -> Vec<(usize, usize)>) -> Option<dreist_formats::Node> {
     let tracks = read(bytes)?;
     let notes = |t: &Vec<Event>| t.iter().filter(|e| matches!(e, Event::Note { .. })).count();
     let track = tracks.iter().max_by_key(|t| notes(t))?;
-    // ConvertMIDIFileToMIDILoadInfo [re:57f67e].
+    // MIDI file to load info [re:57f67e].
     let mut infos: Vec<LoadInfo> = Vec::new();
     let mut max_step = -1i32;
     let last = track.len().saturating_sub(1);
@@ -434,13 +434,13 @@ pub fn import(bytes: &[u8], name: &str, cc_lanes: &dyn Fn(u8) -> Vec<(usize, usi
             _ => {}
         }
     }
-    // ConvertMIDILoadInfoToPattern [re:2fcb47]: per track, sorted by step.
+    // Load info to pattern [re:2fcb47]: per track, sorted by step.
     let defaults = crate::pattern::StepData::off();
     let mut steps: Vec<Vec<Option<crate::pattern::StepData>>> = vec![vec![None; MAX_STEPS as usize]; 64];
     for (pad, track_steps) in steps.iter_mut().enumerate() {
         let mut list: Vec<LoadInfo> = infos.iter().copied().filter(|i| i.pad == pad).collect();
         list.sort_by_key(|i| i.step);
-        // SortMIDILoadInfo [re:29145b]: one note per step, taken from the step
+        // Sorting [re:29145b]: one note per step, taken from the step
         // or a neighbour leaning into it; their CCs follow.
         let mut out: Vec<LoadInfo> = Vec::new();
         for s in 0..MAX_STEPS {
@@ -462,7 +462,7 @@ pub fn import(bytes: &[u8], name: &str, cc_lanes: &dyn Fn(u8) -> Vec<(usize, usi
             }
         }
         out.extend(list.iter().filter(|c| !c.note && !c.used).copied());
-        // ConvertMIDILoadInfoPerTrackToPattern [re:95dd17].
+        // One track's load info to the pattern [re:95dd17].
         for i in out {
             let Some(slot) = track_steps.get_mut(i.step.clamp(0, MAX_STEPS - 1) as usize) else { continue };
             let st = slot.get_or_insert_with(|| defaults.clone());
@@ -492,7 +492,7 @@ pub fn import(bytes: &[u8], name: &str, cc_lanes: &dyn Fn(u8) -> Vec<(usize, usi
         n += 1;
     }
     let count = if n > 0 { n.min(MAX_STEPS) as usize } else { MAX_STEPS as usize };
-    // ConvertTimingForPatternLoadedFromMIDI [re:24c9ad]: a step leaning ≥ 0.75
+    // Timing conversion [re:24c9ad]: a step leaning ≥ 0.75
     // into an empty next step moves there (Shift − 0.5).
     for track_steps in steps.iter_mut() {
         for i in 0..count.saturating_sub(1) {

@@ -55,9 +55,9 @@ pub fn save(doc: &Node, src_samples: Option<&Path>, path: &Path) -> std::io::Res
 }
 
 /// The parts of a project that have their own files ([re:4196af] File
-/// menu; [re:57f674], `SerializeCurrentKit`
-/// [re:394e94], `SerializeCurrentPad` [re:25e3af], `SerializeCurrentPatternBank`
-/// [re:1b98ba], `SerializeCurrentPattern` [re:b14536], `SerializeBindingMap`
+/// menu; [re:57f674], kit
+/// [re:394e94], pad [re:25e3af], pattern bank
+/// [re:1b98ba], pattern [re:b14536], mappings
 /// [re:65fec7]). Each file is `<root>` holding the object(s) under their class
 /// name (`Engine`, `Pad`, `StepPattern`, `BindingMap`; a kit is `Pad0..63`,
 /// a bank `StepPattern0..23`), default attributes removed, samples kept in
@@ -74,7 +74,7 @@ pub enum Part {
 
 impl Part {
     /// (extension, filter description, noun) as [re:0b6aaa]
-    /// 0x16c.. passes them to `Load` / `Save`.
+    /// 0x16c.. passes them to load / save.
     /// The extension is the app's own (saving); loading takes every family
     /// (`dreist_formats::profile::extensions_of`).
     pub fn file_type(self) -> (&'static str, &'static str, &'static str) {
@@ -157,8 +157,8 @@ pub fn keep_outputs(old: &Node, new: &mut Node) {
 
 /// Load a part file into `doc` (samples made absolute against the file's
 /// `.samples` folder). Engine loads keep the old engine's locked pads,
-/// layers, patterns and tracks (`DoLoadEngineOnPath` $_16 [re:6463fe]); a pad
-/// replaces the pad (`DoLoadPadOnPath` $_18 [re:7acfa5], 0x56); a bank or a
+/// layers, patterns and tracks (engine load [re:6463fe]); a pad
+/// replaces the pad (pad load [re:7acfa5], 0x56); a bank or a
 /// pattern replaces the unlocked patterns.
 pub fn load_part(doc: &mut Node, samples: Option<&Path>, part: Part, path: &Path) -> bool {
     let before = (!restore_outputs()).then(|| doc.clone());

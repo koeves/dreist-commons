@@ -1,12 +1,12 @@
 //! Breverb (kinds 39–42): [re:10c03d] (ctor [re:9bdf23],
-//! `Voice::PrepareStream` [re:994866], `Voice::ProcessBuffer` [re:9703a2]) wrapping
-//! the embedded engine `BreverbBFD_*` ([re:f1a802]..): a [re:ac5b7b]
+//! stream setup [re:994866], processing [re:9703a2]) wrapping
+//! the embedded engine API ([re:f1a802]..): a [re:ac5b7b]
 //! ([re:2f8320]) feeding 32-sample [re:4614f9]s to one of the [re:5a6b3d]
 //! algorithms Hall / Plate / Room / Inverse.
 //!
 //! Node ports (all raw 0..1 positions): 0 Mix, 1 Time, 2 Predelay,
-//! 3 Diffusion, 4 Low, 5 High, 6 Size, 7 Spread, 8 Shape. `BreverbBFD_SetParameter`
-//! maps them onto algorithm parameters through `_<Model>_Params`; only the
+//! 3 Diffusion, 4 Low, 5 High, 6 Size, 7 Spread, 8 Shape. The engine's parameter set
+//! maps them onto algorithm parameters through the model's parameter map; only the
 //! first `count` ports are polled, and the last polled port always lands on
 //! parameter 0 (Time). See the dreist-re effects notes.
 
@@ -23,7 +23,7 @@ use blocks::{B, Block, anti_underflow_noise, mix};
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
-/// [re:2178e3] {type, min, max} (stride 0x20 in `_<Name>ReverbParam`).
+/// [re:2178e3] {type, min, max} (one entry of a model's parameter table).
 #[derive(Clone, Copy)]
 pub struct Param(pub i32, pub f32, pub f32);
 
@@ -114,13 +114,13 @@ impl Param {
 /// A [re:5a6b3d] algorithm.
 pub trait Algo: Send {
     fn params(&self) -> &'static [Param];
-    /// `SetParameterVal` body: `pos` from `GetPosition`, `val` clamped.
+    /// Parameter-value set: `pos` from the position lookup, `val` clamped.
     fn set_val(&mut self, idx: usize, pos: f32, val: f32);
     fn change_wave_info(&mut self, sr: f32, n_in: i64, n_out: i64);
     fn reset(&mut self);
     fn process(&mut self, out: &mut [Block; 2], inp: &[Block; 2]);
 
-    /// [re:59336b] (e.g. [re:bbc207]): position → value → SetParameterVal.
+    /// [re:59336b] (e.g. [re:bbc207]): position → value → parameter-value set.
     fn set_parameter(&mut self, idx: usize, p: f32) {
         let v = self.params()[idx].value(p);
         self.set_parameter_val(idx, v);
@@ -133,13 +133,13 @@ pub trait Algo: Send {
     }
 }
 
-/// [re:ac5b7b] (Init [re:5c6631], Process [re:2f8320]).
+/// [re:ac5b7b] (setup [re:5c6631], processing [re:2f8320]).
 struct Public {
     algo: Box<dyn Algo>,
     fifo: [Vec<f32>; 2],
-    fill: usize, // +0x18
-    pend: usize, // +0x20
-    fast: bool,  // +0x40
+    fill: usize,
+    pend: usize,
+    fast: bool,
     blk_in: [Block; 2],
     blk_out: [Block; 2],
     noise: Block,
@@ -230,7 +230,7 @@ impl Public {
     }
 }
 
-/// `eBreverbBFD_Model`.
+/// The engine's reverb model.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Model {
     Hall = 0,
@@ -240,7 +240,7 @@ pub enum Model {
 }
 
 impl Model {
-    /// `BreverbBFD_Create` [re:f1a802]: polled port count and `_<Model>_Params`.
+    /// Engine creation [re:f1a802]: polled port count and the model's parameter map.
     fn map(self) -> &'static [usize] {
         match self {
             Model::Inverse => &[8, 3, 0, 4, 1, 5, 2, 0],
@@ -255,7 +255,7 @@ impl Model {
     }
 }
 
-/// `BreverbBFD_*` handle.
+/// Engine handle.
 struct Bfd {
     model: Model,
     eff: Public,
@@ -272,7 +272,7 @@ impl Bfd {
         Bfd { model, eff: Public::new(algo) }
     }
 
-    /// `BreverbBFD_SetParameter` [re:2cf862].
+    /// Engine parameter set [re:2cf862].
     fn set_parameter(&mut self, i: usize, v: f32) {
         let map = self.model.map();
         if i == 0 {
@@ -283,7 +283,7 @@ impl Bfd {
         }
     }
 
-    /// `BreverbBFD_ChangeWaveInfo` [re:7a3028].
+    /// Engine sample-rate / block-size change [re:7a3028].
     fn change_wave_info(&mut self, sr: f32) {
         let a = &mut self.eff.algo;
         a.change_wave_info(sr, 2, 2);
@@ -331,7 +331,7 @@ impl Breverb {
         Breverb { ports: ports_from(ports::BREVERB), model, sr: 0.0, bfd: Bfd::new(model), stored: [0.0; 9] }
     }
 
-    /// `Voice::PrepareStream` [re:994866]. Hall's port 9 is past the 9-entry
+    /// Stream setup [re:994866]. Hall's port 9 is past the 9-entry
     /// control array (an uninitialised read in the original); it is sent
     /// 0.5 here and never polled again.
     fn prepare(&mut self, sr: f32) {
@@ -357,7 +357,7 @@ impl Node for Breverb {
             self.sr = ctx.sample_rate;
             self.prepare(self.sr);
         }
-        // `Voice::ProcessBuffer` [re:9703a2].
+        // Processing [re:9703a2].
         for i in 0..self.model.count().min(9) {
             let v = self.ports[i].value;
             if (self.stored[i] - v).abs() >= 1e-6 {

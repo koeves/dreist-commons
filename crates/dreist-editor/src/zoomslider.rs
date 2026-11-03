@@ -11,7 +11,7 @@ pub fn thumb(view: (f32, f32), tw: f32) -> (f32, f32) {
     (view.0 * tw, view.1 * tw)
 }
 
-/// `OnMouseLButtonDown` [re:89f320]: 2 left edge, 3 right edge (within 2 px),
+/// Left press [re:89f320]: 2 left edge, 3 right edge (within 2 px),
 /// 1 inside the thumb.
 pub fn hit(view: (f32, f32), tw: f32, h: f32, x: f32, y: f32) -> Option<u8> {
     let (tx, thw) = thumb(view, tw);
@@ -35,8 +35,8 @@ pub fn over_edge(view: (f32, f32), tw: f32, h: f32, x: f32, y: f32) -> bool {
     y >= 0.0 && y < h && ((x - tx).abs() < 2.0 || (x - (tx + thw)).abs() < 2.0)
 }
 
-/// The zone drags (`DoCenterClickZoneDrag` [re:109246], `DoLeftClickZoneDrag`
-/// [re:3ef21b], `DoRightClickZoneDrag` [re:4f55d9]): the new view after moving
+/// The zone drags (centre [re:109246], left
+/// [re:3ef21b], right [re:4f55d9]): the new view after moving
 /// from `last` to `x` (thumb at least 20 px and `min` of the track).
 pub fn drag(view: (f32, f32), tw: f32, mode: u8, last: f32, x: f32, min: f32) -> (f32, f32) {
     let (mut tx, mut thw) = thumb(view, tw);
@@ -74,8 +74,8 @@ pub fn zoom_in(view: (f32, f32), factor: f32, centre: f32, track_w: f32, frames:
 }
 
 /// Auto zoom (`AutoZoomGroup`, option `WaveDisplayZoomMode`): 1
-/// `DoZoomToStartAndEndMarkers` [re:338aad] (the markers ± 500 frames), 2
-/// `DoZoomToStartMarker` [re:d6b60d] / 3 `DoZoomToEndMarker` [re:e23870] (1 %
+/// both markers [re:338aad] (the markers ± 500 frames), 2
+/// start marker [re:d6b60d] / 3 end marker [re:e23870] (1 %
 /// of the file centred on the marker); `None` for mode 0.
 pub fn auto_zoom(mode: i64, frames: u32, start: u32, end: u32) -> Option<(f32, f32)> {
     if !(1..=3).contains(&mode) {

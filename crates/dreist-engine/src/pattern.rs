@@ -4,7 +4,7 @@
 use dreist_formats::Node;
 use dreist_formats::params::{STEP_LANES, step_lane_default, step_lane_index};
 
-/// Number of step graph lanes (`Step::StepGraphItems`).
+/// Number of step graph lanes.
 pub const LANES: usize = 93;
 /// Tracks per pattern (= pads per engine).
 pub const TRACKS: usize = 64;
@@ -22,8 +22,8 @@ pub mod lane {
     pub const PROBABILITY: usize = 16;
 }
 
-/// `StepPattern::Resolution`: names registered by `Start()` ([re:58734c],
-/// `ReplaceResolution`), steps per 16th from table [re:660cc6].
+/// Pattern `Resolution`: names registered at startup ([re:58734c]),
+/// steps per 16th from table [re:660cc6].
 pub const RESOLUTION_NAMES: [&str; 14] = ["1", "1T", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64", "1/64T"];
 const STEPS_PER_16TH: [f64; 14] = [0.0625, 0.09375, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
 
@@ -41,7 +41,7 @@ pub fn resolution_cycles(resolution: usize) -> i32 {
 }
 
 /// Index into [`RESOLUTION_NAMES`]; unknown names map to 14, which reads as
-/// 1.0 (`GetPatternResolutionFloatingPoint` falls back for indices > 13).
+/// 1.0 (the original falls back for indices > 13).
 pub fn resolution_index(name: &str) -> usize {
     RESOLUTION_NAMES.iter().position(|n| *n == name).unwrap_or(14)
 }
@@ -50,7 +50,7 @@ pub fn steps_per_16th(resolution: usize) -> f64 {
     STEPS_PER_16TH.get(resolution).copied().unwrap_or(1.0)
 }
 
-/// `StepPattern::SyncMode` (names from `Start()` `ReplaceSyncMode`; the legacy
+/// Pattern `SyncMode` (names registered at startup; the legacy
 /// names Sync/Trigger/Gate/Shot are also accepted, [re:33eee9]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
@@ -60,7 +60,7 @@ pub enum SyncMode {
     GateRestart,
 }
 
-/// `ReplaceSyncMode` names, by index.
+/// Sync mode names, by index.
 pub const SYNC_MODE_NAMES: [&str; 4] = ["Slave", "Slave restart", "Gate", "Gate restart"];
 
 impl SyncMode {
@@ -73,7 +73,7 @@ impl SyncMode {
             "Slave restart" | "Trigger" => SyncMode::SlaveRestart,
             "Gate" => SyncMode::Gate,
             "Gate restart" | "Shot" => SyncMode::GateRestart,
-            // "Slave", "Sync", and unknown (StringToSyncMode returns 4, treated as free-running).
+            // "Slave", "Sync", and unknown (the original's lookup returns 4, treated as free-running).
             _ => SyncMode::Slave,
         }
     }
@@ -119,9 +119,9 @@ impl StepData {
 #[derive(Debug, Clone)]
 pub struct TrackData {
     pub steps: Vec<StepData>,
-    /// `TrackLength` (+0x54): wraps the track before the pattern end.
+    /// `TrackLength`: wraps the track before the pattern end.
     pub length: u32,
-    /// `<Lane>Rand` per-lane randomisation (+0x70), default 0.5 = none.
+    /// `<Lane>Rand` per-lane randomisation, default 0.5 = none.
     pub rand: [f32; LANES],
     pub mute: bool,
     pub solo: bool,
@@ -141,12 +141,12 @@ impl TrackData {
 
 #[derive(Debug, Clone)]
 pub struct PatternData {
-    /// `PatternSteps` (+0x2b0).
+    /// `PatternSteps`.
     pub steps: u32,
     pub resolution: usize,
     pub sync: SyncMode,
     pub tracks: Vec<TrackData>,
-    /// `MonoModeActive` (+0x2b4): one step per column (`MonoizeSteps`).
+    /// `MonoModeActive`: one step per column.
     pub mono: bool,
 }
 
@@ -218,18 +218,18 @@ impl PatternData {
         steps_per_16th(self.resolution)
     }
 
-    /// `GetPatternLengthIn16ths` [re:960cc4].
+    /// Pattern length in 16ths [re:960cc4].
     pub fn length_16ths(&self) -> f64 {
         self.steps as f64 / self.resolution()
     }
 
-    /// `GetPatternLengthInQN` [re:7eb86a].
+    /// Pattern length in quarter notes [re:7eb86a].
     pub fn length_qn(&self) -> f64 {
         self.length_16ths() * 0.25
     }
 }
 
-/// [re:9f001e] (values at +0x18, 128 doubles; `NumberOfSteps` +0x418).
+/// [re:9f001e] (128 doubles; `NumberOfSteps`).
 #[derive(Debug, Clone)]
 pub struct Swing {
     pub steps: u32,

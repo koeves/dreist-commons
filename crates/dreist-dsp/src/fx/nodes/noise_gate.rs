@@ -1,5 +1,5 @@
-//! [re:8fc789] (Noise Gate, kind 11; `Voice::Reset` [re:fa4788],
-//! `Voice::ProcessBuffer` [re:bacb48]): key = band-passed (LP/HP one-poles)
+//! [re:8fc789] (Noise Gate, kind 11; reset [re:fa4788],
+//! processing [re:bacb48]): key = band-passed (LP/HP one-poles)
 //! input, peak envelope with release, hold counter with hysteresis, gain
 //! attack/release; Preview outputs the key.
 
@@ -14,7 +14,7 @@ pub struct NoiseGate {
     gain: f32,
     lp: [f32; 2],
     hp: [f32; 2],
-    /// +0x140..+0x14c: offset by the alternator, never otherwise used.
+    /// Offset by the alternator, never otherwise used.
     spare: [f32; 4],
 }
 

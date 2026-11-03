@@ -1,5 +1,5 @@
-//! [re:252d9d] (ctor [re:3fd3ae], ChangeWaveInfo [re:32a8a5], SetParameterVal
-//! [re:485cda], ChangeDelays [re:00fbb4], ChangeFilter [re:4c8b34], Process
+//! [re:252d9d] (construction [re:3fd3ae], rate change [re:32a8a5], parameter set
+//! [re:485cda], delay change [re:00fbb4], filter change [re:4c8b34], processing
 //! [re:7e05cb]): a figure-of-eight plate tank (mono input → predelay comb →
 //! high-pass → four input diffusers → two cross-fed halves, each an
 //! LFO-swept allpass, delay, damping, allpass, delay and shelving EQ),
@@ -8,7 +8,7 @@
 use super::blocks::*;
 use super::{Algo, Param};
 
-/// `_PlateReverbParam` [re:587f7d].
+/// Plate parameter table [re:587f7d].
 pub const PARAMS: &[Param] = &[
     Param(1, 0.5, 20.0),       // 0 Time
     Param(0, 0.0, 100.0),      // 1 Size
@@ -28,8 +28,8 @@ pub const PARAMS: &[Param] = &[
     Param(2, 0.0, 8.0),        // 15 Predelay BPM
 ];
 
-/// Output taps (`ChangeDelays`, scaled by size·sr/29800): left 0x398..0x3c8,
-/// right 0x3d0..0x400.
+/// Output taps (delay change, scaled by size·sr/29800): seven left, then
+/// seven right.
 const TAPS: [f32; 14] = [266.0, 2974.0, 1913.0, 1996.0, 1990.0, 187.0, 1066.0, 353.0, 3627.0, 1228.0, 2673.0, 2111.0, 335.0, 121.0];
 
 pub struct Plate {
@@ -37,13 +37,13 @@ pub struct Plate {
     n_in: i64,
     n_out: i64,
     pre: DelayItem,
-    /// Input diffusers 0x430/0x478/0x4c0/0x508.
+    /// Input diffusers.
     ap_in: [DelayItem; 4],
-    /// Tank allpasses 0x550 (left) / 0x598 (right).
+    /// Tank allpasses (left / right).
     ap_tank: [DelayItem; 2],
-    /// LFO allpasses 0x5e0 (left) / 0x680 (right).
+    /// LFO allpasses (left / right).
     ap_lfo: [DelayItemLfo; 2],
-    /// Tank delays 0x720, 0x768 (left), 0x7b0, 0x7f8 (right).
+    /// Tank delays (two left, two right).
     dl: [DelayItem; 4],
     hpf: Bilin,
     shelf: [Biquad; 2],
@@ -77,7 +77,7 @@ pub struct Plate {
     a: Block,
     b: Block,
     d: Block,
-    /// Shelved tank outputs fed back one block later (0x280 left, 0x318 right).
+    /// Shelved tank outputs fed back one block later (left, right).
     fl: Block,
     fr: Block,
 }
@@ -136,7 +136,7 @@ impl Plate {
         p
     }
 
-    /// `ChangeDensity` [re:256fd6].
+    /// Density change [re:256fd6].
     fn change_density(&mut self) {
         self.ap_lfo[0].d.gain = 0.7;
         self.ap_lfo[1].d.gain = 0.7;
@@ -149,7 +149,7 @@ impl Plate {
         self.ap_in[1].gain = d * -0.75;
     }
 
-    /// `ChangeSpin` [re:f1421f].
+    /// Spin change [re:f1421f].
     fn change_spin(&mut self) {
         let m = self.motion * 0.7 + 0.3;
         self.ap_lfo[0].set_lfo((m * 16.0) as i64, m * 1.2);
@@ -161,7 +161,7 @@ impl Plate {
         self.pre.set_length(predelay_len(s, self.sr));
     }
 
-    /// `ChangeDelays` [re:00fbb4].
+    /// Delay change [re:00fbb4].
     fn change_delays(&mut self) {
         let f = self.size * self.sr;
         let len = |n: f32| ((f * n) / 29800.0) as i64;
@@ -182,7 +182,7 @@ impl Plate {
         }
     }
 
-    /// `ChangeFilter` [re:4c8b34]: loop gain for −60 dB over the (size
+    /// Filter change [re:4c8b34]: loop gain for −60 dB over the (size
     /// normalised) decay time, low/high shelves for the frequency-dependent
     /// decay multipliers, input high-pass and the RtHC damping.
     fn change_filter(&mut self) {
@@ -306,7 +306,7 @@ impl Algo for Plate {
         self.n_out = n_out;
     }
 
-    /// `Reset` [re:67bb1b].
+    /// Reset [re:67bb1b].
     fn reset(&mut self) {
         self.fl = [0.0; B];
         self.fr = [0.0; B];

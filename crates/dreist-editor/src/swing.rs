@@ -64,7 +64,7 @@ pub fn name_of(node: Option<&Node>, path: &Path) -> String {
         .unwrap_or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
-/// `ConvertPatternToSwingTemplate`: up to 128 steps (longer patterns are
+/// Pattern to swing template: up to 128 steps (longer patterns are
 /// sampled every floor(steps / 128)); each value is the mean of
 /// `2·Shift − 1` over the tracks whose step is on (0 when none).
 pub fn from_pattern(pat: &PatternData, name: &str) -> Node {

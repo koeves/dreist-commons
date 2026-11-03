@@ -1,7 +1,7 @@
 //! [re:2428e6] (Envelope Shaper, kind 12;
-//! `PrepareStream` [re:ef9fb6], `Reset` [re:da41b9], `ProcessBuffer` [re:14163c])
-//! around [re:1800b5] (`CreateNewTransientDesigner` [re:32ebc6], channel
-//! `Process` [re:f30c18]): a log-domain transient designer. Detector levels
+//! stream setup [re:ef9fb6], reset [re:da41b9], processing [re:14163c])
+//! around [re:1800b5] (construction [re:32ebc6], channel
+//! processing [re:f30c18]): a log-domain transient designer. Detector levels
 //! (softplus-shaped) drive attack and sustain envelopes whose differences
 //! become a gain in dB; parameters glide over 2048 samples.
 //!
@@ -49,20 +49,20 @@ impl Channel {
         let k = 1.0 / sr;
         let e = |a: f64| (a * k).exp();
         self.c = [
-            e(-40.80895976715265),   // 0x38
-            e(-1.5318088844263265),  // 0x40
-            e(-1.5915494309189535),  // 0x48
-            e(-159.15494309189532),  // 0x50
-            e(-14.468631190172303),  // 0x58
-            e(-0.03617157797543075), // 0x80
-            e(-33.862753849339434),  // 0x88
-            e(-10.826866876999683),  // 0x90
-            e(-18.293671619758086),  // 0x98
-            e(-18.08578898771538),   // 0xa0
-            e(-5.167368282204394),   // 0xa8
-            e(-36.17157797543076),   // 0xb0 (and 0xd0)
-            e(-4.521447246928845),   // 0xb8
-            e(-12.057192658476918),  // 0xc0
+            e(-40.80895976715265),   // 0
+            e(-1.5318088844263265),  // 1
+            e(-1.5915494309189535),  // 2
+            e(-159.15494309189532),  // 3
+            e(-14.468631190172303),  // 4
+            e(-0.03617157797543075), // 5
+            e(-33.862753849339434),  // 6
+            e(-10.826866876999683),  // 7
+            e(-18.293671619758086),  // 8
+            e(-18.08578898771538),   // 9
+            e(-5.167368282204394),   // 10
+            e(-36.17157797543076),   // 11 (twice)
+            e(-4.521447246928845),   // 12
+            e(-12.057192658476918),  // 13
         ];
     }
 
@@ -209,7 +209,7 @@ impl Node for EnvelopeShaper {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:da41b9]: every parameter back to its default
+    /// Reset [re:da41b9]: every parameter back to its default
     /// (1, then 0.5); the detectors keep running.
     fn reset(&mut self) {
         for i in 0..6 {
@@ -221,7 +221,7 @@ impl Node for EnvelopeShaper {
 
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         if self.sr != ctx.sample_rate {
-            // PrepareStream: Configure(sr, 2), then the voice Reset.
+            // Stream setup: configure for (sr, 2), then reset.
             self.sr = ctx.sample_rate;
             for c in &mut self.ch {
                 c.configure(self.sr as f64, &self.values);

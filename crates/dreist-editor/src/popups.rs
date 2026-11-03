@@ -1,7 +1,7 @@
 //! Popup buttons and their menus: pad mode, layer playback mode, choke (cut
 //! mode) and pattern step length. Labels come from the original's name maps
-//! ([re:ceabd7]: `ReplaceLayerCutMode`,
-//! `ReplaceLayerPlaybackMode`; `RESOLUTION_NAMES`).
+//! ([re:ceabd7]: layer cut mode,
+//! layer playback mode; `RESOLUTION_NAMES`).
 
 use dreist_dsp::voice::{PLAYBACK_MODE_LABELS, PLAYBACK_MODE_NAMES};
 use dreist_dsp::voices::{CUT_MODE_LABELS, CUT_MODE_NAMES};

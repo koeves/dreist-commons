@@ -7,12 +7,12 @@
 //!   MIDI / Host / Threshold / Timed MIDI (posts `e_setSamplerStartMode`
 //!   0xf2, lambda [re:2a7fed]); MonoButton menu Stereo / Mono (Left) / Mono
 //!   (Right) → 0xfe (lambdas [re:7e2b16]…); Follow lists the auto modes
-//!   (`CreateAutoSamplerModeMap` [re:91218b]).
-//! - `HandleControlEvent` [re:97cc15]: Arm → 0xec, Rec → 0xef, Thru → 0xff,
+//!   ([re:91218b]).
+//! - Control events [re:97cc15]: Arm → 0xec, Rec → 0xef, Thru → 0xff,
 //!   InputGain → 0xf4 (slider × 4), PreviewVolume → 0xe8, thresholds →
 //!   0xf6 / 0xf7 via [re:766df4], sync group →
 //!   0xfa, seconds → 0xf8 (0..3600), bars/beats → 0xf9, source → 0xfd.
-//! - `UpdateState` [re:c51166]: button states and panel visibility.
+//! - State update [re:c51166]: button states and panel visibility.
 
 use dreist_engine::binding::id;
 use dreist_gui::app::{App, UiEvent};
@@ -43,7 +43,7 @@ fn source_of_item(i: usize) -> i32 {
 fn item_of_source(s: i32) -> usize {
     if (1..34).contains(&s) { s as usize } else { 0 }
 }
-/// Splitter position when open (`UpdatePadMode`).
+/// Splitter position when open (set with the pad mode).
 pub const OPEN_HEIGHT: i32 = 80;
 
 /// [re:c42363].
@@ -86,7 +86,7 @@ pub enum TakeAction {
     Saved,
 }
 
-/// [re:1a0972] $_10 [re:324b22]: takes
+/// [re:1a0972] [re:324b22]: takes
 /// go to `<record path>/<date>/` ([re:9c6245] +
 /// "Sampler Captures", unless `SamplerRecordPath` is set).
 pub fn record_dir(opts: &crate::options::Options) -> std::path::PathBuf {
@@ -113,7 +113,7 @@ fn now_utc() -> (i64, u32, u32, u32, u32, u32) {
     (y, m, d, (rem / 3600) as u32, (rem / 60 % 60) as u32, (rem % 60) as u32)
 }
 
-/// `FindFreeSampleFilename` [re:7d058d]: `name.wav`, then `name (2).wav` …
+/// A free sample file name [re:7d058d]: `name.wav`, then `name (2).wav` …
 /// up to 9999.
 pub fn free_filename(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
     let p = dir.join(format!("{name}.wav"));
@@ -123,8 +123,8 @@ pub fn free_filename(dir: &std::path::Path, name: &str) -> Option<std::path::Pat
     (2..=9999).map(|n| dir.join(format!("{name} ({n}).wav"))).find(|p| !p.exists())
 }
 
-/// Auto-allocation step after a take (`DoSendTakeToPadAutoExport` $_11
-/// [re:78dd34]): the layer the take goes to and the next target, or None
+/// Auto-allocation step after a take
+/// ([re:78dd34]): the layer the take goes to and the next target, or None
 /// when the sampler disarms.
 pub fn allocate(mode: usize, target: (usize, usize, usize), selected_layer: usize, layer_used: &dyn Fn(usize) -> bool) -> ((usize, usize, usize), Option<(usize, usize, usize)>) {
     let (e, mut pad, mut layer) = target;
@@ -269,7 +269,7 @@ impl Sampler {
     }
 
     /// A finished take ([re:c5233e] →
-    /// `DoSendTakeToPadAutoExport` [re:b3b498]): saved as
+    /// sending it to a pad [re:b3b498]): saved as
     /// "<HH-MM-SS> Take <n>.wav" (peaks above 0 dBFS scaled to 0.998),
     /// then allocated by the Follow mode.
     pub fn take_finished(&mut self, model: &mut Model, opts: &crate::options::Options, left: &[f32], right: &[f32], sr: f32, out: &mut Vec<Command>) -> Option<TakeAction> {
@@ -410,7 +410,7 @@ impl Sampler {
                 }
                 true
             }
-            // `HandleControlEvent` [re:97cc15] event 8 (double click): In
+            // Control event [re:97cc15] 8 (double click): In
             // 1.0, Thru 0.7937, Start 0.1, Stop 0.00562.
             UiEvent::DoubleClicked { path, name } if self.mine(path) => {
                 match name.as_str() {
@@ -512,7 +512,7 @@ impl Sampler {
     }
 }
 
-/// `Options::Write*` for the sampler's `SamplerLast*` keys.
+/// Saves the sampler's `SamplerLast*` keys.
 fn save_opt(key: &str, v: impl ToString) {
     let mut o = crate::options::Options::load();
     o.set(key, v);

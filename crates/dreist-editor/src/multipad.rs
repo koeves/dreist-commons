@@ -1,7 +1,7 @@
 //! Multi-pad selection ([re:d611cc], `e_setPadSelections`
 //! 0x44, `EngineState` `padSelAnchor` / `padSelItems`) and the original's
 //! "apply to every selected pad" rule of [re:5723c8]
-//! (`GetSelectionOptions` [re:f3180c] / `GetSelectedPads` [re:eac469]).
+//! ([re:f3180c] / [re:eac469]).
 //!
 //! A click selects the pad; cmd toggles it in the selection; shift selects
 //! the contiguous range from the anchor. Pad messages from the editor whose
@@ -11,8 +11,8 @@
 //! not affected (they come from bindings, straight to the engine).
 //!
 //! Modifiers (`e_setModifiers` 0x26, the pad header's AllPads / AllLayers;
-//! `GetSelectionOptions` [re:f3180c] / [re:2b5118], `GetSelectedLayers` [re:cba339],
-//! ev_9aeeaaa0…, `HandleLayerMessage` [re:7c4772]): with all pads on, pad
+//! [re:f3180c] / [re:2b5118], [re:cba339],
+//! ev_9aeeaaa0…, [re:7c4772]): with all pads on, pad
 //! messages go to all 64 pads. Layer messages from the editor whose layer
 //! is in its pad's layer selection (the port: the current layer) or with
 //! all layers on go to every existing layer of the selected layers (all 8
@@ -45,7 +45,7 @@ pub fn set_selection(model: &mut Model, e: usize, anchor: usize, mask: u64) {
     st.set("padSelItems", mask);
 }
 
-/// `SelectPad`: plain → just `p`; cmd → toggle `p`; shift → the range from
+/// Pad selection: plain → just `p`; cmd → toggle `p`; shift → the range from
 /// the anchor. Returns the message for the engine (0x44 [e] [anchor, mask
 /// low 32 bits, high 32 bits as raw floats]).
 pub fn select(model: &mut Model, e: usize, p: usize, cmd: bool, shift: bool) -> Command {
@@ -188,7 +188,7 @@ pub fn layer_selection(model: &Model, e: usize, p: usize) -> (usize, u8) {
     (anchor, stored | 1u8 << anchor.min(7))
 }
 
-/// [re:281f54] $_2 [re:c47c8f]: the layer table's row selection
+/// [re:281f54] [re:c47c8f]: the layer table's row selection
 /// (cmd toggles, shift extends) → `e_setLayerSelections` 0x45 [e, p]
 /// [anchor, mask as raw float bits]; the anchor becomes the current layer.
 pub fn select_layer(model: &mut Model, e: usize, l: usize, cmd: bool, shift: bool) -> Command {
@@ -254,7 +254,7 @@ pub fn select_engine(model: &mut Model, k: usize, cmd: bool, shift: bool) -> usi
     anchor
 }
 
-/// `HandleEngineMessage` [re:16aacd] (ev_5594bf7a…): editor messages for an
+/// [re:16aacd] (ev_5594bf7a…): editor messages for an
 /// engine in the selection apply to the other selected engines; parameter
 /// (0x90) and send (0x98) changes by the same delta, clamped 0..1.
 fn engine_fans_out(kind: u32) -> bool {
@@ -287,7 +287,7 @@ fn engine_fan_out(model: &Model, m: &Message, extra: &mut Vec<Command>) {
     }
 }
 
-/// `HandleLayerMessage` types (0x65..0x89; 0x83 addresses no layer).
+/// Layer message types (0x65..0x89; 0x83 addresses no layer).
 fn layer_fans_out(kind: u32) -> bool {
     (0x65..=0x89).contains(&kind) && kind != 0x83
 }

@@ -1,11 +1,11 @@
-//! [re:667451] (Reverb; `Voice::ProcessBuffer`
+//! [re:667451] (Reverb; processing
 //! [re:8c7936]) around [re:7ed3b6] ([re:56604a]..[re:f993c3]): input gain →
 //! saturator → [re:8147ac] (16 taps per side, cross-fed) and a
 //! diffusion stage → [re:ca5ee9] (figure-eight loop of four
 //! [re:447ddc] blocks with shelving damping) → early/late mix → output
 //! gain → saturator, then a ramped wet/dry mix.
 //!
-//! [re:f5417b] never advances its write index (asm [re:8d92b9]), so
+//! [re:f5417b] never advances its write index ([re:8d92b9]), so
 //! its delayed reads are always zero and each of the four diffusers is a
 //! plain gain of `0.5·(1 + g²)`; that is what the original runs.
 
@@ -49,7 +49,7 @@ impl Early {
         self.prev = [0.0; 2];
     }
 
-    /// `Initialize(room, decay, _, predelay_ms, _)`.
+    /// Setup with `(room, decay, _, predelay_ms, _)`.
     fn init(&mut self, room: f32, decay: f32, pre_ms: f32) {
         self.fb[1] = decay * 0.5;
         let s = room * 9.5 + 0.5;
@@ -331,14 +331,14 @@ impl Henverb {
         for s in &mut self.shelf {
             s.sr = sr;
         }
-        // Indices: 0 = 0x740 (LF), 1 = 0x798 (LF), 2 = 0x7f0 (HF), 3 = 0x848 (HF).
+        // Indices: 0, 1 LF; 2, 3 HF.
         self.shelf[2].init(1000.0, -2.0, true, true);
         self.shelf[3].init(1000.0, -2.0, true, true);
         self.shelf[0].init(30.0, -2.0, false, true);
         self.shelf[1].init(30.0, -2.0, false, true);
     }
 
-    /// `Initialize(room, decay², damp_gain, damp_freq, density)`.
+    /// Setup with `(room, decay², damp_gain, damp_freq, density)`.
     fn init(&mut self, room: f32, fb: f32, damp_gain: f32, damp_freq: f32, coef: f32) {
         self.fb_tgt = fb;
         let size = room * 270.0 + 30.0;
@@ -453,7 +453,7 @@ impl FxpReverb {
 }
 
 impl FxpReverb {
-    /// `PrepareStream` on a rate change.
+    /// Stream setup on a rate change.
     fn prepare(&mut self, sr: f32) {
         if self.sr != sr {
             self.sr = sr;
@@ -469,7 +469,7 @@ impl Default for FxpReverb {
     }
 }
 
-/// `vfcSIMD_VectorWetDryMixS_io`: weights ramp from the previous wet value
+/// Vector wet/dry mix: weights ramp from the previous wet value
 /// (4-lane accumulation for the first `n & !3` samples).
 fn wet_dry(out: [&mut [f32]; 2], wet: [&[f32]; 2], dry: [&[f32]; 2], w0: f32, w1: f32) {
     let n = out[0].len();

@@ -19,7 +19,7 @@ const KINDS: std::ops::RangeInclusive<usize> = 1..=47;
 /// Effects that hold or loop audio on purpose (Audio Freezer).
 const HOLDS_AUDIO: [usize; 1] = [38];
 
-/// The Envelope Shaper's log-domain gains (decompiled [re:1800b5]) reach
+/// The Envelope Shaper's log-domain gains ([re:1800b5]) reach
 /// +50 dB and more at its extreme attack / sustain / gain settings.
 const EXTREME_GAIN: [usize; 1] = [12];
 
@@ -179,7 +179,7 @@ fn render(fx: &mut Effect, sr: f32, seconds: f32) -> [Vec<f32>; 2] {
 }
 
 /// Effects whose voice `Reset` leaves audio state running, so a panic keeps
-/// their tails (decompiled): the base [re:1740cf] is empty (Urei 1176,
+/// their tails (as in the original): the base [re:1740cf] is empty (Urei 1176,
 /// Shaped Distortion, Driver, Maul, the Breverbs); Bus Compressor zeroes
 /// only its meter; Envelope Shaper resets its parameters; Drum Dynamics
 /// its wet ramp; Chorus its modulation; Frequency Shifter its oscillator;

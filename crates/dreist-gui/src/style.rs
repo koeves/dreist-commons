@@ -3,7 +3,7 @@
 //!
 //! Attribute lookup follows [re:edaa92]: the
 //! style's own value, else the first parent (depth-first) that has it, else
-//! the attribute default (`GetAttributeInformation` [re:3d83c2]). The built-in
+//! the attribute default ([re:3d83c2]). The built-in
 //! `ApplicationStyle` holds every base attribute at its default and
 //! `InvisibleStyle` clears fill and border ([re:307020], [re:3b7e9c]).
 
@@ -161,7 +161,7 @@ impl StyleSheet {
         }
     }
 
-    /// Raw attribute value through the parent chain (`HasAttribute`).
+    /// Raw attribute value through the parent chain.
     pub fn raw(&self, style: &str, attr: &str) -> Option<&str> {
         self.raw_depth(style, attr, 0)
     }
@@ -229,7 +229,7 @@ impl StyleSheet {
         }
     }
 
-    /// `GetRoundingOptions` [re:6bd0c8]: TL, TR, BL, BR (default all true).
+    /// Rounding options [re:6bd0c8]: TL, TR, BL, BR (default all true).
     pub fn rounding_options(&self, style: &str) -> [bool; 4] {
         ["optRoundTopLeft", "optRoundTopRight", "optRoundBottomLeft", "optRoundBottomRight"].map(|k| self.bool(style, k, true))
     }

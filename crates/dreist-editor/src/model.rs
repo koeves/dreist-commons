@@ -51,12 +51,12 @@ pub struct Model {
     /// Option `PatternEditorFollow`: the pattern editor and the song
     /// scroll to keep the playback position in view.
     pub follow_playback: bool,
-    /// `e_setModifiers` 0x26 ([re:6f7056] / +[re:80578e], not saved):
+    /// `e_setModifiers` 0x26 ([re:6f7056] / [re:80578e], not saved):
     /// actions apply to all layers / all pads.
     pub all_layers: bool,
     pub all_pads: bool,
     /// Engine multi-selection (`e_setEngineSelections` 0x43, the original
-    /// +[re:1b20b6]; not saved — loading selects only `CurrentEngine`).
+    /// [re:1b20b6]; not saved — loading selects only `CurrentEngine`).
     pub engine_sel: u8,
     /// Pattern editor scroll / zoom per engine.
     pub pattern_view: [crate::pattern::PatternView; ENGINES],

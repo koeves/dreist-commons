@@ -5,10 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
-/// [re:6984ca] (`SearchTypeAsString` [re:e10820]).
+/// [re:6984ca] (type names [re:e10820]).
 pub const TYPES: [&str; 4] = ["File name", "Audio length", "File size", "File type"];
 
-/// `GetSubOptionsForSearchType` [re:3fc5fd]. Audio length lists "Less than
+/// Sub-options per search type [re:3fc5fd]. Audio length lists "Less than
 /// (sec)" twice and never offers "Is (sec)" (kept as the original).
 pub fn sub_types(kind: usize) -> &'static [&'static str] {
     match kind {
@@ -20,12 +20,12 @@ pub fn sub_types(kind: usize) -> &'static [&'static str] {
     }
 }
 
-/// `DoesTypeSupportSearchTerm` [re:cee6a3]: every type but File type.
+/// Types that take a search term [re:cee6a3]: every type but File type.
 pub fn takes_term(kind: usize) -> bool {
     kind < 3
 }
 
-/// `IsSearchTermValid` [re:ef7094]: length and size terms must be > 0; the
+/// Term validity [re:ef7094]: length and size terms must be > 0; the
 /// error and the replacement term.
 pub fn validate(kind: usize, term: &str) -> Result<(), (&'static str, &'static str)> {
     if (kind == 1 || kind == 2) && atof(term) <= 0.0 {
@@ -310,7 +310,7 @@ impl SearchPane {
         self.recent.truncate(RECENT);
     }
 
-    /// The pane's options that take part (`GetSearchOptions` [re:b7f0e2]).
+    /// The pane's options that take part ([re:b7f0e2]).
     pub fn options(&self) -> Vec<SearchOption> {
         self.rows
             .iter()
@@ -320,8 +320,8 @@ impl SearchPane {
     }
 
     /// Open or close the pane, moving the navigator row and the split view
-    /// below it (`DoToggleSearchPane` [re:1814b1]: one animation block, 750 ms,
-    /// `Logarithmic`: the pane's height to 125 / 0, the navigator, the
+    /// below it ([re:1814b1]: one animation block, 750 ms,
+    /// logarithmic: the pane's height to 125 / 0, the navigator, the
     /// previous / next location buttons and the split view's top to the
     /// pane's bottom, the split view's height to the rest).
     pub fn is_open(&self) -> bool {
@@ -448,7 +448,7 @@ impl SearchPane {
                         }
                     }
                     Some(PaneMenu::Type(r)) => {
-                        // `HandleControlEvent` [re:2f7d29] → `UpdateSubTypes`.
+                        // Control event [re:2f7d29] → sub types updated.
                         if *index < TYPES.len() {
                             self.rows[r] = (*index, 0, if takes_term(*index) { std::mem::take(&mut self.rows[r].2) } else { String::new() });
                         }
@@ -479,7 +479,7 @@ impl SearchPane {
                     self.match_all = *on;
                     Some(PaneAction::Handled)
                 }
-                // `HandleControlEvent` [re:b09f4f] → `StartSearch` [re:6e1b99].
+                // Control event [re:b09f4f] → search start [re:6e1b99].
                 "DoSearchButton" => {
                     let opts = self.options();
                     if opts.is_empty() {
@@ -495,7 +495,7 @@ impl SearchPane {
                 }
                 _ => None,
             },
-            // `ValidateSearchTerm` [re:3472b3].
+            // Term validation [re:3472b3].
             UiEvent::TextCommitted { path, name, text } if name == "SearchTermBox" && path.starts_with(page) => {
                 let r = row_of(app, path)?;
                 let k = self.rows[r].0;

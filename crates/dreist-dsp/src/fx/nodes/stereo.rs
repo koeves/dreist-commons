@@ -1,5 +1,5 @@
-//! [re:3d22ad] (Stereo Width; `InitializePorts` [re:675068],
-//! `Voice::ProcessBuffer` [re:ef9b38], `Voice::Reset` [re:e883e3]).
+//! [re:3d22ad] (Stereo Width; port setup [re:675068],
+//! processing [re:ef9b38], reset [re:e883e3]).
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
@@ -26,7 +26,7 @@ impl Node for StereoMixer {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:e883e3].
+    /// Reset [re:e883e3].
     fn reset(&mut self) {
         self.gain = 0.0;
         self.width = 1.0;

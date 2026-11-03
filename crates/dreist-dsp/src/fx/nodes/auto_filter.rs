@@ -1,5 +1,5 @@
-//! [re:55b4db] (Modulated Filter; `InitializePorts` [re:4ea5f6],
-//! `Voice::Reset` [re:c59236], `PrepareStream` [re:8abef9], `ProcessBuffer`
+//! [re:55b4db] (Modulated Filter; port setup [re:4ea5f6],
+//! reset [re:c59236], stream setup [re:8abef9], processing
 //! [re:4f3743]): Chamberlin state-variable filter with a polynomial soft
 //! clipper and diode feedback, cutoff modulated by a diode/RC envelope
 //! follower (Newton-solved per sample) and optional FM from the sidechain.
@@ -61,7 +61,7 @@ impl AutoFilter {
             smooth: 0.0,
             drive: 0.0,
             out_drive: 0.0,
-            // Voice::Reset leaves the pitch state at 1.0.
+            // Reset leaves the pitch state at 1.0.
             pitch: 1.0,
             wet: 1.0,
             alt: super::ssl_filter::DENORMAL,
@@ -81,7 +81,7 @@ impl Node for AutoFilter {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:c59236] (`state` is its field values); the rate
+    /// Reset [re:c59236] (`state` is its field values); the rate
     /// coefficients and the voice's denormal offset are kept.
     fn reset(&mut self) {
         let mut env = std::mem::take(&mut self.env);
@@ -94,7 +94,7 @@ impl Node for AutoFilter {
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         let n = inp[0].len();
         if self.sr != ctx.sample_rate {
-            // PrepareStream: 10 Hz DC blocker and 2.4 Hz envelope high-pass.
+            // Stream setup: 10 Hz DC blocker and 2.4 Hz envelope high-pass.
             self.sr = ctx.sample_rate;
             let inv = 1.0 / self.sr;
             self.c_dc = 1.0 - (inv * -62.831856).exp();
@@ -198,7 +198,7 @@ impl Node for AutoFilter {
             // (one exp2 call and one 0.24 clamp per sample in the original).
             let w = (fm5 * inp[0][i] * f * w0 + f * w0) * 0.5;
             let wc = ((w.abs() + 0.24) - (w - 0.24).abs()) * 0.5;
-            // `ms_sin_tab + 0x1000` indexed by `floor(wc·2048)` directly
+            // The sine table, offset by 4096 bytes, indexed by `floor(wc·2048)` directly
             // (no table-centre offset; wc is clamped to 0..0.24).
             let v = wc * 2048.0;
             let iv = v.floor();

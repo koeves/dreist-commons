@@ -108,7 +108,7 @@ impl FxChain {
         }
     }
 
-    /// [re:7dabbf] / `SetMix` / `SetOutputLevel` / `SetInputTrim`
+    /// [re:7dabbf] / mix / output level / input trim
     /// (messages 0x59, 0x5c–0x5e): store into the slot's rows; the next
     /// `update` applies it.
     pub fn set(&mut self, slot: usize, target: FxTarget, src: usize, value: f32) {
@@ -128,7 +128,7 @@ impl FxChain {
         row[src] = value;
     }
 
-    /// `Effect::SetActive` (message 0x5b).
+    /// Effect active (message 0x5b).
     pub fn set_active(&mut self, slot: usize, active: bool) {
         if let Some(Some(r)) = self.rows.get_mut(slot) {
             r.is_active = active;

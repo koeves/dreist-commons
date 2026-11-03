@@ -1,18 +1,18 @@
-//! Layer "Edit meta data" popup ([re:823bc8], ctor 0xf9d0,
-//! `Pad Editor/MetaDataAnchor.skin`; opened by [re:ecfa09]
-//! $_3's item lambda [re:4c4adf]).
+//! Layer "Edit meta data" popup ([re:823bc8],
+//! `Pad Editor/MetaDataAnchor.skin`; opened by [re:ecfa09]'s
+//! item menu [re:4c4adf]).
 //!
 //! - A working copy of the active analysis' [re:ed1f12] (User,
 //!   else Master; defaults 120 BPM / 1 bar / 0 beats / 440 Hz, a file
-//!   without a `.gsa` gets `GuessKeyData`). Every box parses with `atof`,
+//!   without a `.gsa` gets a guessed key). Every box parses with `atof`,
 //!   clamps (BPM 20..1000, Bars / Beats ≥ 0, Root 1..20000 Hz, Author /
-//!   Description ≤ 63 characters) and `UpdateDisplay` [re:6ef6bb] rewrites all
+//!   Description ≤ 63 characters) and [re:6ef6bb] rewrites all
 //!   boxes (`%0.2f`). BPM / Bars / Beats do not interlock here.
 //! - Root (Hz) and RootNote edit the same pitch: a note n stores
-//!   440·2^((n − 69)/12) (`MIDIKeyToFrequency` [re:abcb3d]); the popup shows
+//!   440·2^((n − 69)/12) ([re:abcb3d]); the popup shows
 //!   round(12·log2(Hz/440)) + 69.
-//! - Guess ($_7): `GuessKeyData` [re:13651e] on the whole file. Save ($_9):
-//!   the working copy into the active analysis and `SaveSliceAnalysis`
+//! - Guess: key guessing [re:13651e] on the whole file. Save:
+//!   the working copy into the active analysis, and saving it
 //!   rewrites the `.gsa` ("Metadata failed to save - is the directory
 //!   read only?"); the engine reads the new tempo (port: a rebuild). Save
 //!   and Cancel close after 0.3 s (port: at once), a click outside closes
@@ -90,7 +90,7 @@ impl MetaData {
         true
     }
 
-    /// `UpdateDisplay` [re:6ef6bb].
+    /// Display update [re:6ef6bb].
     pub fn sync(&self, app: &mut App) {
         let open = self.open.is_some();
         let Some(o) = self.overlay.clone().and_then(|p| app.ctrl_mut(&p)) else { return };

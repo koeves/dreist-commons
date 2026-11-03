@@ -1,5 +1,5 @@
-//! [re:deea98] (Parametric EQ, DJ EQ; `InitializePorts` [re:6fd56c],
-//! `Voice::UpdateCoeffs` [re:445da1], `Voice::ProcessBuffer` [re:36b9e6]) with
+//! [re:deea98] (Parametric EQ, DJ EQ; port setup [re:6fd56c],
+//! coefficient update [re:445da1], processing [re:36b9e6]) with
 //! [re:86c5ff] ([re:026f43]..[re:41d336]): four bands in series — LF shelf/bell,
 //! two peaking mids (Orfanidis-style prescribed-Nyquist-gain design,
 //! `peqx`), HF shelf/bell — each switchable, plus a wet/dry mix.
@@ -10,7 +10,7 @@ type Coeffs = ([f64; 3], [f64; 3]);
 
 const PASS: Coeffs = ([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
 
-/// [re:074878] (asm-checked arithmetic order).
+/// [re:074878] (arithmetic order checked against the original).
 fn peqx(g0: f64, g: f64, gb: f64, w0: f64, dw: f64, fs: f64) -> Coeffs {
     let g2 = g * g;
     let d = g2 - gb * gb;
@@ -62,13 +62,13 @@ fn ssl_peak(f: f64, inv_q: f64, gain: f64, fs: f64) -> Coeffs {
     peqx(1.0, db(gain), db(gain * 0.5), w0, bw * w0, fs)
 }
 
-/// `SSLlowbell` / `SSLhighbell`: bandwidth 0.57·w0.
+/// Low/high bell: bandwidth 0.57·w0.
 fn ssl_bell(f: f64, gain: f64, fs: f64) -> Coeffs {
     let w0 = f * 6.2831854820251465;
     peqx(1.0, db(gain), db(gain * 0.5), w0, w0 * 0.57, fs)
 }
 
-/// `SSLlowshelf` / `SSLhighshelf`: RBJ shelf with slope 0.5.
+/// Low/high shelf: RBJ shelf with slope 0.5.
 pub(crate) fn ssl_shelf(f: f64, gain: f64, fs: f64, high: bool) -> Coeffs {
     let a = db(gain).sqrt();
     let lim = if high { 0.45 } else { 0.44999998807907104 };
@@ -127,7 +127,7 @@ impl SslEq {
         SslEq { ports: ports_from(ports::PARAMETRIC_EQ), first: true, keys: [[f32::NAN; 3]; 4], on: [false; 4], bands: [Bq::default(); 4] }
     }
 
-    /// `UpdateCoeffs` (round-to-nearest; each band recomputed when its ports change).
+    /// Coefficient update (round-to-nearest; each band recomputed when its ports change).
     fn update(&mut self, sr: f32) {
         let p = |i: usize| self.ports[i].value;
         let fs = sr as f64;
@@ -171,7 +171,7 @@ impl Node for SslEq {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:4f13fd]: every band cleared, recomputed next block.
+    /// Reset [re:4f13fd]: every band cleared, recomputed next block.
     fn reset(&mut self) {
         self.first = true;
         self.keys = [[f32::NAN; 3]; 4];

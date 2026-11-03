@@ -277,7 +277,7 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// `DrawArc(rect, start, sweep, clockwise, colour, width)`.
+    /// Arc stroke (rect, start, sweep, clockwise, colour, width).
     pub fn stroke_arc(&mut self, r: RectF, start: f32, sweep: f32, clockwise: bool, c: Colour, width: f32) {
         if sweep.abs() < 1e-3 {
             return;

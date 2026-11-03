@@ -1,9 +1,9 @@
-//! Meter feed: every visible [re:d45123] gets one `Update`
+//! Meter feed: every visible [re:d45123] gets one update
 //! per editor tick from the engine's peak-hold levels, which the caller
 //! then clears ([re:11bc96]).
 //!
 //! The meter's source comes from its ancestors: mixer strips (`channel`
-//! attr: `EditorMixer*Channel::GetOutputLevels`), inspector layer rows
+//! attr: the mixer channel's output levels), inspector layer rows
 //! (`layer` attr), the pad header (`PadSelButton`) and the sampler panel
 //! ([re:7fc93e]).
 

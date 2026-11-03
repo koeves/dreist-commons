@@ -9,10 +9,10 @@ use crate::pattern::{LANES, PatternData, Swing, TRACKS, lane, randomised};
 pub struct EngineState {
     pub current_pattern: usize,
     pub pattern_power: bool,
-    /// `IsGateEnabled` (+0x20): the pattern is running.
+    /// Gate enabled: the pattern is running.
     pub gate: bool,
     pub needs_resync: bool,
-    /// Pattern phase to resync to, in 16ths; -999 = none (+0x18).
+    /// Pattern phase to resync to, in 16ths; -999 = none.
     pub phase_resync: f64,
     /// Offset added to the song position, in 16ths.
     pub process_offset: f64,
@@ -31,7 +31,7 @@ pub struct EngineState {
     pub full_level_velocity: u32,
     pub note_repeat: bool,
     pub note_repeat_synced: bool,
-    /// `NoteRepeatBase` (+0x50, not saved; default 8 = 1/16).
+    /// Note repeat base (not saved; default 8 = 1/16).
     pub note_repeat_base: u32,
     pub note_erase: bool,
     pub visible_pads: u32,
@@ -41,11 +41,11 @@ pub struct EngineState {
     pub held: [bool; TRACKS],
     pub last_velocity: [u32; TRACKS],
     pub last_pitch: [f64; TRACKS],
-    /// `PatternTriggerPPQPos`: where the current pattern started (QN).
+    /// Pattern trigger position: where the current pattern started (QN).
     pub trigger_ppq: f64,
-    /// [re:b98fa6] graph record queue (+0x34, 93 ints, −1 = empty; dirty
-    /// flag +0x1a8): the last recorded value·127 per lane, written into the
-    /// next step the track reaches (`ReadAndPlayStep` [re:9496b8]).
+    /// [re:b98fa6] graph record queue (93 ints, −1 = empty; dirty
+    /// flag): the last recorded value·127 per lane, written into the
+    /// next step the track reaches ([re:9496b8]).
     pub graph_rec: Vec<[i32; LANES]>,
     pub graph_rec_dirty: [bool; TRACKS],
     /// Queued values that reached a step this block: (track, step, lane,
@@ -133,13 +133,13 @@ impl EngineState {
 /// Per-engine values the sequencer reads from `Engine`.
 #[derive(Debug, Clone)]
 pub struct EngineTiming {
-    /// `TempoNumerator / TempoDenominator` (`GetTempoMultiplierFloat`).
+    /// `TempoNumerator / TempoDenominator`.
     pub tempo_multiplier: f64,
     /// `TempoNumerator` / `TempoDenominator` (1..16).
     pub tempo_num: u32,
     pub tempo_den: u32,
     pub swing: Swing,
-    /// `SwingTemplateDepth` (+0xab8).
+    /// `SwingTemplateDepth`.
     pub swing_depth: f32,
 }
 
@@ -154,9 +154,9 @@ impl Default for EngineTiming {
 pub struct Clock {
     pub bpm: f64,
     pub sample_rate: f32,
-    /// Song position at the start of the host block, in quarter notes (+0x30).
+    /// Song position at the start of the host block, in quarter notes.
     pub ppq_block: f64,
-    /// Song position at the start of the current sub-block (+0x38).
+    /// Song position at the start of the current sub-block.
     pub ppq_now: f64,
 }
 
@@ -183,11 +183,11 @@ pub struct NoteRequest {
     pub live: bool,
     /// Pitch offset in semitones (chromatic pad mode).
     pub semitone: f64,
-    /// Live-recording timing offset (`StartVoiceDelayed`), when recording applies.
+    /// Live-recording timing offset (delayed voice start), when recording applies.
     pub record: Option<f64>,
 }
 
-/// Is the track audible given mute/solo (`GetTrackPlaybackStatusFromMuteSolo` [re:60b812]).
+/// Is the track audible given mute/solo ([re:60b812]).
 pub fn track_plays(pattern: &PatternData, track: usize) -> bool {
     let any_solo = pattern.tracks.iter().any(|t| t.solo);
     let t = &pattern.tracks[track];
@@ -201,7 +201,7 @@ pub struct PadInfo<'a> {
     pub links: &'a [[bool; TRACKS]; TRACKS],
 }
 
-/// Random sources: `rand_white` is `Randomiser::GetWhite(0, 1)` (step probability),
+/// Random sources: `rand_white` is uniform white noise in 0..1 (step probability),
 /// `rand_lane` feeds `Convertor` randomisation ([re:5a24f7]).
 pub struct Rng {
     state: u64,
@@ -329,10 +329,10 @@ fn read_and_play_step(
 
     for k in -1..=1 {
         // Absolute step index (not wrapped by the pattern length) and pattern step.
-        // 32-bit wrapping as in the binary (extreme positions saturate `i0`).
+        // 32-bit wrapping as in the original (extreme positions saturate `i0`).
         let mut abs = i0.wrapping_add(k - 1).wrapping_sub(n);
         if abs < 0 {
-            // The binary adds `n` until non-negative.
+            // The original adds `n` until non-negative.
             abs = abs.rem_euclid(n);
         }
         let pstep = i0.wrapping_add(k).rem_euclid(n) as u32;

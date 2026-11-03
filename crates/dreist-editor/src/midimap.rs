@@ -26,7 +26,7 @@ use crate::command::Command;
 use crate::model::Model;
 use crate::{EditorError, err};
 
-/// [re:54266d] (`CreateBindingTypeMap`).
+/// [re:54266d] (binding type names).
 pub const BINDING_TYPES: [&str; 6] = ["Continuous", "Momentary", "Latching", "Trigger", "Gated", "FlipFlop"];
 const ROW: f32 = 20.0;
 const HEADER: f32 = 20.0;
@@ -54,7 +54,7 @@ fn bar_geometry(h: f32, n: usize, scroll: usize) -> Option<(f32, f32, f32, f32)>
     Some((HEADER, track, ty, th))
 }
 const HEADER_STYLE: &str = "BrowserListViewHeaderStyle";
-/// (title, width, min, max) from `UpdateTable` (`AddColumn`: resizable
+/// (title, width, min, max) of the table's columns (resizable
 /// when min ≠ max; u32::MAX = no maximum).
 const COLUMNS: [(&str, f32, f32, f32); 8] = [
     ("Clear", 40.0, 40.0, 40.0),
@@ -194,7 +194,7 @@ fn binding_node_mut<'a>(doc: &'a mut Node, r: &Row) -> Option<&'a mut Node> {
     bindings_mut(doc).children.iter_mut().find(|c| c.class == "Binding" && c.name.as_deref() == Some(&name))
 }
 
-/// The row right-click menu (`UpdateTable` $_3).
+/// The row right-click menu.
 const ROW_MENU: [&str; 6] = ["Remove mapping", "", "Invert range", "Reset min", "Reset max", "Reset min and max"];
 
 /// Remove one binding, renumbering the rest under its key.
@@ -282,7 +282,7 @@ fn set_string(n: &mut Node, name: &str, v: &str) {
     }
 }
 
-/// [re:66fafd] / `GetBindingMinMax` [re:260d06]:
+/// [re:66fafd] / [re:260d06]:
 /// a binding's Min/Max in the target's units — pad, engine and layer
 /// parameters through their conversions, gains (metronome 0x24, aux 0x9f,
 /// master 0xa5, preview 0x15f) linear −100..6, master tune 0xa6 −12..12,
@@ -303,7 +303,7 @@ pub fn binding_value(r: &Row, v: f32) -> f32 {
 
 /// `BindingsLocked`: the loaded project keeps the current bindings
 /// ([re:92292a] skips restoring "Bindings" while
-/// `BindingMap` +0xce48 is set).
+/// the bindings are locked).
 pub fn carry_bindings(from: &Node, to: &mut Node) {
     to.children.retain(|c| c.class != "BindingMap");
     if let Some(b) = bindings(from) {
@@ -435,7 +435,7 @@ impl MidiMap {
         match ev {
             UiEvent::Clicked { path, name, on, .. } if path.starts_with(&self.page) => {
                 match name.as_str() {
-                    // `HandleControlEvent` [re:99090c]: confirm, then 0x10.
+                    // [re:99090c]: confirm, then 0x10.
                     "Clear" if app.ctrl(path).is_some_and(|c| c.class == "CtrlButton") => {
                         let items = vec!["Are you sure you want to remove all bindings? This cannot be undone!".into(), String::new(), "Yes".into(), "No".into()];
                         app.open_menu(path, items, None);
@@ -478,7 +478,7 @@ impl MidiMap {
                 true
             }
             UiEvent::Mouse { path, overload, kind, x, y } if overload == "MIDIMapTable" => {
-                // [re:ba68d6] / `OnMouseMove`:
+                // [re:ba68d6] / mouse move:
                 // a press on a grip resizes that column by the pointer's
                 // travel within its min / max.
                 if let Some((col, last)) = self.col_drag {
@@ -529,7 +529,7 @@ impl MidiMap {
                     return true;
                 }
                 match kind {
-                    // [re:fb19a6] $_3 [re:1cc864]: a row's
+                    // [re:fb19a6] [re:1cc864]: a row's
                     // right-click menu (the row gets selected).
                     MouseKind::RightDown => {
                         let Some((row, _)) = self.cell(app, rs.len(), *x, *y) else { return false };
@@ -630,7 +630,7 @@ impl MidiMap {
         }
     }
 
-    /// `ATC_Tick` [re:451f3a]: with Auto select on, the binding of the last
+    /// Timer tick [re:451f3a]: with Auto select on, the binding of the last
     /// incoming MIDI channel/CC gets selected and scrolled into view.
     pub fn incoming(&mut self, app: &App, model: &Model, ch: usize, cc: usize) {
         if !self.auto_select {

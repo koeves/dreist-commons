@@ -19,7 +19,7 @@ pub struct Ctx {
     /// Song position in quarter notes at the start of the block.
     pub ppq: f64,
     pub playing: bool,
-    /// [re:c912bd] (`SetTune`, 440 Hz).
+    /// [re:c912bd] (tuning, 440 Hz).
     pub tune: f32,
 }
 
@@ -58,7 +58,7 @@ impl Port {
         Port::new(v(def), v(lo), v(hi))
     }
 
-    /// `SetValue01` [re:6bb8cb].
+    /// Normalized value set [re:6bb8cb].
     pub fn set01(&mut self, v: f32) {
         let v = v.clamp(0.0, 1.0) as f64;
         self.value = ((self.max - self.min) * v + self.min) as f32;
@@ -82,8 +82,8 @@ pub trait Node: Send {
     /// One block of at most [`NODE_BLOCK`] frames (longer ones work but may
     /// grow the work buffers); no allocation once `prepare_rate` ran.
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]);
-    /// The voice's `Reset` ([re:b33786] calls it on every voice, from
-    /// [re:404233] and `CreateVoice`): whatever running state the
+    /// The voice's reset ([re:b33786] calls it on every voice, from
+    /// [re:404233] and voice creation): whatever running state the
     /// original class clears, without allocating. The base
     /// [re:0363ae] is empty, so tails survive a panic in
     /// nodes that do not override it.
@@ -131,12 +131,12 @@ pub struct Effect {
     trim: Trim,
     /// Trimmed input of the current sub-block.
     buf: [[f32; NODE_BLOCK]; 2],
-    /// Values for this block (`Effect + 0x1c0..0x1cc`).
+    /// Values for this block.
     pub active: bool,
     pub mix: f32,
     pub level: f32,
     pub trim_target: f32,
-    /// Last pushed front-panel values (`Effect + 0x1d4`, stride 0x74).
+    /// Last pushed front-panel values.
     pub params: [f32; 12],
 }
 
@@ -203,7 +203,7 @@ impl Effect {
     }
 
     /// [re:967f49] → [re:330ad9] →
-    /// [re:572a93]: each voice's own `Reset` ([`Node::reset`]),
+    /// [re:572a93]: each voice's own reset ([`Node::reset`]),
     /// in place on the audio thread.
     pub fn panic(&mut self) {
         if let Some(n) = self.node.as_mut() {
@@ -211,7 +211,7 @@ impl Effect {
         }
     }
 
-    /// `PushParameterValue`: front-panel parameter → node port(s).
+    /// Front-panel parameter → node port(s).
     pub fn push_parameter(&mut self, index: usize, v01: f32) {
         if let Some(p) = self.params.get_mut(index) {
             *p = v01;
@@ -296,7 +296,7 @@ impl EffectChain {
         }
     }
 
-    /// `NeedsToProcess` [re:b32927].
+    /// Whether processing is needed [re:b32927].
     pub fn needs_to_process(&self) -> bool {
         self.active && self.mix.abs() >= 1e-6 && self.slots.iter().flatten().any(|e| e.kind != 0 && e.active)
     }

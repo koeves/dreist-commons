@@ -4,14 +4,14 @@
 //! - [re:518b99]: banks A–D show 16 pads in 4×4,
 //!   "All" shows 64 in 8×8; the matrix lays out from the bottom
 //!   (`optLayoutFromTop="false"`).
-//! - [re:ff2d9a] / `UpdatePad` [re:bc1ce0] /
-//!   `UpdateLayerIndicators` [re:535995]: styles `PadStyle` /
+//! - [re:ff2d9a] / pad update [re:bc1ce0] /
+//!   layer indicators [re:535995]: styles `PadStyle` /
 //!   `PadSelectedStyle`, `PadNameLabel[Selected]Style`, layer indicators
 //!   `PadLayer{,Selected,Muted,Soloed,MutedSoloed}IndicatorStyle`, name text
 //!   per pad mode.
 //! - [re:b99f7e]: velocity from the click's
 //!   x position (peak at the centre), or with option `PadVelocityBehaviour`
-//!   1 − y/height; `TriggerSound` [re:069c0a] posts `e_playSound` (0x3b).
+//!   1 − y/height; triggering [re:069c0a] posts `e_playSound` (0x3b).
 
 use dreist_engine::live::PadMode;
 use dreist_gui::app::{App, MouseKind, UiEvent};
@@ -51,17 +51,17 @@ pub struct Pads {
 
 /// [re:2d30eb] flash overlay.
 ///
-/// - `DoFlash` [re:870ce8]: on (+0x32c), alpha (+0x330) 0.65, colour = the
+/// - Flash [re:870ce8]: on, alpha 0.65, colour = the
 ///   style's colAltFill (default Pink).
-/// - `FlashIfNotAlreadyFlashing` [re:c6c89e]: the same at 0.85 when off.
-/// - `DoFlashLoop` [re:74ec67]: `DoFlash` and the loop flag (+0x32d) unless
-///   looping; `EndFlashLoop` [re:5b24df] clears it unless the pad is being
-///   dragged (+0x324, set when its drag starts, cleared by `DragEnded` /
+/// - Flash unless flashing [re:c6c89e]: the same at 0.85 when off.
+/// - Flash loop [re:74ec67]: a flash and the loop flag unless
+///   looping; ending the loop [re:5b24df] clears it unless the pad is being
+///   dragged (set when its drag starts, cleared when the drag ends /
 ///   mouse up).
-/// - `ATC_Tick` [re:33a0c6] (every 1/30 s timer tick): rising (+0x334 clear)
+/// - Timer tick [re:33a0c6] (every 1/30 s): rising (falling flag clear)
 ///   alpha += 0.1 up to 0.65, then falling; falling −0.2 down to 0, then
 ///   off, or rising again while looping. The falling flag is never reset
-///   by `DoFlash`, so later flashes start falling.
+///   by a flash, so later flashes start falling.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Flash {
     pub on: bool,
@@ -203,7 +203,7 @@ impl Pads {
             }
         }
         passive(&mut template);
-        // [re:114692] calls `SetUserEnableState(false)` on
+        // [re:114692] user-disables
         // the overlay (hidden and disabled); only x0x shading shows it.
         if let Some(o) = template.find_mut("Overlay") {
             o.enabled = false;
@@ -341,7 +341,7 @@ impl Pads {
             }
             let lit = step_state.is_some_and(|s| s.1 > 0);
             // x0x: the overlay marks the steps of odd shading groups
-            // (`SetStyleAsStepState` → `Overlay` `SetVisible`).
+            // (step-state style → `Overlay` shown).
             let shade = x0x_pat.as_ref().map(|p| crate::pattern::shaded(p.resolution, idx));
             for c in pad.children.iter_mut() {
                 match c.name.as_str() {
@@ -415,7 +415,7 @@ impl Pads {
     pub(crate) fn drag_flash(&mut self, app: &App, model: &Model, what: DragFlash, x: f32, y: f32) {
         let (ox, oy) = app.origin(&self.matrix);
         let Some(m) = app.ctrl(&self.matrix) else { return };
-        // Pad rects shrunk by 2 px (`DoFlashPadsAtPosition` [re:288c64]).
+        // Pad rects shrunk by 2 px (flashing pads at a position [re:288c64]).
         let inside = |c: &Ctrl| {
             let (px, py) = (x as i32 - ox, y as i32 - oy);
             let r = c.rect;
@@ -454,7 +454,7 @@ impl Pads {
         }
     }
 
-    /// [re:8d9b8a] / `DragEnded`: every loop ends.
+    /// [re:8d9b8a] / drag end: every loop ends.
     pub fn end_drag_flash(&mut self) {
         for f in &mut self.flash {
             f.dragged = false;
@@ -465,7 +465,7 @@ impl Pads {
     /// Per-frame flash timer ([re:ba3c9b]), and
     /// [re:bd4d75]: in x0x mode, while the pattern
     /// plays with its power on, the current step's pad flashes
-    /// (`FlashIfNotAlreadyFlashing`). Returns whether a pad changed.
+    /// (unless already flashing). Returns whether a pad changed.
     pub fn animate(&mut self, app: &mut App, model: &Model) -> bool {
         let e = model.engine;
         if model.pad_mode(e) == PadMode::X0x && model.pattern_power(e) {
@@ -543,7 +543,7 @@ impl Pads {
                         true
                     }
                     MouseKind::Drag => {
-                        // `DoMouseMoveNormalMode` [re:10ff5a]: past 10 px (or
+                        // Mouse move, normal mode [re:10ff5a]: past 10 px (or
                         // outside the pad) the drag starts and the pad loops.
                         let (w, h) = (pad.rect.w as f32, pad.rect.h as f32);
                         let out_of = *x < 0.0 || *y < 0.0 || *x >= w || *y >= h;
@@ -594,9 +594,9 @@ impl Pads {
     }
 
     /// [re:032c62] + the visibility rules:
-    /// `UpdateControlVisibilityToMatchPadMode` [re:0c84c6] sets them per pad
-    /// mode, then notifies [re:91eddf], whose listener (`LoadSkin` $_10
-    /// [re:d830f2]) sets each of FullLevelKnob + FullLevelButton,
+    /// [re:0c84c6] sets them per pad
+    /// mode, then notifies [re:91eddf], whose listener
+    /// ([re:d830f2]) sets each of FullLevelKnob + FullLevelButton,
     /// RepeatButton + RepeatCount and EraseButton visible exactly when its
     /// right edge is left of the panel width − 25, and Options when any is
     /// not — so the fit decides.
@@ -646,7 +646,7 @@ impl Pads {
         }
     }
 
-    /// `LoadSkin` $_12 [re:a04671]: the 14 resolution names (current base
+    /// [re:a04671]: the 14 resolution names (current base
     /// checked) then "Sync to next division".
     fn repeat_items(&self, model: &Model) -> Vec<(String, OptAction)> {
         let e = model.engine;
@@ -658,11 +658,11 @@ impl Pads {
         v
     }
 
-    /// The strip's buttons, knob and menus (`LoadSkin` lambdas $_2 0x1e
-    /// `e_setNoteEraseState`, $_3 0x1f `e_setNoteRepeatState`, $_4 the
+    /// The strip's buttons, knob and menus (skin lambdas 0x1e
+    /// `e_setNoteEraseState`, 0x1f `e_setNoteRepeatState`, the
     /// timing menu (0x20 `e_setNoteRepeatBase` [e] [i]; sync writes the
-    /// engine state directly), $_6 0x22 `e_setFullLevelLevel` [e] [knob],
-    /// $_7 0x21 `e_setFullLevelState`, $_9 the collapsed options menu).
+    /// engine state directly), 0x22 `e_setFullLevelLevel` [e] [knob],
+    /// 0x21 `e_setFullLevelState`, the collapsed options menu).
     pub fn handle_controls(&mut self, app: &mut App, model: &mut Model, ev: &UiEvent, out: &mut Vec<Command>) -> bool {
         use dreist_engine::binding::id;
         let e = model.engine;
@@ -718,7 +718,7 @@ impl Pads {
                     app.open_menu(path, labels, None);
                     false
                 }
-                // $_9 [re:48766b]: the hidden controls as menu items.
+                // [re:48766b]: the hidden controls as menu items.
                 "Options" => {
                     let hidden = |n: &str| self.ctrl_path(app, n).and_then(|p| app.ctrl(&p).map(|c| !c.visible)).unwrap_or(false);
                     let check = |on: bool, t: &str| if on { format!("✓ {t}") } else { t.to_string() };

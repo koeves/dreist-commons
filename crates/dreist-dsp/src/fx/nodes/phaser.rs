@@ -1,5 +1,5 @@
-//! [re:297af4] (Phaser, kind 18, dual-mono; `Reset` [re:bcfa17],
-//! `ProcessBuffer` [re:a6a78c]): 2/4/6/8 first-order allpass stages (Mode
+//! [re:297af4] (Phaser, kind 18, dual-mono; reset [re:bcfa17],
+//! processing [re:a6a78c]): 2/4/6/8 first-order allpass stages (Mode
 //! 0–7; odd modes flip the feedback and output polarity), coefficient from
 //! a per-mode polynomial of the cosine-LFO-swept frequency, saturated
 //! input and DC-blocked feedback, ramped dry/wet gains.

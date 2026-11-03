@@ -37,7 +37,7 @@ fn db_amp(a: f32) -> String {
     if a <= 1e-5 { "-oo dB".into() } else { format!("{} dB", f2s((20.0 * a.log10()) as f64, 1, false)) }
 }
 
-/// SI prefix of [re:df3abf] / `DoubleScaled`: the scaled value and
+/// SI prefix of [re:df3abf]: the scaled value and
 /// prefix ('\0' when none, which ends the C string).
 fn si(f: f32) -> (f32, Option<char>) {
     let e = (f.abs() + 1e-10).log10().floor();
@@ -56,7 +56,7 @@ fn round_away(x: f32) -> i32 {
     (x + if x < 0.0 { -0.5 } else { 0.5 }) as i32
 }
 
-/// `BeatPowerToString` [re:729835] + " note" ([re:d4b3a1]).
+/// Beat power text [re:729835] + " note" ([re:d4b3a1]).
 fn beat_note(x: f32) -> String {
     if x <= -8.0 {
         return "0 note".into();

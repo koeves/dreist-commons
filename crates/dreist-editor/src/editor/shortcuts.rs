@@ -39,7 +39,7 @@ impl Editor {
         }
     }
 
-    /// The standalone's menu bar (`AcceleratorTriggered` [re:80cba3]: the
+    /// The standalone's menu bar ([re:80cba3]: the
     /// entry's function, whatever the keyboard options say).
     pub fn menu_bar_items(&self) -> (Vec<dreist_gui::menubar::Item>, Vec<(String, Vec<dreist_gui::menubar::Item>)>) {
         use dreist_gui::menubar::Item;
@@ -136,7 +136,7 @@ impl Editor {
             }
             // [re:dd7138]: Filter starts editing
             // the search box; Find is the box menu's "Advanced search..."
-            // (`NotifyListeners([re:80cb0a])` → the pane toggles).
+            // (its listeners are notified [re:80cb0a] → the pane toggles).
             0x160 | 0x161 => {
                 self.binding_message(&dreist_engine::binding::Message::new(0x14e, &[], &[1.0]));
                 let Some(b) = &mut self.browser else { return };

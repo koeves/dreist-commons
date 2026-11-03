@@ -30,19 +30,19 @@ pub enum UiEvent {
     /// Mouse on a custom control (non-empty `overload`): position local to it.
     Mouse { path: Vec<usize>, overload: String, kind: MouseKind, x: f32, y: f32 },
     /// A second left press on the same control within the double-click
-    /// time (`OnMouseLButtonDblClick`; event 8 for stock controls), after
+    /// time (event 8 for stock controls), after
     /// that press's own events.
     DoubleClicked { path: Vec<usize>, name: String },
     /// A left drag that started on control `from` (custom or stock) ended
     /// over a different control: `to` is the full hit path under the
     /// pointer (deepest last), `x`/`y` in root coordinates
-    /// ([re:4dff70] → the target's `OnDroppedObject`).
+    /// ([re:4dff70] → the target's drop handler).
     Dropped { from: Vec<usize>, to: Vec<usize>, x: f32, y: f32 },
     /// A drag from `from` (past the threshold) is over `to` (full hit path),
-    /// for drop-target feedback and drag cursors (`DragMove`).
+    /// for drop-target feedback and drag cursors.
     DragOver { from: Vec<usize>, to: Vec<usize>, x: f32, y: f32 },
     /// The pointer moved over a custom control with no button held
-    /// (`OnMouseMove` without a press), position local to it.
+    /// (a mouse move without a press), position local to it.
     Hover { path: Vec<usize>, overload: String, x: f32, y: f32 },
     /// The pointer entered another interactive control (or left them all):
     /// the [re:944095] 0x80 / 0x100 enter / leave listeners.
@@ -174,7 +174,7 @@ pub struct App {
     pub tooltip: Option<crate::tooltip::Tip>,
 }
 
-/// `Editor::open` → [re:680872].
+/// Editor open → [re:680872].
 pub const MIN_WINDOW: (i32, i32) = (1150, 650);
 
 /// Pixels the pointer must travel before a press becomes a drag.
@@ -282,7 +282,7 @@ impl App {
         }
     }
 
-    /// `Ctrl::IsHierarchyVisible`: the control and all its parents shown.
+    /// The control and all its parents shown.
     pub fn shown(&self, path: &[usize]) -> bool {
         let mut c = &self.root;
         for &i in path {
@@ -319,7 +319,7 @@ impl App {
         self.set_tooltip_at(a, text, pos);
     }
 
-    /// The delayed form (`SetToolTipText(.., false, ..)`, e.g. the browser
+    /// The delayed form (not immediate, e.g. the browser
     /// path buttons on mouse enter): shown after 50 ticks of the pointer
     /// staying within 4 px.
     pub fn set_tooltip_delayed(&mut self, a: crate::ctrl::Rect, text: &str, pos: crate::tooltip::Pos) {
@@ -555,7 +555,7 @@ impl App {
             if c.class == "CtrlWindowSizer" {
                 cur = Some(crate::cursor::Cursor::ResizeNwse);
             }
-            // Splitter bar enter ($_3): resize cursor unless locked.
+            // Splitter bar enter: resize cursor unless locked.
             if crate::splitter::on_bar(c, x as i32 - ox, y as i32 - oy) && !crate::splitter::locked(c) && crate::splitter::draggable(c) {
                 cur = Some(if crate::splitter::vertical(c) { crate::cursor::Cursor::UpDown } else { crate::cursor::Cursor::LeftRight });
             }
@@ -876,7 +876,7 @@ impl App {
                 }
                 return out;
             }
-            // A right press on a plain panel (`OnMouseRButtonDown` of the
+            // A right press on a plain panel (the right mouse down of the
             // panel under the pointer, e.g. an effect panel's background).
             if button == MouseButton::Right && !hit.is_empty() {
                 let name = self.ctrl(&hit).map(|c| c.name.clone()).unwrap_or_default();
@@ -890,7 +890,7 @@ impl App {
         out
     }
 
-    /// `SetIconicStateAnimated`: start folding (`iconic`) or unfolding the
+    /// Start folding (`iconic`) or unfolding the
     /// collapse panel at `path`; [`App::animate`] runs it.
     pub fn fold(&mut self, path: &[usize], iconic: bool) -> Vec<UiEvent> {
         let Some(c) = self.ctrl_mut(path) else { return Vec::new() };
@@ -911,7 +911,7 @@ impl App {
         vec![UiEvent::Collapse { path: path.to_vec(), iconic, end: false }]
     }
 
-    /// `SetIconicState`: fold / unfold at once (start and end
+    /// Fold / unfold at once (start and end
     /// notifications).
     pub fn set_iconic(&mut self, path: &[usize], iconic: bool) -> Vec<UiEvent> {
         let Some(c) = self.ctrl_mut(path) else { return Vec::new() };
@@ -927,7 +927,7 @@ impl App {
         vec![UiEvent::Collapse { path: path.to_vec(), iconic, end: false }, UiEvent::Collapse { path: path.to_vec(), iconic, end: true }]
     }
 
-    /// `Ctrl::SetRectAnimated(to, ms, curve, end)`: move the control at
+    /// Animated rect change (to, ms, curve, end): move the control at
     /// `path` from `from`; [`App::animate`] reports `UiEvent::Animated` with
     /// `tag` at the end.
     pub fn animate_rect(&mut self, path: &[usize], from: crate::ctrl::Rect, to: crate::ctrl::Rect, ms: f32, curve: fn(f32) -> f32, tag: u32) {
@@ -992,7 +992,7 @@ impl App {
 
     /// [re:d703b9]: the pointer's travel in
     /// screen pixels is added to the root's (unscaled) size; an axis below
-    /// the minimum keeps its size and its anchor. `Editor::open` $_1 then
+    /// the minimum keeps its size and its anchor. The editor's resize handler then
     /// asks the host for the size × scale (at least 1150×650); the window
     /// follows through [`App::resize_request`].
     fn sizer_move(&mut self, x: f32, y: f32) {
@@ -1020,12 +1020,12 @@ impl App {
         }
     }
 
-    /// Whether the window sizer is being dragged (`SetIsLiveResizing`).
+    /// Whether the window sizer is being dragged (live resizing).
     pub fn live_resizing(&self) -> bool {
         self.sizer_drag.is_some()
     }
 
-    /// [re:9d17dc] / `OnMouseLButtonUp`: the bar
+    /// [re:9d17dc] / mouse up: the bar
     /// follows the pointer's travel since the press, clamped (draggable
     /// splitters only).
     fn split_move(&mut self, path: &[usize], start: i32, x: f32, y: f32, end: bool) -> Vec<UiEvent> {
@@ -1041,7 +1041,7 @@ impl App {
         vec![UiEvent::Split { path: path.to_vec(), pos, end }]
     }
 
-    /// `SetSplitterPosition` animations (250 ms Linear, floored steps).
+    /// Splitter position animations (250 ms Linear, floored steps).
     fn animate_splits(&mut self) -> Vec<UiEvent> {
         let now = std::time::Instant::now();
         let mut out = Vec::new();
@@ -1088,7 +1088,7 @@ impl App {
             return vec![UiEvent::RightClicked { path, name }];
         }
         let mut out = Vec::new();
-        // The drag keeps the press's transmod cursor (`OnMouseLButtonDown`);
+        // The drag keeps the press's transmod cursor (as on mouse down);
         // with a source selected a press on the centre / main track edits
         // the primary (base) value, the ring / strip the depth.
         let mut primary = false;

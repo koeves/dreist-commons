@@ -53,11 +53,11 @@ impl Editor {
     }
 
     /// Knob right clicks (the panels' [re:944095] 0x10 listeners, e.g.
-    /// [re:efb170] $_26 [re:2f6dee], [re:042ac9] $_8 [re:aaaa12],
-    /// [re:f61ec0] $_6 [re:b9a170], [re:e5c3c3] $_6
-    /// [re:22e1ae], [re:2f9e16] $_2 [re:382eda], [re:4196af] $_3,
-    /// [re:f5b367] $_5, [re:223b19] $_7,
-    /// [re:284b3d] $_3, [re:bc7b1d] $_15):
+    /// [re:efb170] [re:2f6dee], [re:042ac9] [re:aaaa12],
+    /// [re:f61ec0] [re:b9a170], [re:e5c3c3]
+    /// [re:22e1ae], [re:2f9e16] [re:382eda], [re:4196af],
+    /// [re:f5b367], [re:223b19],
+    /// [re:284b3d], [re:bc7b1d]):
     /// Reset, Edit, and for modulatable knobs "Remove all modulation from
     /// this control".
     pub(crate) fn knob_right_click(&mut self, ev: &UiEvent) -> bool {
@@ -78,11 +78,11 @@ impl Editor {
                     return false;
                 }
                 let mut items = vec![("Reset".to_string(), KnobAction::Reset), ("Edit".to_string(), KnobAction::Edit)];
-                // Macro knobs add "Rename" ([re:4632d9] $_3).
+                // Macro knobs add "Rename" ([re:4632d9]).
                 if name.starts_with("Macro") && self.transmod.reset_value(&self.app, &self.model, path, name).is_some() {
                     items.push(("Rename".into(), KnobAction::Rename));
                 }
-                // [re:38b63d] $_26: the coarse tune knob (param 5) adds "Tune
+                // [re:38b63d]: the coarse tune knob (param 5) adds "Tune
                 // loop to tempo", the pre-delay knob (param 7) the
                 // "Set pre delay in msec" check.
                 if self.inspector.reset_value(path, name).is_some() && class == "CtrlTransmodKnob" {
@@ -209,7 +209,7 @@ impl Editor {
 
     /// Knob / slider double clicks with `DoubleClickResets` (default on):
     /// the control goes to its default and reports it as a move (the
-    /// original lambdas `SetValue` + `NotifyListeners`, or post the default
+    /// original sets the value and notifies the listeners, or posts the default
     /// directly), always the base value (transmod source 0). Off, the
     /// original opens a typed edit ([re:c8b896]), as
     /// the knob menu's "Edit" does.

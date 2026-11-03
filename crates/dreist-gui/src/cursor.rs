@@ -1,10 +1,10 @@
 //! Mouse cursors ([re:9c94c6], [re:16425e]).
 //!
-//! - `SystemCursor` [re:1e246f]: 0 arrow, 1 busy (the arrow), 2 open hand,
+//! - System cursors [re:1e246f]: 0 arrow, 1 busy (the arrow), 2 open hand,
 //!   3 up/down, 4 left/right, 5 I-beam, 6 resize / 7 cross-hairs / 8 plus
 //!   (all the crosshair), 9 NW-SE resize (HIServices'
 //!   `resizenorthwestsoutheast` cursor), 10 operation not allowed.
-//! - `LoadCursors` [re:bc58a6]: every image in `Resources/Cursors` becomes a
+//! - Loading [re:bc58a6]: every image in `Resources/Cursors` becomes a
 //!   named cursor; [re:f09031] ([re:7681c8] x, y, cursorName)
 //!   gives hot spots, others use (2, 2).
 //!
@@ -40,10 +40,10 @@ impl Cursor {
 /// [re:57899c] for a transmod knob /
 /// slider under the pointer at (`x`, `y`) (control-relative): the class
 /// cursors are TransmodPrimary (ModCursor 0), TransmodSecondary (1) and
-/// TransmodBoth (2) (`Editor::open` [re:468d3b]). Not modulated (no source
+/// TransmodBoth (2) (editor open [re:468d3b]). Not modulated (no source
 /// selected) the drag mode is 3 → Primary. Modulated: knob inside its
-/// centre circle (square knobs only, `OnMouseMove` [re:db47c7]) / slider over
-/// its main track (`GetDragMode` [re:654080]: x < w − round(w·realModDim))
+/// centre circle (square knobs only, [re:db47c7]) / slider over
+/// its main track (drag mode [re:654080]: x < w − round(w·realModDim))
 /// → alt ? 1 (Primary) : 3 (Both); elsewhere 2 (Secondary).
 pub fn transmod(c: &crate::ctrl::Ctrl, x: f32, y: f32, alt: bool) -> Option<Cursor> {
     let modulated = c.attr("editingDepth") == Some("true");

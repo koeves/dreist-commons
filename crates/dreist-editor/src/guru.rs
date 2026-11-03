@@ -72,7 +72,7 @@ fn octave_norm(o: f64) -> f32 {
     ((o + 4.0) / 8.0) as f32
 }
 
-/// [re:f50fdf] → a `StepPattern` node (`ConvertToStepPattern` [re:78d175]).
+/// [re:f50fdf] → a `StepPattern` node ([re:78d175]).
 pub fn convert_pattern(c: Option<&Node>, slot: usize) -> Node {
     let mut sp = Node::new("StepPattern", Some(&format!("StepPattern{slot}")));
     let pages = int(c, "Pages", 1);
@@ -153,7 +153,7 @@ fn convert_step(cs: &Node, at: usize) -> Node {
     s
 }
 
-/// [re:7dc2a1] → layer node attributes (`ConvertToLayer` [re:fa1c16]). `cut_by`
+/// [re:7dc2a1] → layer node attributes ([re:fa1c16]). `cut_by`
 /// is the pad's Guru `CutBy`; `guru` the imported file (its folder holds
 /// the samples).
 fn convert_layer(cl: &Node, layer: &mut Node, cut_by: i64, guru: &Path) {
@@ -232,7 +232,7 @@ fn convert_layer(cl: &Node, layer: &mut Node, cut_by: i64, guru: &Path) {
     }
 }
 
-/// [re:b5da8f] → pad node (`ConvertToPad` [re:34b283]).
+/// [re:b5da8f] → pad node ([re:34b283]).
 fn convert_pad(cp: Option<&Node>, pad: &mut Node, guru: &Path) {
     pad.set("Gain", level(f(cp, "Level", 0.7937)));
     pad.set("Mute", if f(cp, "Mute", 0.0) != 0.0 { "true" } else { "false" });
@@ -269,7 +269,7 @@ fn convert_pad(cp: Option<&Node>, pad: &mut Node, guru: &Path) {
     }
 }
 
-/// [re:976fb1] → engine node (`ConvertToEngine` [re:26a8d5]); patterns only for
+/// [re:976fb1] → engine node ([re:26a8d5]); patterns only for
 /// presets.
 fn convert_engine(ce: Option<&Node>, eng: &mut Node, guru: &Path, with_patterns: bool) {
     eng.set("TempoNumerator", f(ce, "Numerator", 1.0) as i64);
@@ -304,7 +304,7 @@ fn convert_engine(ce: Option<&Node>, eng: &mut Node, guru: &Path, with_patterns:
 }
 
 /// [re:190791] (Steps 1..128, Name "Guru ST", `Step%d` `Mov0`) → a swing
-/// template (`ConvertToSwingTemplate` [re:fd40bc]).
+/// template ([re:fd40bc]).
 fn convert_groove(g: Option<&Node>) -> Node {
     let steps = int(g, "Steps", 1).clamp(1, 128);
     let mut n = Node::new("SwingTemplate", Some("SwingTemplate"));
@@ -322,7 +322,7 @@ fn convert_groove(g: Option<&Node>) -> Node {
     n
 }
 
-/// `DoLoadGuruPatternOnPath`: the file's `Pattern0` into slot `slot`
+/// Guru pattern: the file's `Pattern0` into slot `slot`
 /// (locked patterns stay).
 pub fn import_pattern(doc: &mut Node, e: usize, slot: usize, path: &Path) -> Result<(), String> {
     let root = load_root(path)?;
@@ -335,7 +335,7 @@ pub fn import_pattern(doc: &mut Node, e: usize, slot: usize, path: &Path) -> Res
     Ok(())
 }
 
-/// `DoLoadGuruPatternBankOnPath`: `Pattern0`..`Pattern23` (missing ones
+/// Guru pattern bank: `Pattern0`..`Pattern23` (missing ones
 /// skipped, locked slots kept).
 pub fn import_bank(doc: &mut Node, e: usize, path: &Path) -> Result<(), String> {
     let root = load_root(path)?;
@@ -350,7 +350,7 @@ pub fn import_bank(doc: &mut Node, e: usize, path: &Path) -> Result<(), String> 
     Ok(())
 }
 
-/// `DoLoadGuruKitOnPath`: the current engine with its pads 0..15 converted
+/// Guru kit: the current engine with its pads 0..15 converted
 /// from the file's `Engine` (locked pads and layers keep the old ones),
 /// kit name = file stem.
 pub fn import_kit(doc: &mut Node, e: usize, path: &Path) -> Result<(), String> {
@@ -380,10 +380,10 @@ pub fn import_kit(doc: &mut Node, e: usize, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// `DoLoadGuruPresetOnPath` $_19: a new document — tempo `BPM` (120),
+/// Guru preset: a new document — tempo `BPM` (120),
 /// master tune `MstrPtc` (semitones), master level cbrt(`MstrLvl`) (0.5),
 /// engines `Engine1`..`Engine8` with their patterns. The scenes end up
-/// empty: `GetScenesFromGuruPreset` resets each scene it restores.
+/// empty: the scene import resets each scene it restores.
 pub fn import_preset(path: &Path) -> Result<Node, String> {
     let root = load_root(path)?;
     let mut doc = crate::project::new_document();
@@ -402,8 +402,8 @@ pub fn import_preset(path: &Path) -> Result<Node, String> {
     Ok(doc)
 }
 
-/// Guru 1 swing template text (`ConvertGuru1SwingTemplateToGridSwingTemplate`
-/// [re:5070ca]): a "VERSION" line is required; "MAX=" gives the step count
+/// Guru 1 swing template text
+/// ([re:5070ca]): a "VERSION" line is required; "MAX=" gives the step count
 /// (default 32); each "STEP=" line's value is the 6 characters from
 /// column 9 (at most 128 steps). The template is named after the file.
 pub fn convert_swing_text(path: &Path) -> Result<Node, String> {

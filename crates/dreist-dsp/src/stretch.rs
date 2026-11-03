@@ -1,6 +1,6 @@
 //! Timestretch for `Timestretch` layers. The original drives DIRAC
-//! ([re:e6eaa3], `UpdateTimestretchParameters`
-//! [re:e9b827], source callback `DiracProc` [re:5dc8dd]); the port substitutes
+//! ([re:e6eaa3], timestretch parameter update
+//! [re:e9b827], source callback [re:5dc8dd]); the port substitutes
 //! Signalsmith Stretch (MIT), so output differs from the original by design.
 //! See the dreist-re voice notes ("Timestretch").
 
@@ -23,7 +23,7 @@ pub struct Stretcher {
 }
 
 impl Stretcher {
-    /// Mode 0 `Default`, 1 `Fast` (`LayerTimestretchMode`).
+    /// Mode 0 `Default`, 1 `Fast` (the layer's timestretch mode).
     pub fn new(sample_rate: f32, fast: bool) -> Stretcher {
         let sr = sample_rate.max(1.0) as u32;
         let s = if fast { Stretch::preset_cheaper(2, sr) } else { Stretch::preset_default(2, sr) };

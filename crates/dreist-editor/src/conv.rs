@@ -1,5 +1,5 @@
 //! Value texts of [re:0c929e] (knob tooltips) and the generic
-//! `ToolTip*Provider`s.
+//! tooltip providers.
 //!
 //! [re:48679f]: the name (or
 //! the description function's text), ": " unless it already has a ':',
@@ -34,38 +34,38 @@ fn signed_digits(v: i64, n: usize) -> String {
 /// A value converter: its value text and suffix.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Conv {
-    /// `PercentConversion` [re:ae320e]: `%.3d` of ⌊100v⌋, "%".
+    /// Percent [re:ae320e]: `%.3d` of ⌊100v⌋, "%".
     Percent,
-    /// `DepthConversion` [re:9d4b8d]: `%+03d` of ⌊200v − 100⌋, "%".
+    /// Depth [re:9d4b8d]: `%+03d` of ⌊200v − 100⌋, "%".
     Depth,
-    /// `OnOffConversion` [re:7c2c57].
+    /// On / off [re:7c2c57].
     OnOff,
-    /// `PanConversion` [re:843664]: L / R / C at the ends and centre, else
+    /// Pan [re:843664]: L / R / C at the ends and centre, else
     /// `%+03d` of ⌊200v − 100⌋.
     Pan,
-    /// `DecibelsConversion` [re:81a04e]: 20·log10(2v³) ≤ 6, `%0.2f`, "-∞"
+    /// Decibels [re:81a04e]: 20·log10(2v³) ≤ 6, `%0.2f`, "-∞"
     /// below −100, "dB".
     Decibels,
-    /// `SemitonesConversion` [re:33e2e0]: `%+d` semitones.
+    /// Semitones [re:33e2e0]: `%+d` semitones.
     Semitones,
-    /// Layer octave ([re:40a771] $_1).
+    /// Layer octave ([re:40a771]).
     Octaves,
-    /// Layer fine tune ($_3): `%+.3d` cents.
+    /// Layer fine tune: `%+.3d` cents.
     Cents,
-    /// Layer pre-delay ($_5): note values, or `%+.3d` msec.
+    /// Layer pre-delay: note values, or `%+.3d` msec.
     PreDelay { msec: bool },
-    /// Layer cutoff ($_8): Hz / KHz.
+    /// Layer cutoff: Hz / KHz.
     Cutoff,
-    /// Envelope stage seconds: v² · max ($_11..$_17).
+    /// Envelope stage seconds: v² · max.
     Seconds(f32),
-    /// Time stretch ($_10).
+    /// Time stretch.
     Stretch,
-    /// `DegreesConversion` [re:663133]: `%03d` of ⌊360v⌋, "°".
+    /// Degrees [re:663133]: `%03d` of ⌊360v⌋, "°".
     Degrees,
     /// AD envelope stages ([re:aa1c09]
-    /// $_1 [re:b0d075]): `%0.2f` of 5.5v, "secs".
+    /// [re:b0d075]): `%0.2f` of 5.5v, "secs".
     AdSecs,
-    /// Sequencer step count ($_3 [re:d967c0]): `%d` of ⌊15v + 1⌋.
+    /// Sequencer step count ([re:d967c0]): `%d` of ⌊15v + 1⌋.
     Steps,
 }
 
@@ -131,12 +131,12 @@ impl Conv {
         }
     }
 
-    /// `GetString(v, false)`: value, space, suffix.
+    /// Value, space, suffix.
     pub fn text(self, v: f32) -> String {
         format!("{} {}", self.value(v), self.suffix(v))
     }
 
-    /// `GetString(v, true)` under `name`.
+    /// The value text under `name`.
     pub fn named(self, name: &str, v: f32) -> String {
         let mut s = name.to_string();
         if !s.is_empty() && !s.contains(':') {

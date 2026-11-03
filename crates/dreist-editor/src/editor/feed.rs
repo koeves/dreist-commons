@@ -6,7 +6,7 @@ use crate::*;
 
 impl Editor {
     /// One meter tick from the engine's peak levels (the caller clears
-    /// them afterwards, as `ClearAllMeters`).
+    /// them afterwards, as the original clears all meters).
     pub fn update_meters(&mut self, levels: &dreist_engine::Meters) {
         // Only the changed meters are repainted.
         for r in meters::update(&mut self.app.root, &self.model, levels) {
@@ -120,7 +120,7 @@ impl Editor {
     /// mode (Slice opens the slicer).
     pub fn sampler_take(&mut self, left: &[f32], right: &[f32], sr: f32) -> Option<sampler::TakeAction> {
         let mut out = Vec::new();
-        // `StopTake` [re:e602d2]: the display keeps the finished take.
+        // Take stop [re:e602d2]: the display keeps the finished take.
         let sel = (self.model.engine, self.model.pad[self.model.engine], self.model.layer[self.model.engine]);
         let buckets =
             left.chunks(model::LIVE_BUCKET).enumerate().map(|(i, l)| model::bucket(l, right.get(i * model::LIVE_BUCKET..(i * model::LIVE_BUCKET + l.len()).min(right.len())).unwrap_or(&[]))).collect();
@@ -140,8 +140,8 @@ impl Editor {
         r
     }
 
-    /// Live take display from the audio thread (`StartTake` [re:94c103] /
-    /// `RecordDataToCurrentTake` [re:eb0601]): `reset` starts a new take.
+    /// Live take display from the audio thread ([re:94c103] /
+    /// [re:eb0601]): `reset` starts a new take.
     pub fn sampler_live(&mut self, reset: bool, buckets: &[(f32, f32)]) {
         if !reset && buckets.is_empty() {
             return;
@@ -225,7 +225,7 @@ impl Editor {
     }
 
     /// Messages from editor-only bindings (`EditorOnly`; the panels'
-    /// `HandleMessage`, see `editbind`).
+    /// message handlers, see `editbind`).
     /// Bound parameters the engine moved (MIDI CC / host automation): into
     /// the document and onto the controls (the original's editor reads the
     /// shared model), not undo steps.

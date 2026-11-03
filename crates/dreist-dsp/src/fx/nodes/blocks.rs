@@ -113,7 +113,7 @@ impl StereoIir {
         self.inv_sr = 1.0 / sr;
     }
 
-    /// `SetMode` (also marks the coefficients stale).
+    /// Mode setup (also marks the coefficients stale).
     pub fn set_mode(&mut self, mode: u32) {
         self.mode = mode;
         self.dirty = true;
@@ -124,7 +124,7 @@ impl StereoIir {
         self.q_tgt = q;
     }
 
-    /// `Initialize(f01, q)`: 0..1 maps to 20 Hz..20 kHz logarithmically.
+    /// Setup with `(f01, q)`: 0..1 maps to 20 Hz..20 kHz logarithmically.
     pub fn set_01(&mut self, f: f32, q: f32) {
         self.f_tgt = (f * 9.965784 + 3.321928 + 1.0).exp2();
         self.q_tgt = q;
@@ -272,7 +272,7 @@ impl SideChain {
     }
 }
 
-/// [re:76aea3] ([re:142a06]..[re:35ca5e]), `ProcessParabolic` mode: peak
+/// [re:76aea3] ([re:142a06]..[re:35ca5e]), parabolic mode: peak
 /// hold with an accelerating release, then a one-pole attack smoother.
 #[derive(Debug, Clone, Copy)]
 pub struct EnvFollower {
@@ -300,7 +300,7 @@ impl EnvFollower {
         self.accel = (sr / 88200.0) * 1e-5 + 1.0;
     }
 
-    /// `Initialize(attack, release, level, fast)`: times are `2^(12x − 9)` s.
+    /// Setup with `(attack, release, level, fast)`: times are `2^(12x − 9)` s.
     pub fn init(&mut self, attack: f32, release: f32, level: f32, fast: bool) {
         self.level = level;
         let a = (attack * 12.0 - 8.0 - 1.0).exp2();
@@ -425,7 +425,7 @@ impl Default for Compander {
 }
 
 thread_local! {
-    /// `Randomiser::ms_seed` / [re:5d62ba]: process-wide in the original;
+    /// The shared seed counter [re:5d62ba]: process-wide in the original;
     /// per thread here and reset with the engine ([`reset_seeds`]).
     static MS_SEED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static VRAND_SEED: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -500,7 +500,7 @@ impl Rng {
         self.pink_core() * 0.2
     }
 
-    /// `GetPink`: Voss–McCartney over five rows with a ±2 running-sum limit.
+    /// Pink noise: Voss–McCartney over five rows with a ±2 running-sum limit.
     pub fn pink(&mut self, lo: f32, hi: f32) -> f32 {
         (hi - lo) * (self.pink_core() * 0.2 + 0.5) + lo
     }
@@ -581,7 +581,7 @@ impl Default for Gain {
 }
 
 impl Gain {
-    /// `Initialize(g)` with [re:e1649c] (2g³).
+    /// Setup with `g` and [re:e1649c] (2g³).
     pub fn init(&mut self, g: f32) {
         let c = g * g * g;
         self.target = c + c;
@@ -634,7 +634,7 @@ impl DrumDynamics {
         self.env[3].init(0.25, 0.45, 1.0, false);
     }
 
-    /// `Initialize(attack, sustain, release)` (each 0..1, 0.5 = neutral).
+    /// Setup with `(attack, sustain, release)` (each 0..1, 0.5 = neutral).
     pub fn init(&mut self, attack: f32, sustain: f32, release: f32) {
         self.transient = attack + attack + -1.0;
         self.sustain = sustain + sustain + -1.0;
@@ -814,7 +814,7 @@ impl DualPole {
         self.f[3].set_mode(b);
     }
 
-    /// `Initialize(f01, q, width, steep)`.
+    /// Setup with `(f01, q, width, steep)`.
     pub fn init(&mut self, f: f32, q: f32, width: f32, steep: bool) {
         let q = if steep { 0.8 } else { 1.0 } * q;
         if !self.dual {

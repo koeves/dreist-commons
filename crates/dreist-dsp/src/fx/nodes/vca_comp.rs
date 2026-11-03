@@ -1,5 +1,5 @@
-//! [re:d1f784] (VCA Compressor, kind 10; `Voice::Reset`
-//! [re:610c55], `Voice::ProcessBuffer` [re:a3c763]): peak detector floored at the
+//! [re:d1f784] (VCA Compressor, kind 10; reset
+//! [re:610c55], processing [re:a3c763]): peak detector floored at the
 //! threshold, one-pole attack/release (`exp(−ln2/(t·sr))`), static curve
 //! `gr = dB − ((dB − thr)/ratio + thr)` with ratio = Ratio port + 1 (the
 //! port holds `log2` of the displayed ratio, so "4" gives 3:1), makeup and

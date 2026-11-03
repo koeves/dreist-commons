@@ -1,5 +1,5 @@
-//! [re:c23a25] (Delay; `InitializePorts` [re:ae61ec], `SetMaxDelay`
-//! [re:71bddc], `Reset` [re:0322d7], `PrepareStream` [re:b8c3e6], `ProcessBuffer`
+//! [re:c23a25] (Delay; port setup [re:ae61ec], buffer sizing
+//! [re:71bddc], reset [re:0322d7], stream setup [re:b8c3e6], processing
 //! [re:0fa774]): tempo-syncable stereo (or summed-mono) feedback delay. The
 //! delay time glides tape-style toward its target, the feedback path is
 //! soft-saturated and band-limited (one-pole low-pass then high-pass), and
@@ -21,20 +21,20 @@ pub struct Delay {
     buf: [Vec<f32>; 2],
     mask: u32,
     idx: u32,
-    /// 0x138 current delay (samples), 0x13c target, 0x140 glide rate.
+    /// Current delay (samples), target, glide rate.
     cur: f32,
     target: f32,
     rate: f32,
-    /// 0x144/0x148 low-pass, 0x14c/0x150 high-pass states.
+    /// Low-pass and high-pass states.
     lp: [f32; 2],
     hs: [f32; 2],
-    /// 0x12c/0x130 swing tap multipliers, 0x134 their smoothing.
+    /// Swing tap multipliers and their smoothing.
     swing: [f32; 2],
-    /// 0x154 wet, 0x158 dry, 0x15c feedback ramps.
+    /// Wet, dry and feedback ramps.
     wet: f32,
     dry: f32,
     fb: f32,
-    /// 0x168: previous block was summed-mono (copy L → R when leaving it).
+    /// Previous block was summed-mono (copy L → R when leaving it).
     was_mono: u32,
     alt: f32,
 }
@@ -63,7 +63,7 @@ impl Delay {
         }
     }
 
-    /// `SetMaxDelay`: power-of-two buffers covering `MAX_DELAY` samples
+    /// Buffer sizing: power-of-two buffers covering `MAX_DELAY` samples
     /// (allocated on first use).
     fn alloc(&mut self) {
         if !self.buf[0].is_empty() {
@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(peak.0 - 40 * n, 12000, "{peak:?}");
     }
 
-    /// `GetLengthOfTail`: echo time × (1 + repeats until the feedback falls
+    /// Tail length: echo time × (1 + repeats until the feedback falls
     /// to the voice noise floor), so a pad's voice outlives its echoes.
     #[test]
     fn tail_covers_the_echoes() {

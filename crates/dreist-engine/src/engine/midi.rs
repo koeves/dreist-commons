@@ -1,7 +1,7 @@
 //! MIDI input and live pad notes for [re:a71fe5] (the dreist-re live-input notes):
-//! `processEvents` → `ProcessMIDIEvent` at the block start, the
+//! `processEvents` → MIDI event handling at the block start, the
 //! [re:d662aa] queue dispatched at sub-block starts
-//! (`HandleMIDIEventImmediate`), the note messages 0x3b–0x3e, `DoStartNote`
+//! (immediate handling), the note messages 0x3b–0x3e, note start
 //! with note repeat, and [re:8ea21e].
 
 use super::{Dreist, LAYERS, solo_pass};
@@ -56,7 +56,7 @@ impl Dreist {
         }
     }
 
-    /// Note repeat controls (messages 0x1f / 0x20 / `SetNoteRepeatSyncEnabled`).
+    /// Note repeat controls (messages 0x1f / 0x20 / sync enable).
     pub fn set_note_repeat(&mut self, e: usize, enabled: bool, base: u32, synced: bool) {
         if let Some(eng) = self.engines.get_mut(e) {
             eng.state.note_repeat = enabled;
@@ -81,7 +81,7 @@ impl Dreist {
         self.msg_pad_off(e, pad, delta as f64, None);
     }
 
-    /// `ProcessVSTMIDIEvents(0, n)` before the sub-block loop.
+    /// Host MIDI events for frames 0..n, before the sub-block loop.
     pub(super) fn process_midi_in(&mut self, n: usize) {
         // Taken and put back: the queue keeps its capacity.
         let mut events = std::mem::take(&mut self.midi_in);
@@ -142,7 +142,7 @@ impl Dreist {
         (0..self.engines.len() as i32).contains(&e).then_some(e as usize)
     }
 
-    /// `ProcessMIDIEvent` [re:70eb56].
+    /// MIDI event [re:70eb56].
     fn midi_event(&mut self, ev: MidiEvent) {
         let ch = (ev.data[0] & 0x0f) as usize;
         let note = (ev.data[1] & 0x7f) as usize;
@@ -160,7 +160,7 @@ impl Dreist {
         }
     }
 
-    /// `ProcessMIDINoteOn` [re:b7bf6c]; false = not handled here.
+    /// Note-on [re:b7bf6c]; false = not handled here.
     fn midi_note_on(&mut self, ch: usize, note: usize, vel: u32, delta: u32) -> bool {
         let item = self.midi_map.get(ch, note);
         let (item_engine, item_pad, is_pad, is_scene) = match item {
@@ -221,7 +221,7 @@ impl Dreist {
         }
     }
 
-    /// `ProcessMIDINoteOff` [re:61594e].
+    /// Note-off [re:61594e].
     fn midi_note_off(&mut self, ch: usize, note: usize, delta: u32) -> bool {
         let item = self.midi_map.get(ch, note);
         let item_engine = match item {
@@ -249,15 +249,15 @@ impl Dreist {
         }
     }
 
-    /// `HandleMIDIEventImmediate` [re:c14865].
+    /// Immediate MIDI event [re:c14865].
     fn immediate(&mut self, ev: MidiEvent) {
         let ch = (ev.data[0] & 0x0f) as usize;
         let note = (ev.data[1] & 0x7f) as usize;
         match status_kind(ev.data) {
             0x90 => self.note_on_immediate(ch, note, ev.data[3] as i8 as i32),
             0x80 => self.note_off_immediate(ch, note),
-            // ProcessMIDICC [re:9147a8]: BindingMap (MIDI learn itself is an
-            // editor feature), then CC1 → ModWheel source ([re:c19c30]).
+            // MIDI CC [re:9147a8]: BindingMap (MIDI learn itself is an
+            // editor feature), then CC1 → mod wheel source ([re:c19c30]).
             0xb0 => {
                 self.last_cc = (self.last_cc.0.wrapping_add(1), ch as u8, note as u8);
                 let mut msgs = std::mem::take(&mut self.messages);
@@ -269,12 +269,12 @@ impl Dreist {
                     self.host.values[crate::modulation::src::MOD_WHEEL] = ev.data[2] as i8 as f32 * 0.007874016;
                 }
             }
-            // Pitch bend → PitchWheel (+0x48c) = 14-bit/16383.
+            // Pitch bend → pitch wheel = 14-bit/16383.
             0xe0 => {
                 let v = ((ev.data[2] & 0x7f) as u32) << 7 | (ev.data[1] & 0x7f) as u32;
                 self.host.values[crate::modulation::src::PITCH_WHEEL] = v as f32 * 6.103888e-5;
             }
-            // Channel pressure → ChannelPress (+0x490) = v/127.
+            // Channel pressure → channel pressure = v/127.
             0xd0 => {
                 self.host.values[crate::modulation::src::CHANNEL_PRESS] = ev.data[1] as i8 as f32 * 0.007874016;
             }
@@ -282,7 +282,7 @@ impl Dreist {
         }
     }
 
-    /// `ProcessMIDINoteOnImmediate` [re:54d829] (`extra` = data byte 3).
+    /// Immediate note-on [re:54d829] (`extra` = data byte 3).
     fn note_on_immediate(&mut self, ch: usize, note: usize, extra: i32) {
         let item = self.midi_map.get(ch, note);
         let engine = match item {
@@ -309,7 +309,7 @@ impl Dreist {
         }
     }
 
-    /// `ProcessMIDINoteOffImmediate` [re:b9bf40].
+    /// Immediate note-off [re:b9bf40].
     fn note_off_immediate(&mut self, ch: usize, note: usize) {
         let item = self.midi_map.get(ch, note);
         let engine = match item {
@@ -352,14 +352,14 @@ impl Dreist {
         }
     }
 
-    /// Messages 0x3b/0x3c (`HandleTransportMessage`): `semitone` is the 0x3c
+    /// Messages 0x3b/0x3c (transport messages): `semitone` is the 0x3c
     /// value (chromatic MIDI notes); `play` is 0x3b's third value.
     fn msg_pad_on(&mut self, e: usize, pad: usize, vel: u32, delta: f64, semitone: Option<f64>, play: bool) {
         let Some(eng) = self.engines.get(e) else { return };
         let mode = eng.pad_mode;
         let mut pad = pad;
         if mode == PadMode::X0x {
-            // `HandleTransportMessage` [re:33e7fc]: x0x mode edits the current
+            // Transport message [re:33e7fc]: x0x mode edits the current
             // pad's track at step = pad (within the pattern's steps), cycling
             // off → on (velocity 0.5) → accent (1.0) → off; an on step below
             // 0.5 becomes 0.5. Posted as 0xd2 [vel, 1.0, false] / 0xd3. The
@@ -411,7 +411,7 @@ impl Dreist {
         self.automation.retain(|ev| !(matches!(status_kind(ev.data), 0x80 | 0x90) && (ev.data[0] & 0x0f) as usize == e && (ev.data[1] & 0x7f) as usize == note));
     }
 
-    /// `DoStartNote` [re:0d62e7].
+    /// Note start [re:0d62e7].
     fn do_start_note(&mut self, e: usize, pad: usize, vel: u32, delay: f64, semitone: f64, immediate: bool) {
         let (sr, bpm, ppq) = (self.sr as f64, self.bpm, self.ppq);
         let sub = self.sub_start as f64;
@@ -455,7 +455,7 @@ impl Dreist {
         }
     }
 
-    /// `DoStartNote` [re:3c8245]: selection follows a live note while the
+    /// Note start [re:3c8245]: selection follows a live note while the
     /// sampler is idle or recording for the selected engine: the engine
     /// becomes the selected one (`EngineSelectionFollowsMIDI`), then the
     /// pad the selected engine's current one (`PadSelectionFollowsMIDI`;
@@ -476,11 +476,11 @@ impl Dreist {
         }
     }
 
-    /// `StartVoiceDelayed` [re:4e8b59] + [re:927da0]
+    /// Delayed voice start [re:4e8b59] + [re:927da0]
     /// (live): no mute/solo check, the given velocity, held until note-off.
     /// While playing with pattern power on the step is the recording step
-    /// (`GetIndexOfRecordingStep`, kept with the current limited step by
-    /// `ReadAndPlayStep`) and its Repeats lane gives the repeat count;
+    /// (kept with the current limited step by
+    /// step playback) and its Repeats lane gives the repeat count;
     /// otherwise step −1 and the default step's repeats.
     fn start_voice_live(&mut self, e: usize, pad: usize, vel: u32, delay: f64, semitone: f64) {
         if pad >= TRACKS {
@@ -524,7 +524,7 @@ impl Dreist {
         }
     }
 
-    /// Recording phase (`StartVoiceDelayed`): `x = delay·res·mult/spb + ppq −
+    /// Recording phase (delayed voice start): `x = delay·res·mult/spb + ppq −
     /// trigger`, wrapped into the pattern, `d` = offset inside the step (QN),
     /// phase `2d`, minus 0.5 when `floor(200d) > 25` (kept as in the original).
     fn record_phase(&self, e: usize, delay: f64) -> Option<f64> {

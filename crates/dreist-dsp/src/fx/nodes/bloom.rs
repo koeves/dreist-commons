@@ -1,6 +1,6 @@
-//! [re:a42e25] (Bloom; `InitializePorts` [re:59ad5a], `Voice::PrepareStream`
-//! [re:d41488], `UpdateDSPParameters` [re:c67536], `ProcessBuffer` [re:c44d47],
-//! `ProcessFeedbackModelling` [re:a88d43]): a modelled stereo delay sharing one
+//! [re:a42e25] (Bloom; port setup [re:59ad5a], stream setup
+//! [re:d41488], parameter update [re:c67536], processing [re:c44d47],
+//! feedback modelling [re:a88d43]): a modelled stereo delay sharing one
 //! `DelayBuffer` between three front ends — Digital (bit/sample-rate
 //! reduction), BBD (compander + clock decimation) and Tape (saturation,
 //! shelving, wow and hiss). Each model also runs a buffer-less copy of
@@ -26,24 +26,23 @@ struct DelayBuffer {
     sr: f32,
     buf: [Vec<f32>; 2],
     mask: u32,
-    /// 0x268/0x26c write and 0x270/0x274 read heads.
+    /// Write and read heads.
     w: [u32; 2],
     r: [u32; 2],
-    /// 0x2a0/0x2a8 target and 0x2b0/0x2b8 current delay (samples).
+    /// Target and current delay (samples).
     tgt: [f64; 2],
     cur: [f64; 2],
-    /// 0x2c0/0x2c4 glide speeds (1/samples) when lengthening/shortening.
+    /// Glide speeds (1/samples) when lengthening/shortening.
     k_up: f32,
     k_down: f32,
-    /// 0x27c/0x280 backwards countdowns, 0x284/0x288 read gains, 0x28c/0x28d
-    /// gain fading in.
+    /// Backwards countdowns, read gains, gain fading in.
     count: [i32; 2],
     gain: [f32; 2],
     ramp: [bool; 2],
-    /// 0x290/0x294 frozen loop starts, 0x298/0x29c ends.
+    /// Frozen loop starts and ends.
     frz_start: [i32; 2],
     frz_end: [i32; 2],
-    /// 0x278 frozen, 0x279 ping-pong, 0x27a backwards.
+    /// Frozen, ping-pong, backwards.
     frozen: bool,
     ping_pong: bool,
     backwards: bool,
@@ -113,7 +112,7 @@ impl DelayBuffer {
         self.clear();
     }
 
-    /// `ClearDelay` [re:5136c2] (a frozen buffer is kept).
+    /// Delay clear [re:5136c2] (a frozen buffer is kept).
     fn clear(&mut self) {
         if self.frozen {
             return;
@@ -138,7 +137,7 @@ impl DelayBuffer {
         self.iir.set_hz(hz, 0.0);
     }
 
-    /// `Initialize` [re:63ec3d].
+    /// Setup [re:63ec3d].
     #[allow(clippy::too_many_arguments)]
     fn init(&mut self, l_ms: f32, r_ms: f32, freeze: bool, reverse: bool, fb: f32, phase: bool, xfb: f32, ping_pong: bool, width: f32) {
         let size = self.size();
@@ -189,7 +188,7 @@ impl DelayBuffer {
         self.gain[c]
     }
 
-    /// `PullFromBuffer` [re:5fbb9a].
+    /// Buffer read [re:5fbb9a].
     fn pull(&mut self, n: usize) {
         let mut rate = [0.0f64; 2];
         for c in 0..2 {
@@ -401,7 +400,7 @@ fn tone_to_bits_and_rate(tone: f32, sr: f32) -> (f32, f32) {
     (b, srd)
 }
 
-/// [re:b56fd2] clock decimation (`DecimateInputAudio` [re:0d7e95]).
+/// [re:b56fd2] clock decimation (input decimation [re:0d7e95]).
 #[derive(Default)]
 struct Decimator {
     hold: [u32; 2],
@@ -482,7 +481,7 @@ impl Tape {
         self.wow_rate = Rng::new().white(0.0625, 2.0) * (1.0 / sr);
     }
 
-    /// `Initialize(1 − tone, 1 − slew)`; returns the buffer modelling values.
+    /// Setup with `(1 − tone, 1 − slew)`; returns the buffer modelling values.
     fn init(&mut self, a: f32, b: f32) -> (u32, u32, f32) {
         let a3 = a * a * a;
         self.hiss.target = a3 * 0.1;
@@ -591,7 +590,7 @@ impl Bloom {
         (((v.abs() + 2.0) - (v - 2.0).abs()) * 0.5).round() as u32
     }
 
-    /// `UpdateDSPParameters`.
+    /// Parameter update.
     fn update(&mut self, ctx: &Ctx, n: usize) {
         let p = |i: usize| self.ports[i].value;
         let model = self.model();

@@ -1,12 +1,12 @@
-//! [re:691de1] (Ring Mod, kind 24; `Voice::Reset` [re:4bb22f],
-//! `Voice::ProcessBuffer` [re:66c1f6]): soft-clipped input times a carrier at
+//! [re:691de1] (Ring Mod, kind 24; reset [re:4bb22f],
+//! processing [re:66c1f6]): soft-clipped input times a carrier at
 //! `2^Pitch · tune` Hz (max Nyquist/… clamp 0.5 cycles/sample): sine
 //! ([re:19db55]), triangle, saw, pulse, parabola, white or pink
 //! sample-and-hold, wet/dry.
 //!
 //! Triangle and saw reuse the distortion core's naive [re:2e09a0] ticks
 //! (the 3-argument variants); pulse and parabola follow the 2-argument
-//! `tickSqrPwm` [re:d08eff] / `tickPrb` [re:fae61a].
+//! pulse [re:d08eff] / parabola [re:fae61a] ticks.
 
 use super::blocks::Rng;
 use super::distortion::Osc;

@@ -1,10 +1,10 @@
-//! [re:c7fe15] (Classic Guru Filter, kind 37; `ProcessBuffer`
-//! [re:c686b0]) around [re:9be7ff] (`Set` [re:c65d82], `ProcessStereo`
+//! [re:c7fe15] (Classic Guru Filter, kind 37; processing
+//! [re:c686b0]) around [re:9be7ff] (parameter set [re:c65d82], stereo processing
 //! [re:541ab7]): a double-precision 12 dB state-variable filter run twice per
 //! sample, its band-pass soft-limited (`x − k₃x³`, clamped at the turning
 //! point), output a Mode-morphed mix (low → band → high) of both passes.
 //!
-//! `Set` compares against cached parameters that it never stores, so it
+//! The parameter set compares against cached parameters that it never stores, so it
 //! recomputes (and dithers the states by ±1e-20) on every block unless all
 //! three parameters are exactly zero.
 

@@ -1,7 +1,7 @@
 //! Pattern Convertor ([re:c65c97], pattern key menu › Convert
 //! timing): NumStepsBox (1..1024, default 16), RezCombo (resolutions,
-//! default 1/16), ApplyToAll, Cancel / Apply (`DoPatternConversion`
-//! [re:cf7e00] → `DoConvertPattern` [re:4ec8dd] per pattern; port:
+//! default 1/16), ApplyToAll, Cancel / Apply ([re:cf7e00]
+//! → [re:4ec8dd] per pattern; port:
 //! `PatternData::convert_timing`, sent as step count / length / clear /
 //! step messages).
 
@@ -48,7 +48,7 @@ impl Convertor {
     }
 
     pub fn sync(&mut self, app: &mut App) {
-        // [re:6abcdc] $_16 0xd5c0: slides in
+        // [re:6abcdc]: slides in
         // from the top (500 ms Exponential); closing slides out.
         let shown = self.overlay.clone().map(|p| self.slide.sync(app, &p, self.open)).unwrap_or(false);
         let (open, steps, res, all) = (shown, self.steps, self.resolution, self.all);

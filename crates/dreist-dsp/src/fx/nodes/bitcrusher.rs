@@ -1,5 +1,5 @@
-//! [re:93069c] (Bit Crusher, kind 23; `Voice::Reset` [re:66d1b7],
-//! `Voice::ProcessBuffer` [re:40b373]): band-pass (LP then HP one-poles),
+//! [re:93069c] (Bit Crusher, kind 23; reset [re:66d1b7],
+//! processing [re:40b373]): band-pass (LP then HP one-poles),
 //! driven soft clip, sample-and-hold at `Freq` with `2^Bits` levels,
 //! tone low-pass, dirty/clean mix, 2 Hz DC blocker and wet/dry.
 
@@ -15,7 +15,7 @@ pub struct BitCrusher {
     hp: [f32; 2],
     dc: [f32; 2],
     tone: [f32; 2],
-    /// Ramped drive, dirty, clean, mix (+0x154..+0x160).
+    /// Ramped drive, dirty, clean, mix.
     drive: f32,
     dirty: f32,
     clean: f32,

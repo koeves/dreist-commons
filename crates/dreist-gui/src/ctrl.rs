@@ -1,5 +1,5 @@
-//! Control tree loaded from `.skin` files (`Ctrl::SerializeFromData`
-//! [re:3cfb1f]) and edge anchoring (`Ctrl::AutoResizeChildren` [re:00273a]).
+//! Control tree loaded from `.skin` files
+//! ([re:3cfb1f]) and edge anchoring ([re:00273a]).
 
 use std::collections::HashMap;
 
@@ -37,7 +37,7 @@ impl Rect {
     }
 }
 
-/// `Ctrl::AxisResizeMode` (`CreateAxisResizeModeMap` [re:f8e582]); the skins
+/// Axis resize mode ([re:f8e582]); the skins
 /// use the short forms FNear/FFar/LNear/LFar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Anchor {
@@ -74,7 +74,7 @@ pub fn anchors_fill() -> [(Anchor, f32); 4] {
     [(Anchor::FixedNear, 0.0); 4]
 }
 
-/// Rounding with `DAT_017cf530` = {0.5, −0.5}: half away from zero.
+/// Rounding with a {0.5, −0.5} table: half away from zero.
 fn rnd(v: f32) -> i32 {
     (v + if v < 0.0 { -0.5 } else { 0.5 }) as i32
 }
@@ -325,7 +325,7 @@ impl Ctrl {
         self.children.iter_mut().find_map(|c| c.find_overload_mut(class))
     }
 
-    /// `Ctrl::SetRect` then `AutoResizeChildren(old, new)`.
+    /// Set the rect, then auto-resize the children (old, new).
     pub fn set_rect(&mut self, r: Rect) {
         let old = self.rect;
         self.rect = r;
@@ -356,7 +356,7 @@ impl Ctrl {
         }
     }
 
-    /// `Ctrl::AutoResizeChildren` [re:00273a].
+    /// Edge anchoring of the children [re:00273a].
     pub fn auto_resize_children(&mut self, old: Rect, new: Rect) {
         if old.w == 0 && old.h == 0 {
             return;
@@ -374,7 +374,7 @@ impl Ctrl {
     }
 }
 
-/// One axis of `AutoResizeChildren`: `near` is left/top, `far` right/bottom;
+/// One axis of the children's auto-resize: `near` is left/top, `far` right/bottom;
 /// `parent_old`/`parent_new` the parent extent before and after.
 fn anchor_axis(pos: i32, size: i32, near: (Anchor, f32), far: (Anchor, f32), parent_old: i32, parent_new: i32) -> (i32, i32) {
     let (nm, nv) = near;

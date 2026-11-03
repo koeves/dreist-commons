@@ -1,5 +1,5 @@
-//! [re:5789e6] (PhaseMod Array, kind 27; `Reset` [re:8108e3],
-//! `ProcessBuffer` [re:3f15df]): up to four sine-like oscillators (folded
+//! [re:5789e6] (PhaseMod Array, kind 27; reset [re:8108e3],
+//! processing [re:3f15df]): up to four sine-like oscillators (folded
 //! triangle through `(x − x³)·2.6`) phase-modulated by the input (left
 //! drives 1 and 3, right 2 and 4), detuned by Spread in one of three
 //! patterns, weighted by Stack (1–4 voices, `1/√stack` with a fractional

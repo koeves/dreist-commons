@@ -1,11 +1,11 @@
-//! Editor-only bindings (`Binding` `EditorOnly`, +0x16): controls whose MIDI
+//! Editor-only bindings (`Binding` `EditorOnly`): controls whose MIDI
 //! / host binding posts a message back to the editor instead of the engine
-//! (`GetBindingForControl` of [re:aca9d3], [re:841010],
+//! ([re:aca9d3], [re:841010],
 //! [re:702088], [re:f3c257], [re:45e9a3]
-//! [re:4dc7b3], [re:c2fdf6], [re:029183], `Editor`
+//! [re:4dc7b3], [re:c2fdf6], [re:029183], the editor
 //! [re:59ad1d], [re:b2db08]; ev_48b124b4…).
 //!
-//! The panels' `HandleMessage` act on them (ev_7a135bd5…: [re:b1e892]
+//! The panels' message handlers act on them (ev_7a135bd5…: [re:b1e892]
 //! [re:0f6c7c], [re:728dc3], [re:13d3b0],
 //! [re:edde0b]):
 //! - set a toggle from the value (≥ 0.5) and notify: Show Splits 0x1c5, All
@@ -18,7 +18,7 @@
 //!   0x1b7–0x1ba, Quantize 0x1bb, Copy to next 0x1bf; undo / redo 0x18d /
 //!   0x18e; scene snapshot to next 0x10e;
 //! - values: pattern length 0x1b2 = ⌊v·1023 + 1⌋, step length 0x1b3 =
-//!   the popup item at v (`SelectItemWithNormalizedFloat`);
+//!   the popup item at v;
 //! - panels: editor tabs 0x146–0x14c, utility tabs 0x14d / 0x14e, mixer
 //!   Mix / Sends / Effects 0x14f–0x151.
 

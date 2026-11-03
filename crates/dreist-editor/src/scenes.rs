@@ -6,8 +6,8 @@
 //!   name-label styles.
 //! - [re:1b7c5f]: the select button shows the scene's MIDI
 //!   key name ([re:8ad0c7], C-2 = scene 0).
-//! - `OnSceneTrigger` [re:3a4349] posts `e_sceneTrigger` 0x10a [scene, on],
-//!   `OnSceneSnapshot` [re:d39e7a] `e_sceneSnapshot` 0x10d, `OnSceneClear`
+//! - Trigger [re:3a4349] posts `e_sceneTrigger` 0x10a [scene, on],
+//!   snapshot [re:d39e7a] `e_sceneSnapshot` 0x10d, clear
 //!   [re:10dbd2] `e_sceneClear` 0x108.
 
 use dreist_engine::binding::id;

@@ -1,5 +1,5 @@
-//! Drawing of the stock [re:4a79c9] controls, following the decompiled `Draw` /
-//! `DrawLayer` methods. Custom the original panels (`overloadClass`) get their
+//! Drawing of the stock [re:4a79c9] controls, following the original's
+//! drawing. The original's custom panels (`overloadClass`) get their
 //! skin children drawn here and their own content from the editor layer.
 
 use crate::colour::{self, Colour};
@@ -54,13 +54,13 @@ impl<'s> Renderer<'s> {
     }
 
     /// Draw `c` (whose rect is relative to the painter's current origin) and
-    /// its children (`Ctrl::DrawChildren` [re:0cca49]: visible children in
+    /// its children ([re:0cca49]: visible children in
     /// order, each translated and clipped to its rect).
     pub fn draw(&self, p: &mut Painter, c: &Ctrl) {
         if !c.visible {
             return;
         }
-        // `Ctrl::SetAlpha` (vfunc 0x1b8): the control's own alpha, on top
+        // The control's own alpha, on top
         // of the disabled alpha.
         let own = c.attr_f32("alpha", 1.0);
         if own <= 0.0 {
@@ -169,7 +169,7 @@ impl<'s> Renderer<'s> {
     }
 
     /// The header logo with the master level ([re:2f6a08]
-    /// [re:4a9597] / `DrawLogo` [re:a75af4] draw a 3 px frame inset 1.5 and the
+    /// [re:4a9597] / [re:a75af4] draw a 3 px frame inset 1.5 and the
     /// product mark in colFill, then again in colAltFill at the master
     /// level's alpha, `overlayAlpha` = min(level·0.75, 1)). The port's mark
     /// is a "D": a stem and a bowl.
@@ -276,7 +276,7 @@ impl<'s> Renderer<'s> {
         }
     }
 
-    /// [re:33ddf4] (ev_db5615b5… `DrawBackground` [re:7fa1f2] / `DrawBar`
+    /// [re:33ddf4] (ev_db5615b5… background [re:7fa1f2] / bar
     /// [re:595f2d]), horizontal and determinate: the default fill (colFill /
     /// colBorder), then a bar round(w × value) wide — inset 2 px (clipped)
     /// when taller than 6 — filled colAltFill and framed 1 px in
@@ -356,7 +356,7 @@ impl<'s> Renderer<'s> {
         self.styles.colour(st, attr, std_col(d))
     }
 
-    /// `Ctrl::DrawDefaultFill` [re:1efccd] with colour attributes.
+    /// The default fill [re:1efccd] with colour attributes.
     pub fn default_fill(&self, p: &mut Painter, c: &Ctrl, fill: &str, border: &str, shadow: bool) {
         let st = self.style(c);
         let f = self.colour_attr(st, fill);
@@ -425,7 +425,7 @@ impl<'s> Renderer<'s> {
         }
         let font = self.styles.font(st);
         let mut colour = self.styles.colour(st, colour_attr, std_col("StandardControlText"));
-        // Runtime fade (`SetColourAttribute` with an alpha copy).
+        // Runtime fade (a colour attribute with an alpha copy).
         if let Some(a) = c.attr("textAlpha").and_then(|v| v.parse::<f32>().ok()) {
             colour = colour.with_alpha(colour.f_alpha() * a.clamp(0.0, 1.0));
         }
@@ -438,7 +438,7 @@ impl<'s> Renderer<'s> {
         RectF::new(0.0, 0.0, c.rect.w as f32, c.rect.h as f32)
     }
 
-    /// [re:b7a6d1] + `DrawText` [re:26c463].
+    /// [re:b7a6d1] + text [re:26c463].
     fn button(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let mut fill = self.colour_attr(st, if c.on { "colAltFill" } else { "colFill" });
@@ -455,8 +455,8 @@ impl<'s> Renderer<'s> {
     }
 
     /// [re:29f888]: text box with the text between the
-    /// h×h search icon (`DrawSearchIcon` [re:a7d6df]: 2 px magnifier and a menu
-    /// triangle in colText) and the clear icon (`DrawClearIcon` [re:369e45],
+    /// h×h search icon ([re:a7d6df]: 2 px magnifier and a menu
+    /// triangle in colText) and the clear icon ([re:369e45],
     /// only with text: a colAltFill disc inset h/5 with a 2 px colFill
     /// cross inset h/6).
     fn search_box(&self, p: &mut Painter, c: &Ctrl) {
@@ -664,7 +664,7 @@ impl<'s> Renderer<'s> {
         }
     }
 
-    /// [re:0c57f8] + `DrawHandle` [re:a65320].
+    /// [re:0c57f8] + handle [re:a65320].
     fn slider(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
@@ -709,7 +709,7 @@ impl<'s> Renderer<'s> {
         let radius = s.float(st, "realCornerRounding", 0.0);
         let corners = s.rounding_options(st);
         p.fill_rounded(b, radius, corners, s.colour(st, "colFill", std_col("StandardControlBackground")));
-        // Header strip (`SetRect`: width × intIconicDim, or the iconic
+        // Header strip (width × intIconicDim, or the iconic
         // dim × height when folded to the left / right); folded, its bottom
         // corners lose their rounding.
         let hr = crate::collapse::header(c);

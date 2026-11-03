@@ -1,6 +1,6 @@
-//! [re:c3ddf6] (ctor [re:af1687], ChangeWaveInfo [re:f2831f], SetParameterVal
-//! [re:887a80], ChangeSizes [re:378aed], ChangeFeedBack [re:39a517],
-//! ChangeHallResponse [re:33b0c4], Process [re:8a43cd]): per-channel predelay
+//! [re:c3ddf6] (construction [re:af1687], rate change [re:f2831f], parameter set
+//! [re:887a80], size change [re:378aed], feedback change [re:39a517],
+//! response change [re:33b0c4], processing [re:8a43cd]): per-channel predelay
 //! combs and diffusers feeding a four-stage serial loop (each stage a
 //! pre-delay with feedforward tap, allpass and delay; stages 2 and 4 add
 //! the shelved loop signal, damping and an LFO-swept allpass), read by
@@ -9,7 +9,7 @@
 use super::blocks::*;
 use super::{Algo, Param};
 
-/// `_HallReverbParam` [re:3c3501].
+/// Hall parameter table [re:3c3501].
 pub const PARAMS: &[Param] = &[
     Param(1, 0.6, 20.0),       // 0 Time
     Param(0, 0.0, 100.0),      // 1 Size
@@ -42,20 +42,20 @@ pub struct Hall {
     sr: f32,
     n_in: i64,
     pre: [DelayItem; 2],
-    /// Input diffusers 0x330, 0x378 (L), 0x3c0, 0x408 (R).
+    /// Input diffusers (two left, two right).
     ap_in: [DelayItem; 4],
-    /// Stage pre-delays 0x450, 0x498, 0x4e0, 0x528.
+    /// Stage pre-delays.
     sd: [DelayItem; 4],
-    /// LFO allpasses 0x610 (stage 2), 0x570 (stage 4).
+    /// LFO allpasses (stage 2, stage 4).
     lfo: [DelayItemLfo; 2],
-    /// Allpasses 0x6b0 (stage 1), 0x6f8 (3), 0x740 (2b), 0x788 (4b).
+    /// Allpasses (stage 1, 3, 2b, 4b).
     ap: [DelayItem; 4],
-    /// Loop delays 0x7d0, 0x818, 0x860, 0x8a8, 0x8f0, 0x938.
+    /// Loop delays.
     dl: [DelayItem; 6],
     damp: [Bilin; 2],
     low_cut: [Bilin; 2],
     shelf: [Biquad; 2],
-    /// Feedforward taps / gains of the stage pre-delays (0xa30.., 0xa50.., 0xa60..).
+    /// Feedforward taps / gains of the stage pre-delays.
     sd_tap: [i64; 4],
     sd_ff: [f32; 4],
     sd_in: [f32; 4],
@@ -91,7 +91,7 @@ pub struct Hall {
     b: Block,
     d: Block,
     f: Block,
-    /// Loop signal carried between stages and blocks (0x318).
+    /// Loop signal carried between stages and blocks.
     e: Block,
     noise: Block,
 }
@@ -173,7 +173,7 @@ impl Hall {
         }
     }
 
-    /// `ChangeSpin` [re:064afb].
+    /// Spin change [re:064afb].
     fn change_spin(&mut self) {
         let f = (20f64.powf(self.spin as f64) * 0.1f32 as f64) as f32;
         let d = ((self.wander * 16.0) / f) as i32 as i64;
@@ -189,7 +189,7 @@ impl Hall {
         self.low_cut[1].c = self.low_cut[0].c;
     }
 
-    /// `ChangeSizes` [re:378aed].
+    /// Size change [re:378aed].
     fn change_sizes(&mut self) {
         let r = self.sr / 44100.0;
         let f6 = (self.size * 9.0 + 1.0) * r;
@@ -264,7 +264,7 @@ impl Hall {
         ];
     }
 
-    /// `ChangeFeedBack` [re:39a517].
+    /// Feedback change [re:39a517].
     fn change_feedback(&mut self) {
         let t = ((self.time_mult as f64).log10() * 0.699999988079071 + self.time as f64) as f32;
         let t = if t >= 0.0 { if t > 1.0 { 1.0 } else { t as f64 } } else { 0.0 };
@@ -278,7 +278,7 @@ impl Hall {
         self.change_response();
     }
 
-    /// `ChangeHallResponse` [re:33b0c4].
+    /// Response change [re:33b0c4].
     fn change_response(&mut self) {
         self.damp[0].sr = self.sr;
         if self.damping >= 17999.0 {
@@ -447,7 +447,7 @@ impl Algo for Hall {
         }
     }
 
-    /// `Reset` [re:1e88b5].
+    /// Reset [re:1e88b5].
     fn reset(&mut self) {
         self.e = [0.0; B];
         for d in self.pre.iter_mut().chain(&mut self.ap_in).chain(&mut self.sd).chain(&mut self.ap).chain(&mut self.dl) {

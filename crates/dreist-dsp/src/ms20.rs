@@ -4,7 +4,7 @@
 
 use crate::analog::{analog, lerp, lut_pos};
 
-/// [re:e1a2d5] (`CreateFilterModeMap` [re:8b9ff3]).
+/// [re:e1a2d5] (mode name map [re:8b9ff3]).
 pub const MS20_MODES: [&str; 4] = ["LPF", "BPF", "HPF", "Notch"];
 
 #[derive(Debug, Clone)]
@@ -31,14 +31,14 @@ impl Ms20 {
         f
     }
 
-    /// `SetSampleRate` [re:8892c5]: 10 Hz DC blocker on the output.
+    /// Sample-rate setup [re:8892c5]: 10 Hz DC blocker on the output.
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.inv_sr = 1.0 / sr;
         let e = (self.inv_sr * -62.831856).exp();
         self.dc_coef = ((2.0 - e) - e.abs()) * 0.5;
     }
 
-    /// `Initialize` [re:b4eb83].
+    /// Setup [re:b4eb83].
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.mode = (mode * 3.0).round() as u32;
         self.octave = cutoff * 12.0 - 6.0;

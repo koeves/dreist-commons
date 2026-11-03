@@ -156,7 +156,7 @@ pub(crate) fn put_pad(model: &mut Model, e: usize, p: usize, mut node: Node) {
     }
 }
 
-/// "Save layer sample..." (`ConstructPadMenu` lambda $_18 [re:319fbe]): the
+/// "Save layer sample..." (pad menu lambda [re:319fbe]): the
 /// layer's audio cropped to its start / end markers, written as a 24-bit
 /// WAV with the file's channel count ([re:12499e]).
 pub fn save_layer_sample(model: &Model, e: usize, p: usize, l: usize, dst: &std::path::Path) -> Result<(), String> {
@@ -350,7 +350,7 @@ impl PadMenu {
         };
         let sample = |model: &Model, l: usize| model.layer_sample(e, p, l).or_else(|| model.layer_node(e, p, l).and_then(|n| n.attr("AudioFileName")).map(|f| PathBuf::from(f.replace('\\', "/"))));
         let done = Outcome { changed: true, browse: None, save: None };
-        // Lock and colour go through `HandlePadMessage`, which applies them
+        // Lock and colour go through the pad message handler, which applies them
         // to every selected pad.
         let targets: Vec<usize> = {
             let (_, mask) = crate::multipad::selection(model, e);
@@ -590,7 +590,7 @@ mod tests {
     }
 }
 
-/// [re:084d85] $_1 [re:89a9b0]: the pad bank buttons' right-click
+/// [re:084d85] [re:89a9b0]: the pad bank buttons' right-click
 /// menu items (16 pads of bank `b`).
 pub const BANK_ITEMS: [&str; 10] = ["Cut", "Copy", "Paste", "", "Mute all", "Solo all", "", "Unmute all", "Unsolo all", "Clear all mute and solo"];
 
@@ -656,7 +656,7 @@ pub fn bank_action(model: &mut Model, clip: &mut Clipboard, b: usize, index: usi
 }
 
 /// [re:70c4bf] plus the inspector's
-/// "Edit meta data" ($_3 [re:a49bd9]): the layer row's right-click items.
+/// "Edit meta data" ([re:a49bd9]): the layer row's right-click items.
 pub const LAYER_ITEMS: [&str; 13] = ["Cut", "Copy", "Paste", "", "Clear", "Reset", "Reset Envelopes", "", "Lock", "", "Send to slicer", "", "Edit meta data"];
 
 /// Whether layer `l` (or its pad) is locked.
@@ -709,16 +709,16 @@ fn reset_hold(model: &mut Model, e: usize, p: usize, l: usize) {
 }
 
 /// A layer menu pick (indices into [`LAYER_ITEMS`]):
-/// - Cut ($_0): copy, then `e_deallocateSample` (0xe1).
-/// - Copy ($_1) / Paste ($_2, onto layer `l`, keeping its lock).
-/// - Clear ($_3, 0xe2 `e_clearLayer`): sample and state.
-/// - Reset ($_4, 0x85 [re:0c2c1d]): everything but the
+/// - Cut: copy, then `e_deallocateSample` (0xe1).
+/// - Copy / Paste (onto layer `l`, keeping its lock).
+/// - Clear (0xe2 `e_clearLayer`): sample and state.
+/// - Reset (0x85 [re:0c2c1d]): everything but the
 ///   sample: parameters, depths, markers (back to the file), velocity
 ///   split, sends, mix and lock, then the hold.
-/// - Reset Envelopes ($_5, 0x86 `ResetEnvelopeState`): the amp and free
-///   envelope parameters to their defaults, then `ResetHoldTime`.
-/// - Lock ($_6, 0x73 `e_setLayerLock`).
-/// - Send to slicer ($_7).
+/// - Reset Envelopes (0x86): the amp and free
+///   envelope parameters to their defaults, then the hold time.
+/// - Lock (0x73 `e_setLayerLock`).
+/// - Send to slicer.
 pub fn layer_action(model: &mut Model, clip: &mut Clipboard, e: usize, p: usize, l: usize, index: usize, out: &mut Vec<Command>) -> LayerOutcome {
     let mut o = LayerOutcome::default();
     let name = format!("Layer{l}");

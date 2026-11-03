@@ -1,4 +1,4 @@
-//! Preferences (`Options::Read*/Write*`). The original keeps them in the
+//! Preferences. The original keeps them in the
 //! [re:5cffa6] defaults domain (shared with licensing); the
 //! port stores its own `key=value` file so the installed v2's settings
 //! are never touched.

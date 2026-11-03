@@ -1,5 +1,5 @@
 //! Drag and drop between controls ([re:4dff70] → the
-//! target's `OnDroppedObject`). Sources: a pad ([re:2d30eb]), a pattern
+//! target's drop handler). Sources: a pad ([re:2d30eb]), a pattern
 //! selector key ([re:2aecb8]) and the browser file list
 //! ([re:fb6b2b], the selected entries).
 //! Modifier flags as [re:77e545]
@@ -8,7 +8,7 @@
 //! - [re:dd2ce9]: nothing on a locked pad.
 //!   Pad onto pad: alt copies ([re:669193], 0x56
 //!   `e_setPad`), alt+shift moves (the copy then 0xe3 clears the source),
-//!   otherwise swaps (`SwapPads` [re:206406], 0x54); the target is selected.
+//!   otherwise swaps ([re:206406], 0x54); the target is selected.
 //!   Browser files: one file → [re:3448d7]
 //!   [re:def93d] mode 9 (layer 0) / 10 with alt (the first layer without a
 //!   sample, "No available layers on selected pad!" when there is none);
@@ -38,13 +38,13 @@ use crate::{Editor, padmenu, pads, patmenu};
 /// Drop-target highlights other than the pads.
 ///
 /// - [re:435cd9]: another key, or one browser
-///   pattern file (`IsListAllPatternFiles` and a single item), sets +0x274 /
-///   +0x276 (cleared by `DragExit` / `OnDroppedObject`); `ATC_Tick`
-///   [re:e2c2f1] steps the highlight alpha (+0x278) by 25 per tick, back to 0
-///   past 120; `DrawLayer` [re:e0363b] layer 3 fills the bounds in
+///   pattern file (a single item), sets the highlight
+///   (cleared on drag exit / drop); the timer tick
+///   [re:e2c2f1] steps the highlight alpha by 25 per tick, back to 0
+///   past 120; draw layer 3 [re:e0363b] fills the bounds in
 ///   StandardControlHighlight (set in the constructor) at that alpha.
-/// - [re:20910b]: +0x260 = the selector
-///   under the pointer (−1 on `DragExit`); `Draw` fills its rect.
+/// - [re:20910b]: remembers the selector
+///   under the pointer (−1 on drag exit); drawing fills its rect.
 #[derive(Default)]
 pub(crate) struct DropHighlights {
     key: Option<Vec<usize>>,
@@ -124,7 +124,7 @@ impl Editor {
     }
 
     /// [re:2a11ae] flashes while dragging over the pads
-    /// (`DragExit` ends them elsewhere): a pad, or anything with alt, flashes
+    /// (drag exit ends them elsewhere): a pad, or anything with alt, flashes
     /// the pad under the pointer; browser kit files flash every pad; other
     /// files the pads from the one under the pointer on, one per file.
     /// Pattern keys flash nothing.
@@ -379,7 +379,7 @@ impl Editor {
         }
     }
 
-    /// The file loader for a dropped non-audio file (`HandleDragAndDrop`
+    /// The file loader for a dropped non-audio file (the drop handler
     /// → the document's load call): presets replace the project, kits and
     /// engines the selected engine, pad files the target pad, pattern
     /// files the target (or current) pattern slot.

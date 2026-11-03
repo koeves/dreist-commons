@@ -3,7 +3,7 @@
 use crate::*;
 
 impl Editor {
-    /// Tools ([re:4139f8] lambda [re:a00968]) and Help ([re:0316e2])
+    /// Tools ([re:4139f8] [re:a00968]) and Help ([re:0316e2])
     /// menus.
     pub(crate) fn tools_help_menu(&mut self, ev: &UiEvent) -> bool {
         let reset = format!("Reset {}", crate::product());
@@ -54,8 +54,8 @@ impl Editor {
             UiEvent::MenuSelected { name, index, .. } if name == "HelpButton" => {
                 match *index {
                     0 => self.modals.show(&mut self.app, modal::Kind::About),
-                    // [re:4139f8] $_23 lambda #7: the host resizes
-                    // to `GetDefaultWindowSize`.
+                    // [re:4139f8]: the host resizes
+                    // to the default window size.
                     2 => {
                         let (w, h) = self.window_size.0;
                         self.app.resize(w, h);

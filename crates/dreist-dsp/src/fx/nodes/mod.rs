@@ -1,7 +1,7 @@
 //! Effect type → node construction ([re:c57d81]
 //! [re:4f73e7]), hidden-port setup ([re:1160d2]
 //! [re:141f96]) and front-panel → port mapping
-//! (`GetEffectParameterIndexFromLayerParameterIndex` [re:15ee1b]).
+//! (front-panel index → port index [re:15ee1b]).
 
 use super::convert::time_beat_to_units;
 use super::{Ctx, Node};
@@ -53,7 +53,7 @@ pub mod vari_eq;
 pub mod vca_comp;
 
 /// Build the node for an effect type; `None` = not ported yet (pass-through).
-/// Reset the engine-wide random states (Breverb `_Randnext`, the
+/// Reset the engine-wide random states (the Breverb LCG, the
 /// `Randomiser` / [re:b24a21] seed counters) before building an engine, so a
 /// project renders the same every time it is loaded.
 pub fn reset_shared_rng() {
@@ -120,7 +120,7 @@ pub fn is_ported(kind: usize) -> bool {
     matches!(kind, 1..=47)
 }
 
-/// `SetupInternalParameters` [re:141f96]: fixed values (normalized) for ports
+/// Hidden-port setup [re:141f96]: fixed values (normalized) for ports
 /// the front panel does not expose.
 pub fn setup_internal(kind: usize, node: &mut dyn Node) {
     let set: &[(usize, f32)] = match kind {
@@ -187,15 +187,15 @@ pub fn node_port(effect: usize, n: usize) -> usize {
     t.get(n).copied().unwrap_or(n)
 }
 
-/// `ValueToLeveldB` as `GetLengthOfTail` inlines it: `26.888343·ln(1.25·x)`
-/// above `MappedLimit` (the double 0x3c9041ec40000000), else −1000.
+/// Level in dB as the tail-length computation inlines it: `26.888343·ln(1.25·x)`
+/// above the mapped limit (the double 0x3c9041ec40000000), else −1000.
 fn value_to_level_db(x: f32) -> f32 {
     if x as f64 > f64::from_bits(0x3c90_41ec_4000_0000) { (x * 1.25).ln() * 26.888344 } else { -1000.0 }
 }
 
-/// Delay (15) and Bloom (45): the echo time (`ConvertToUnits(Time, Sync,
-/// 60/bpm)·sr`) times one plus the number of repeats it takes the feedback
-/// to fall to `kVoiceNoiseFloor` (5e-5), both in `ValueToLeveldB` terms.
+/// Delay (15) and Bloom (45): the echo time (Time in Sync units at
+/// 60/bpm, ·sr) times one plus the number of repeats it takes the feedback
+/// to fall to the voice noise floor (5e-5), both in dB-level terms.
 fn feedback_tail(node: &dyn Node, ports: [usize; 3], ctx: &Ctx) -> f32 {
     let v = |i: usize| node.port_value(i).unwrap_or(0.0);
     let repeats = (value_to_level_db(5e-5) / value_to_level_db(v(ports[1]))).abs();

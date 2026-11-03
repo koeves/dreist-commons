@@ -7,14 +7,14 @@
 //! [re:0e72ae] binds `Control<n>` to effect
 //! parameter n−1 (up to 12); changes post `e_setFXParameter` 0x59 with index
 //! [engine, pad, layer, slot] and values [parameter, source, value]
-//! (`DoSendEffectFloatMessageChange` [re:b5d4be]). Trim/mix/output post
+//! ([re:b5d4be]). Trim/mix/output post
 //! 0x5e/0x5c/0x5d with values [0, value, source].
 //!
 //! [re:ea87a2] (EffectTypeCombo): Save
 //! preset, Save as default, Revert to default, the type's presets (user
 //! folder first, then system `Effects/<Type>/*.fxpreset`), Remove effect,
-//! then one submenu per category (`EffectCategoryToString` [re:cf5f13],
-//! `GetCategoryForEffect` [re:63da62] table [re:b06dc6]). The empty slot's
+//! then one submenu per category ([re:cf5f13],
+//! [re:63da62] table [re:b06dc6]). The empty slot's
 //! AddButton offers the category submenus ([re:57c692]). Choosing
 //! posts `e_setEffect` (100) [engine, pad, layer] with the slot and a new
 //! `Effect` loaded from the type's `Default.fxpreset`
@@ -46,8 +46,8 @@ fn preset_dirs(resources: &std::path::Path, kind: usize) -> Vec<std::path::PathB
     v
 }
 
-/// `GetPresetsForEffectType` [re:1598f6]: user presets, then system ones;
-/// `ScanFolderForPresetsForEffectType` [re:53368c] descends into subfolders
+/// The type's presets [re:1598f6]: user presets, then system ones;
+/// the folder scan [re:53368c] descends into subfolders
 /// and skips `Default.fxpreset` (the type's default, not a preset).
 pub fn presets(resources: &std::path::Path, kind: usize) -> Vec<std::path::PathBuf> {
     fn scan(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -106,16 +106,16 @@ enum Action {
     Type(usize),
     /// Option parameter item: (parameter, normalized value).
     Option(usize, f32),
-    /// `DoShowEffectTypeMenu` Save preset / Save as default.
+    /// Type menu Save preset / Save as default.
     SavePreset,
     SaveDefault,
-    /// Chain menu ([re:e04aee] $_3 [re:3687bc]).
+    /// Chain menu ([re:e04aee] [re:3687bc]).
     ChainSave,
     ChainClear,
     ChainLoad(std::path::PathBuf),
     /// A preset folder (the tokenised menu's submenu).
     ChainFolder(std::path::PathBuf),
-    /// [re:a86ca5] / [re:57c692] $_1.
+    /// [re:a86ca5] / [re:57c692].
     EffectCut,
     EffectCopy,
     EffectPaste,
@@ -137,7 +137,7 @@ pub enum SaveRequest {
     Effect(Target, usize, usize),
 }
 
-/// [re:3cc799] / `GetSystemEffectsChainPath`
+/// [re:3cc799] /
 /// [re:e73ad8]: "Effect Chains" under the user documents folder and the
 /// resources.
 pub fn chain_dirs(resources: &std::path::Path) -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
@@ -168,7 +168,7 @@ pub fn chain_presets(resources: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-/// The doc chain for a `.fxchain` file (`DoLoadPreset` [re:8e8a6f]): effects
+/// The doc chain for a `.fxchain` file ([re:8e8a6f]): effects
 /// with `Parameter<n>` renamed to the document's names, `ChainPresetName`
 /// = the file path.
 pub fn load_chain(path: &std::path::Path) -> Option<Node> {
@@ -286,9 +286,9 @@ pub enum Target {
     Engine(usize),
     Pad(usize, usize),
     Layer(usize, usize, usize),
-    /// Global aux return (`GetEffectChain` engine −4, pad = aux).
+    /// Global aux return (chain of engine −4, pad = aux).
     Aux(usize),
-    /// Master channel (`GetEffectChain` engine −3).
+    /// Master channel (chain of engine −3).
     Master,
 }
 
@@ -423,7 +423,7 @@ impl FxPanel {
                 panel.set_attr("fxKind", kind.to_string());
                 let w = panel.rect.w;
                 panel.set_rect(Rect::new(x, 0, w, h));
-                // `UpdateToShowCurrentChain`: Effect `IsFolded` → `SetIconicState(true)`.
+                // Effect `IsFolded` → the panel starts iconic.
                 if node.bool("IsFolded").unwrap_or(false) {
                     dreist_gui::collapse::set_iconic(&mut panel, true);
                     fold_controls(&mut panel, false);
@@ -468,7 +468,7 @@ impl FxPanel {
     pub fn sync(&mut self, app: &mut App, model: &Model, t: Target) {
         let fx = effects(model, t);
         self.rebuild(app, t, &fx);
-        // Chain header: Active / Mix, and `UpdateNextPreviousButtons`
+        // Chain header: Active / Mix, and the next / previous buttons
         // [re:100883] — prev / next enabled with two or more presets while the
         // chain is active.
         let chain = chain_node(model, t);
@@ -508,7 +508,7 @@ impl FxPanel {
                         let key: String = pn.chars().filter(|ch| !ch.is_whitespace()).collect();
                         let v = get(&key, 0.5);
                         if k.class == "CtrlPopupButton" {
-                            // `SelectItemWithNormalizedFloat`: round(v·(n − 1)).
+                            // The popup item round(v·(n − 1)).
                             if let Some(items) = effect_option_strings(kind, n - 1) {
                                 let i = ((v * (items.len() - 1) as f32).round() as usize).min(items.len() - 1);
                                 k.text = items[i].to_string();
@@ -569,7 +569,7 @@ impl FxPanel {
     }
 
     /// Sources modulating the effect parameter knob at `path`
-    /// ([re:2f9e16] $_5, [re:a50db4]).
+    /// ([re:2f9e16], [re:a50db4]).
     pub fn modulation_mask(&self, app: &App, model: &Model, path: &[usize]) -> Option<u32> {
         if !path.starts_with(&self.host) {
             return None;
@@ -583,7 +583,7 @@ impl FxPanel {
     }
 
     /// An effect parameter knob's tooltip ([re:947faf]
-    ///  [re:9c30fa]): "<param>: <Effect::GetStringParameter>"
+    ///  [re:9c30fa]): "<param>: <value text>"
     /// and, with a transmod source shown and a non-zero depth, " -> " and
     /// the modulated value.
     pub fn tooltip(&self, app: &App, model: &Model, path: &[usize], source: Option<usize>) -> Option<String> {
@@ -609,10 +609,10 @@ impl FxPanel {
         Some(text)
     }
 
-    /// A knob double click's reset value: [re:375f19] $_9
+    /// A knob double click's reset value: [re:375f19]
     /// [re:759587] (Mix 0.5, Trim / Output 1.0) and [re:2f9e16]
-    /// $_3 [re:6a5c33] (the value the type's default preset gave the
-    /// parameter, [re:1cda27] → +0x744).
+    /// [re:6a5c33] (the value the type's default preset gave the
+    /// parameter, [re:1cda27]).
     pub fn reset_value(&self, app: &App, path: &[usize], name: &str) -> Option<f32> {
         if !path.starts_with(&self.host) {
             return None;
@@ -699,7 +699,7 @@ impl FxPanel {
         CATEGORIES.iter().enumerate().map(|(i, c)| (format!("{c} ▸"), Action::Category(i))).collect()
     }
 
-    /// `DoShowEffectTypeMenu` for an existing effect.
+    /// The type menu for an existing effect.
     fn type_menu(&self, kind: usize, current: Option<&str>) -> Vec<(String, Action)> {
         let mut v = vec![
             ("Save preset".to_string(), Action::SavePreset),
@@ -795,7 +795,7 @@ impl FxPanel {
                 self.save_request = Some(SaveRequest::Chain(t));
                 return;
             }
-            // `DoClearChain`: an empty chain.
+            // Clear: an empty chain.
             (Action::ChainClear, _) => {
                 chain.children.retain(|c| c.class != "Effect" && c.name.as_deref() != Some("ChainPresetName"));
             }
@@ -810,8 +810,7 @@ impl FxPanel {
         out.push(model.rebuild_command());
     }
 
-    /// Step through the type's presets (`DoLoadNextPreset` /
-    /// `DoLoadPreviousPreset`).
+    /// Step through the type's presets (next / previous).
     fn step_preset(&mut self, model: &mut Model, t: Target, slot: usize, kind: usize, dir: i32, out: &mut Vec<Command>) {
         let ps = presets(&self.resources, kind);
         if ps.is_empty() {
@@ -857,7 +856,7 @@ impl FxPanel {
             // Right press on an effect panel's background: Cut / Copy /
             // Paste ([re:a86ca5]; not over
             // its controls); on an empty slot's Add button: Paste
-            // ([re:57c692] $_1 [re:4bab0b]).
+            // ([re:57c692] [re:4bab0b]).
             UiEvent::RightClicked { path, name } if path.starts_with(&self.host) => {
                 let Some(c) = app.ctrl(path) else { return false };
                 let paste = dreist_gui::menu::item("Paste", effect_clipboard().is_some());
@@ -871,8 +870,8 @@ impl FxPanel {
                 return true;
             }
             // Option parameters ([re:0e72ae]:
-            // popup items from `GetParameterOptionStrings`; lambda $_0
-            // [re:f8185c] sends `FloatValue` = item/(count − 1)).
+            // popup items from the parameter's option strings;
+            // [re:f8185c] sends the value item/(count − 1)).
             UiEvent::Clicked { path, name, .. } if path.starts_with(&self.host) && name.starts_with("Control") && app.ctrl(path).is_some_and(|c| c.class == "CtrlPopupButton") => {
                 let (Some((slot, kind)), Some(n)) = (self.slot_of(app, path), name.strip_prefix("Control").and_then(|n| n.parse::<usize>().ok())) else { return false };
                 let Some(items) = effect_option_strings(kind, n - 1) else { return true };
@@ -881,8 +880,7 @@ impl FxPanel {
                 self.open_menu(app, path, Some(slot), list);
                 return true;
             }
-            // Chain preset menu and stepping ([re:e04aee]
-            // $_3 / $_4 / $_5).
+            // Chain preset menu and stepping ([re:e04aee]).
             UiEvent::Clicked { path, name, .. } if path.starts_with(&self.host) && matches!(name.as_str(), "PresetCombo" | "PresetPrev" | "PresetNext") => {
                 let current = chain_current(model, t);
                 if name == "PresetCombo" {
@@ -923,8 +921,8 @@ impl FxPanel {
                 }
                 return true;
             }
-            // The chain header's own Active button / Mix knob ([re:6929fb]
-            // $_6 / $_7): 0x60 / 0x62 [e, p, l] [value].
+            // The chain header's own Active button / Mix knob
+            // ([re:6929fb]): 0x60 / 0x62 [e, p, l] [value].
             UiEvent::Clicked { path, name, on, .. } if name == "ActiveButton" && path.starts_with(&self.host) && self.slot_of(app, path).is_none() => {
                 out.push(msg(id::SET_FX_CHAIN_ACTIVE, &[e, p, l], &[*on as i32 as f32]));
                 return true;
@@ -970,8 +968,8 @@ impl FxPanel {
     }
 }
 
-/// Show / hide the controls an effect panel folds away ([re:375f19]
-/// $_19 / $_20): Active, Next / Last preset and the knob labeller.
+/// Show / hide the controls an effect panel folds away
+/// ([re:375f19]): Active, Next / Last preset and the knob labeller.
 pub fn fold_controls(panel: &mut Ctrl, show: bool) {
     fn walk(c: &mut Ctrl, show: bool) {
         for k in &mut c.children {

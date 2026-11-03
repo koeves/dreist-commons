@@ -1,5 +1,5 @@
-//! [re:c38c8c] (Hi-Lo Balance, kind 6; `Voice::Reset` [re:8ba832],
-//! `Voice::ProcessBuffer` [re:44061e]): one-pole crossover; the low part is
+//! [re:c38c8c] (Hi-Lo Balance, kind 6; reset [re:8ba832],
+//! processing [re:44061e]): one-pole crossover; the low part is
 //! weighted `cos(b·π/2)·√2`, the high part `sin(b·π/2)·√2`, then wet/dry.
 
 use super::math::clip01;
@@ -7,7 +7,7 @@ use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
 pub struct HiLo {
     ports: Vec<Port>,
-    /// Ramped coefficient, low gain, high gain, mix (+0x124..+0x130).
+    /// Ramped coefficient, low gain, high gain, mix.
     k: f32,
     lo: f32,
     hi: f32,

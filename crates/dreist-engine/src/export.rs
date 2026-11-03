@@ -169,8 +169,8 @@ fn auto_crop(l: &mut Vec<f32>, r: &mut Vec<f32>, tail_start: usize, sr: f32) {
     r.truncate(end);
 }
 
-/// A finished render waiting to be written ([re:8c1655] between `Process`
-/// and `ExportToDisk`).
+/// A finished render waiting to be written ([re:8c1655] between rendering
+/// and writing).
 pub struct Rendered {
     bufs: Vec<(Vec<f32>, Vec<f32>)>,
     outputs: Vec<usize>,
@@ -236,7 +236,7 @@ pub fn render_export(doc: &Node, samples: &Path, sr: u32, opts: &Options, progre
     let bufs: Vec<(Vec<f32>, Vec<f32>)> = outputs
         .iter()
         .map(|&o| match (opts.files, o) {
-            // The mixdown sums every output (`InitializeMultiExport` mixdown flag).
+            // The mixdown sums every output (the multi-export mixdown flag).
             (Files::Mixdown, _) => {
                 let (mut l, mut r) = (ml.clone(), mr.clone());
                 for [a, b] in &sub {
@@ -249,7 +249,7 @@ pub fn render_export(doc: &Node, samples: &Path, sr: u32, opts: &Options, progre
             (_, k) => (sub[k - 1][0].clone(), sub[k - 1][1].clone()),
         })
         .collect();
-    // Peaks and clipped counts (`Process` tail).
+    // Peaks and clipped counts (end of rendering).
     let peak = bufs.iter().flat_map(|(l, r)| l.iter().chain(r)).fold(0.0f32, |m, v| m.max(v.abs()));
     let clipped = bufs.iter().flat_map(|(l, r)| l.iter().chain(r)).filter(|v| v.abs() > 1.0).count();
     let total = bufs.iter().map(|(l, r)| l.len() + r.len()).sum();
@@ -269,9 +269,9 @@ impl Rendered {
         Some(format!("{pct:.1}% of exported samples will be clipped ({} of {}, max level +{db:.2}dB) unless you normalize. Should the export be normalized?", self.clipped, self.total))
     }
 
-    /// Write the files (`CompleteExportAfterPrompt` / `ExportToDisk`):
+    /// Write the files (after the prompt):
     /// `normalise` is the prompt's answer; without one the mode decides
-    /// (`Normalize` [re:b989c3]: 0.998 / overall peak). `out` is the chosen
+    /// (normalising [re:b989c3]: 0.998 / overall peak). `out` is the chosen
     /// path; several outputs append the output name to its stem, loop mode
     /// writes `_start` / main / `_tail`.
     pub fn finish(self, out: &Path, normalise: Option<bool>) -> Result<Report, String> {
@@ -304,7 +304,7 @@ impl Rendered {
                 save(path(""), &l, &r, &mut report)?;
                 continue;
             }
-            // `ExportToDisk` loop mode: first pass, second pass (the loop),
+            // Loop mode: first pass, second pass (the loop),
             // and what rings past it.
             let n = l.len();
             let a = loop_len.min(n);

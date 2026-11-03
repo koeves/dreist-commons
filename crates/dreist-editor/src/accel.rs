@@ -3,8 +3,8 @@
 //!
 //! [re:3b32b8] hands each key to
 //! [re:9454a7], which looks the key up in
-//! the accelerator table (the menus' key equivalents, `Construct*Menu`) and
-//! runs the entry's function from `ConstructFunMap` [re:df170c]:
+//! the accelerator table (the menus' key equivalents) and
+//! runs the entry's function [re:df170c]:
 //! - nothing happens unless option `RespondToKeyboard` (default on) is set;
 //! - an entry matches when the key matches and either both sides have no
 //!   modifiers or the modifier sets are equal;
@@ -12,11 +12,10 @@
 //!   (default off), except the browser arrows 0x24–0x27.
 //!
 //! The standalone app also carries the table as its menu bar's key
-//! equivalents ([re:c60fcb]; `AcceleratorTriggered` [re:80cba3] runs
+//! equivalents ([re:c60fcb]; [re:80cba3] runs
 //! the function regardless of the options), so there every entry works.
 
-/// Modifier set of an entry (`KeyTriggered` compares bytes 0–3: shift,
-/// command, option, control).
+/// Modifier set of an entry (shift, command, option, control).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mods {
     pub shift: bool,
@@ -31,17 +30,17 @@ impl Mods {
     }
 }
 
-/// What an entry's function does (`ConstructFunMap` lambdas $_0..$_53).
+/// What an entry's function does (54 functions).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
-    /// `PostMessageToEditor(id)`.
+    /// Editor message `id`.
     Editor(u32),
-    /// `PostMessageToSynth(id, !flag)` for a transport toggle (the header
-    /// button with that message, flipped).
+    /// Engine message `id` with the flag flipped, for a transport toggle
+    /// (the header button with that message).
     Toggle(&'static str),
-    /// `PostMessageToSynth(id)` for a transport trigger (the header button).
+    /// Engine message `id` for a transport trigger (the header button).
     Press(&'static str),
-    /// $_33 (Loop): an empty function.
+    /// Loop: an empty function.
     Nothing,
 }
 
@@ -75,8 +74,8 @@ const fn a(id: u32, key: &'static str, mods: Mods, name: &'static str, action: A
 /// e_updateDelete 0x18f, e_updateBrowserStartFilter / StartFind 0x160 /
 /// 0x161, e_grabRetroRecording 0x23, browser 0x155–0x15b, panels
 /// 0x146–0x14e, e_resetUISizeToDefault / Scale 0x152 / 0x153. Synth:
-/// e_togglePlayback 0x15 (![re:64b7fd]), e_toggleRecord 0x14 (+0x8c),
-/// e_toggleMetronome 0x18 (+0x8f), e_toggleQuantize 0x19 (+0x91),
+/// e_togglePlayback 0x15 (![re:64b7fd]), e_toggleRecord 0x14,
+/// e_toggleMetronome 0x18, e_toggleQuantize 0x19,
 /// e_songSetActive 0x117 (!active, 0), e_returnToZero 0x1d, e_panic 0x12.
 pub const TABLE: &[Accel] = &[
     a(0x00, ",", C, "Preferences", Action::Editor(0x16a)),
@@ -121,8 +120,8 @@ pub const TABLE: &[Accel] = &[
     a(0x35, "2", AK, "Reset UI scale to 100%", Action::Editor(0x153)),
 ];
 
-/// Menu items without a key (`ConstructFileMenu`): id, title, editor
-/// message (`ConstructFunMap` keys 4–8, 11, 12, 15–20).
+/// Menu items without a key (File menu): id, title, editor
+/// message (functions 4–8, 11, 12, 15–20).
 pub const UNKEYED: &[(u32, &str, u32)] = &[
     (0x04, "Open Pad", 0x16f),
     (0x05, "Open PatternBank", 0x170),
@@ -148,9 +147,8 @@ pub enum Menu {
 
 use Menu::{Item as I, Separator as Sep, Sub};
 
-/// The standalone's menus (`ConstructFileMenu`, `ConstructEditMenu`,
-/// `ConstructBrowserMenu`, `ConstructTransportMenu`, `ConstructViewMenu`;
-/// Preferences, `ConstructPrefsMenu`, sits in the app menu).
+/// The standalone's menus (File, Edit, Browser, Transport, View;
+/// Preferences sits in the app menu).
 pub const MENUS: &[(&str, &[Menu])] = &[
     (
         "File",
@@ -182,7 +180,7 @@ pub fn entry(id: u32) -> Option<(&'static str, Action)> {
     TABLE.iter().find(|e| e.id == id).map(|e| (e.name, e.action)).or_else(|| UNKEYED.iter().find(|u| u.0 == id).map(|u| (u.1, Action::Editor(u.2))))
 }
 
-/// `KeyTriggered`: the entry for `key` with `mods`, if it responds.
+/// The entry for `key` with `mods`, if it responds.
 /// `menu_bar`: the standalone's menu key equivalents (no option gating).
 pub fn lookup(key: &str, mods: Mods, keyboard: bool, extended: bool, menu_bar: bool) -> Option<&'static Accel> {
     let e = TABLE.iter().find(|e| e.key == key && e.mods == mods)?;

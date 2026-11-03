@@ -1,6 +1,6 @@
 //! The wave display's timeline strip ([re:a2cbaa]
-//! [re:ad103f], `ComputeComponentAreas` [re:d9085e], `OnMouseRButtonDown`
-//! [re:86971c], `LoadTimelineMode` [re:e959cc]). See the dreist-re GUI notes (Wave
+//! [re:ad103f], layout [re:d9085e], right click
+//! [re:86971c], timeline mode [re:e959cc]). See the dreist-re GUI notes (Wave
 //! display timeline).
 //!
 //! Areas: the timeline 0..15, the marker strip 15..30 (both filled with

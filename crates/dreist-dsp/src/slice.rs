@@ -5,7 +5,7 @@
 
 use rustfft::{FftPlanner, num_complex::Complex32};
 
-/// [re:83de95] (16 bytes).
+/// [re:83de95].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransientPoint {
     pub pos: i32,
@@ -14,31 +14,31 @@ pub struct TransientPoint {
     pub mean: f32,
 }
 
-/// [re:a11c15] parameters (`Initialize`; values from `SliceAudioFile`).
+/// [re:a11c15] parameters (setup; values from the slicing call).
 #[derive(Debug, Clone, Copy)]
 pub struct Detector {
-    /// +0x10: mean multiplier.
+    /// Mean multiplier.
     pub threshold: f32,
-    /// +0x14: FFT size.
+    /// FFT size.
     pub fft: usize,
-    /// +0x18: hop in % of the FFT size.
+    /// Hop in % of the FFT size.
     pub overlap_pct: f32,
-    /// +0x1c: running-mean window (frames).
+    /// Running-mean window (frames).
     pub mean_window: usize,
-    /// +0x20: mean floor.
+    /// Mean floor.
     pub min_mean: f32,
-    /// +0x24: dynamic-threshold multiplier.
+    /// Dynamic-threshold multiplier.
     pub dyn_mult: f32,
-    /// +0x28: dynamic-threshold decay per sample.
+    /// Dynamic-threshold decay per sample.
     pub decay: f32,
-    /// +0x44 / +0x48: peak window and onset look-back (frames).
+    /// Peak window and onset look-back (frames).
     pub peak_window: usize,
     pub look_back: usize,
 }
 
 impl Default for Detector {
-    /// [re:c5ff4b]: Initialize(1.0, 1024, 12.5, 100,
-    /// 0.0025, 3.0, 0.0014); ctor +0x44 = 5, +0x48 = 6.
+    /// [re:c5ff4b]: setup with (1.0, 1024, 12.5, 100,
+    /// 0.0025, 3.0, 0.0014); peak window 5 and look-back 6 at construction.
     fn default() -> Detector {
         Detector { threshold: 1.0, fft: 1024, overlap_pct: 12.5, mean_window: 100, min_mean: 0.0025, dyn_mult: 3.0, decay: 0.0014, peak_window: 5, look_back: 6 }
     }
@@ -49,7 +49,7 @@ impl Detector {
         ((self.fft as f32 * self.overlap_pct * 0.01).floor() as usize).max(1)
     }
 
-    /// `DoOnsetDetection` [re:6451fb]: half-wave rectified spectral flux of
+    /// Onset detection [re:6451fb]: half-wave rectified spectral flux of
     /// Hann-windowed frames (stereo averaged), frames start one FFT early.
     pub fn onset_function(&self, left: &[f32], right: Option<&[f32]>) -> Vec<f32> {
         let n = self.fft;
@@ -89,7 +89,7 @@ impl Detector {
         out
     }
 
-    /// `PositionOnset` [re:707fa1]: argmax of the third difference near `u`.
+    /// Onset positioning [re:707fa1]: argmax of the third difference near `u`.
     fn position(&self, odf: &[f32], u: usize) -> usize {
         let lo = u.saturating_sub(self.look_back);
         let hi = (u + 2).min(odf.len().saturating_sub(1));
@@ -104,7 +104,7 @@ impl Detector {
         (u + 1 + arg).saturating_sub(self.look_back)
     }
 
-    /// [re:79ac65] + `PeakPicker` [re:0a87af].
+    /// [re:79ac65] + peak picking [re:0a87af].
     pub fn detect(&self, left: &[f32], right: Option<&[f32]>) -> Vec<TransientPoint> {
         let hop = self.hop();
         let mut odf = self.onset_function(left, right);
@@ -142,7 +142,7 @@ impl Detector {
     }
 }
 
-/// `SlicePoint` (`Serialize` [re:567a97]: `Start Locked Deleted Pos Strength
+/// `SlicePoint` (saved by [re:567a97] as `Start Locked Deleted Pos Strength
 /// DynSense Mean`; manual slices keep −50 in the three analysis fields).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SlicePoint {
@@ -160,7 +160,7 @@ impl SlicePoint {
         SlicePoint { start, pos: start as i32, locked, deleted: false, strength: -50.0, dyn_sense: -50.0, mean: -50.0 }
     }
 
-    /// `CanSliceBeUsedAtSensitivity` [re:ba60a9] + `EvaluateOnset` [re:4b4787].
+    /// Usable at a sensitivity [re:ba60a9], with the onset evaluation [re:4b4787].
     pub fn usable_at(&self, threshold: f32) -> bool {
         if self.locked {
             return true;
@@ -173,8 +173,7 @@ impl SlicePoint {
     }
 }
 
-/// Threshold for a 0..1 sensitivity (`GetUserSliceAnalysisForSensitivity`
-/// [re:1500d9]): `(1 − s^0.6)·29 + 0.5`.
+/// Threshold for a 0..1 sensitivity ([re:1500d9]): `(1 − s^0.6)·29 + 0.5`.
 pub fn sensitivity_threshold(sensitivity: f32) -> f32 {
     (1.0 - sensitivity.powf(0.6)) * 29.0 + 0.5
 }
@@ -229,7 +228,7 @@ pub fn slice_markers(slices: &[SlicePoint], i: usize, region_end: u32) -> (u32, 
     (slices[i].start, end)
 }
 
-/// One sliced hit placed by `ExtractPatternFromAnalysis`.
+/// One sliced hit placed by the pattern extraction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SliceHit {
     pub slice: usize,
@@ -238,7 +237,7 @@ pub struct SliceHit {
     pub step: usize,
     /// Shift lane (0.5 = on the grid).
     pub shift: f32,
-    /// ForceLayer lane (`ConvertLayerIndexNormalisedValue`; 0 single-layer).
+    /// ForceLayer lane (normalized layer index; 0 single-layer).
     pub force_layer: f32,
 }
 

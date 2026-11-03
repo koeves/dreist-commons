@@ -1,7 +1,7 @@
 //! Transmod modulator graphs ([re:1962d1]
 //! [re:f491ae], the `DisplayPanel` of each modulator skin): `width` values in
 //! 0..1 drawn as a 2 px line at `y = 3 + (h − 6)·(1 − v)`. The shapes come
-//! from each modulator's `GetVisualization` (two cycles across the width
+//! from each modulator's visualisation (two cycles across the width
 //! for the LFOs). Maths and Sample & Hold draw nothing.
 
 use dreist_dsp::modulators::lfo_table;

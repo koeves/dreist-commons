@@ -139,7 +139,7 @@ impl MoogOut {
     }
 }
 
-/// [re:2e09a0] square (`tickSqrPwm`) as used by [re:eb0467] mode 3.
+/// [re:2e09a0] square (pulse tick) as used by [re:eb0467] mode 3.
 /// The original's band-limiting table [re:031640] lives in zero-filled
 /// memory that nothing writes, so every BLEP correction is 0 and each edge
 /// lands about 8 samples late through the voice-slot bookkeeping.
@@ -178,7 +178,7 @@ impl SquareOsc {
         }
     }
 
-    /// Shared body of the 3- and 4-argument `tickSqrPwm` ([re:d08eff] / [re:fe8643]).
+    /// Shared body of the 3- and 4-argument pulse ticks ([re:d08eff] / [re:fe8643]).
     fn tick(&mut self, inc: f32, pw: f32) -> f32 {
         let delayed = self.delay[self.delay_pos];
         self.delay[self.delay_pos] = pw;

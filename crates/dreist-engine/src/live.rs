@@ -3,11 +3,11 @@
 
 /// [re:bcefb7] engine value meaning "the selected engine" (−666).
 pub const SELECTED: i32 = -666;
-/// `GetMIDINoteForPadAndEngine` [re:1d8fbb]: pad + 36.
+/// A pad's MIDI note [re:1d8fbb]: pad + 36.
 pub const PAD_NOTE_BASE: u8 = 36;
 
-/// [re:bcefb7] (0x38 bytes): +0x14 type, +0x18 function, +0x1c engine,
-/// +0x20 pad, +0x24 pattern, +0x28 scene.
+/// [re:bcefb7]: type, function, engine,
+/// pad, pattern, scene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MapItem {
     #[default]
@@ -36,7 +36,7 @@ pub struct MidiMap {
 }
 
 impl Default for MidiMap {
-    /// `SetupDefaultMap` [re:c3e2ba] + `SetupExtraSceneChannel(15)` [re:f1f4ad].
+    /// Default map [re:c3e2ba] + the extra scene channel 15 [re:f1f4ad].
     fn default() -> Self {
         let mut m = MidiMap { items: vec![MapItem::None; 16 * 128] };
         for c in 0..9 {
@@ -81,7 +81,7 @@ impl MidiMap {
     }
 }
 
-/// `Engine::PadMode` (`CreatePadModeMap` [re:8d4ce4]).
+/// Engine `PadMode` ([re:8d4ce4]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PadMode {
     #[default]
@@ -116,8 +116,8 @@ pub fn pad_to_velocity(pad: u32, visible_pads: u32) -> u32 {
     (((p + 1) as f32 / d) * 127.0).floor() as u32
 }
 
-/// Note-repeat interval in quarter notes for `NoteRepeatBase` 0..=13
-/// (`DoStartNote` [re:d8fe7c] switch; out-of-range → 1).
+/// Note-repeat interval in quarter notes for note repeat base 0..=13
+/// (note start [re:d8fe7c] switch; out-of-range → 1).
 pub fn repeat_interval_qn(base: u32) -> f64 {
     match base {
         0 => 4.0,
@@ -137,7 +137,7 @@ pub fn repeat_interval_qn(base: u32) -> f64 {
     }
 }
 
-/// Normalised MIDI status (`ProcessMIDIEvent` [re:70eb56]): channel messages
+/// Normalised MIDI status (MIDI event handling [re:70eb56]): channel messages
 /// keep the high nibble, note-on velocity 0 → note-off, CC 123/124 → 0xff.
 pub fn status_kind(data: [u8; 4]) -> u8 {
     let s = if data[0] < 0xf0 { data[0] & 0xf0 } else { data[0] };

@@ -12,7 +12,7 @@
 //! Menus: an empty slot's TypePopup lists the 8 modulator types
 //! ([re:88ebb5] lambda [re:ff6599], names via
 //! [re:321f37] split from camel case); choosing one inserts it
-//! (`InsertModulator` [re:9c3f18]: message 0x2b [slot, modulator], then
+//! ([re:9c3f18]: message 0x2b [slot, modulator], then
 //! selects source slot + 5). A modulator's Options button
 //! ([re:adeff9] lambda [re:0cb4ec]) offers Remove
 //! modulator, the 8 types to replace it, and the check item "Keep trigger
@@ -301,7 +301,7 @@ impl Transmod {
         let Some(sp) = &self.scroller else { return };
         let Some(sc) = app.ctrl_mut(sp) else { return };
         sc.children.clear();
-        // [re:8b43ec] $_0 re-stacks when a panel folds.
+        // [re:8b43ec] re-stacks when a panel folds.
         sc.set_attr("stackAxis", "v".into());
         sc.set_attr("stackGap", "2".into());
         let w = sc.rect.w;
@@ -441,8 +441,8 @@ impl Transmod {
     }
 
     /// A knob double click's reset value: macros 0
-    /// ([re:ce19fc] $_1 [re:69ec5c]), modulator
-    /// parameters their default ([re:e5c3c3] $_13 [re:69fc2e],
+    /// ([re:ce19fc] [re:69ec5c]), modulator
+    /// parameters their default ([re:e5c3c3] [re:69fc2e],
     /// [re:674117]).
     pub fn reset_value(&self, app: &App, model: &Model, path: &[usize], name: &str) -> Option<f32> {
         if self.select.as_ref().is_some_and(|sp| path.starts_with(sp)) && name.starts_with("Macro") {
@@ -502,7 +502,7 @@ impl Transmod {
                 } else {
                     model.doc.children.push(n);
                 }
-                // `InsertModulator`: select the new modulator's source.
+                // As on insert: select the new modulator's source.
                 model.source = (slot + 5).min(28);
             }
             _ => return,
@@ -538,7 +538,7 @@ impl Transmod {
         true
     }
 
-    /// "Rename" ([re:284b3d] $_3 [re:5661c5] for macros, $_9
+    /// "Rename" ([re:284b3d] [re:5661c5] for macros,
     /// [re:14a9cd] / [re:4faf1b] for sources): a 150 × 20 edit box over the
     /// control with the current name.
     pub fn start_rename(&mut self, app: &mut App, model: &Model, path: &[usize], target: Result<usize, usize>) {
@@ -583,7 +583,7 @@ impl Transmod {
         }
     }
 
-    /// [re:ce19fc] $_9 [re:32cf77]: a source button's
+    /// [re:ce19fc] [re:32cf77]: a source button's
     /// right-click menu — Unipolar (0x31, `Polar_<source>`), Remove all
     /// modulation from this source / from the product (confirmed; 0x32
     /// per source). The port edits the document and rebuilds.
@@ -680,7 +680,7 @@ impl Transmod {
                         if s != slot {
                             return true;
                         }
-                        // `UpdateStepValueFromMousePosition` [re:1539da].
+                        // Step value from the mouse position [re:1539da].
                         let px = *x as i32;
                         let Some(step) = cells.iter().position(|(cx, cw)| px >= *cx && px < cx + cw) else { return true };
                         let v = (1.0 - *y / h as f32).clamp(0.0, 1.0);
@@ -718,7 +718,7 @@ impl Transmod {
             }
             if let Some((slot, actions)) = self.menu.take() {
                 match actions.get(*index).copied().unwrap_or(MenuAction::None) {
-                    // [re:adeff9] $_4 lambda #1 [re:edac74]:
+                    // [re:adeff9] lambda #1 [re:edac74]:
                     // option `RemoveModBehavour` (Prompt, AlwaysClear,
                     // NeverClear, ClearOnModifier — option key).
                     MenuAction::Remove => match crate::options::Options::load().string("RemoveModBehavour", "Prompt").as_str() {
@@ -846,7 +846,7 @@ impl Transmod {
 /// the Steps knob under colDisabledOverlay; the playing step's cell is
 /// filled with colAltFill first ([re:cf6b89], kept in
 /// `Model::seq_steps`).
-/// [re:da0f3d] ctor $_3 [re:32145b]: "Step n - v%" over a cell.
+/// [re:da0f3d] ctor [re:32145b]: "Step n - v%" over a cell.
 pub fn seq_tooltip(model: &Model, c: &Ctrl, x: f32) -> Option<String> {
     let slot: usize = c.attr("modSlot")?.parse().ok()?;
     let n = modulator(model, slot)?;

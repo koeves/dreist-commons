@@ -1,7 +1,7 @@
 //! [re:d45123]: per-channel smoothing, peak hold and clip
-//! latch (`Update` [re:4d45b9]) and drawing (`DrawVerticalBackground`
-//! [re:26a3fa], `DrawVerticalMeters` [re:c82e14], `DrawHorizontalMeters`
-//! [re:cc7f14], `DecibelsToPosition` [re:ecd866]).
+//! latch ([re:4d45b9]) and drawing (vertical background
+//! [re:26a3fa], vertical meters [re:c82e14], horizontal meters
+//! [re:cc7f14], dB to position [re:ecd866]).
 //!
 //! Style attributes ([re:1e8fdf]
 //! [re:26dfaa]): 0x20 intMarkingSize (12), 0x21 intClipDimension (10), 0x22
@@ -14,17 +14,17 @@ use crate::ctrl::Ctrl;
 use crate::paint::{Painter, RectF};
 use crate::style::{HAlign, StyleSheet, VAlign};
 
-/// Range set by the constructor (+0x224 / +0x228).
+/// Range set by the constructor.
 pub const MIN_DB: f32 = -90.0;
 pub const MAX_DB: f32 = 0.0;
-/// Smoothing coefficients set on the first `Update` (+0x218 / +0x21c).
+/// Smoothing coefficients set on the first update.
 const ATTACK: f32 = 4.641_581e-34;
 const RELEASE: f32 = 0.814_912_74;
 /// Peak hold in updates, then −0.6 dB per update.
 const HOLD: i32 = 30;
 const PEAK_FALL_DB: f32 = 0.6;
 
-/// [re:64f223] (20 bytes).
+/// [re:64f223].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MeterInfo {
     /// Displayed value: dB (log meters) or amplitude (linear meters).
@@ -36,7 +36,7 @@ pub struct MeterInfo {
     pub hold: i32,
 }
 
-/// `Update` [re:4d45b9]: feed one peak amplitude per channel; true when the
+/// [re:4d45b9]: feed one peak amplitude per channel; true when the
 /// display changed.
 pub fn update(meters: &mut Vec<MeterInfo>, levels: &[f32], linear: bool) -> bool {
     if meters.len() != levels.len() {
@@ -118,7 +118,7 @@ fn look(s: &StyleSheet, st: &str) -> Look {
     }
 }
 
-/// `DecibelsToPosition` [re:ecd866]: pixel offset (from the top for vertical
+/// dB to position [re:ecd866]: pixel offset (from the top for vertical
 /// meters, from the left for horizontal ones).
 fn position(w: f32, h: f32, clip: f32, v: f32, linear: bool) -> f32 {
     let frac = if linear { v } else { -((v - MIN_DB) / (MIN_DB - MAX_DB)) };
@@ -206,7 +206,7 @@ pub fn draw(p: &mut Painter, s: &StyleSheet, st: &str, c: &Ctrl) {
         p.stroke_rect(area.pixel_align(), lk.border, 1.0);
     } else {
         // Horizontal: rows top to bottom, clip area at the right
-        // (`DrawHorizontalMeters`; the background mirrors the vertical one).
+        // (the background mirrors the vertical one).
         let m = if lk.marking + lk.marking > h || lk.hide_text { 0.0 } else { lk.marking };
         let area_h = (h - m).max(0.0);
         p.fill_rect(rect(0.0, 0.0, w, area_h), lk.fill);

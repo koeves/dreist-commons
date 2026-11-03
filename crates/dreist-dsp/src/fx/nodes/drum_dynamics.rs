@@ -1,9 +1,9 @@
-//! [re:339ec8] (Drum Dynamics, kind 13; `Voice::Reset`
-//! [re:6ed5a6], `PrepareStream` [re:5704f4], `ProcessBuffer` [re:f8ab3a]): the
+//! [re:339ec8] (Drum Dynamics, kind 13; reset
+//! [re:6ed5a6], stream setup [re:5704f4], processing [re:f8ab3a]): the
 //! `DrumDynamics` transient/sustain shaper side-chained by the left input
 //! (the side-chain audio port is unconnected in effect chains), crossfaded
 //! in from dry over the first block after a reset
-//! (`vfcSIMD_VectorWetDryMixS_io` [re:e67f1c]).
+//! (vector wet/dry mix [re:e67f1c]).
 
 use super::blocks::DrumDynamics as Shaper;
 use crate::fx::{Ctx, Node, Port, ports, ports_from, scratch};
@@ -29,7 +29,7 @@ impl Default for DrumDynamics {
     }
 }
 
-/// `vfcSIMD_VectorWetDryMixS_io`: wet gain ramps `w0 → w1` (dry the
+/// Vector wet/dry mix: wet gain ramps `w0 → w1` (dry the
 /// complement) in four-lane steps, the remainder continuing from lane 0.
 pub fn wet_dry_mix(out: &mut [f32], wet: &[f32], dry: &[f32], w0: f32, w1: f32) {
     let n = out.len();

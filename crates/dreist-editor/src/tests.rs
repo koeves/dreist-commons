@@ -3261,7 +3261,7 @@ fn tooltips_follow_the_pointer() {
 fn layer_meta_data_editor_saves_the_gsa() {
     let dir = std::env::temp_dir().join(format!("dreist-meta-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    // A 2 s mono file: GuessKeyData gives 120 BPM over 1 bar.
+    // A 2 s mono file: key data guessing gives 120 BPM over 1 bar.
     let wav = dir.join("loop 97.wav");
     let silence = vec![0.0f32; 88200];
     dreist_engine::write_wav(&wav, 44100, &silence, &silence).unwrap();

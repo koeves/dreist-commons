@@ -50,7 +50,7 @@ impl VoiceFilter {
 
     /// The cores back to their state after `new`, keeping the comb buffers
     /// and ramp (no allocation at note start). The drive ramp is kept: the
-    /// binary's reset only resets the filter cores, so a voice's drive
+    /// original's reset only resets the filter cores, so a voice's drive
     /// glides from its previous note's gain.
     pub fn reset(&mut self) {
         let sr = self.sr;

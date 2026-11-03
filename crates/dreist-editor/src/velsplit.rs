@@ -1,35 +1,35 @@
 //! Pad options panel ([re:3af242], [re:96dbe2]),
 //! shown in place of the layer panel by the inspector's "Pad options..."
-//! button ([re:281f54] $_3 [re:6b84c1] slides it over the layer
-//! panel: in from the right edge in 350 ms, out in 250 ms, `Exponential`
+//! button ([re:281f54] [re:6b84c1] slides it over the layer
+//! panel: in from the right edge in 350 ms, out in 250 ms, exponential
 //! curve, the button disabled meanwhile).
 //!
 //! - `SelModeCombo`: the five [re:9500d6] modes →
 //!   `e_setPadLayerMode` 0x51 [e, p] [mode].
 //! - `v2a` knob: `e_setPadParameter` 0x4e [e, p] [v, 2 (V2A), 0].
-//! - `LinkButton1..64`: `e_setPadLinkage` 0x53 [e, p] [pad, on] ($_11 [re:61efc2]).
-//! - "Auto" (`Insert`, enabled in velocity-split mode only, `Update`
+//! - `LinkButton1..64`: `e_setPadLinkage` 0x53 [e, p] [pad, on] ([re:61efc2]).
+//! - "Auto" (`Insert`, enabled in velocity-split mode only, update
 //!   [re:ae10bc]): "Auto split velocity graphs" → 0x57, "Auto overlap velocity
-//!   graphs 10/20/25/50%" → 0x58 [e, p] [0.1 ...] ($_0 [re:4d9d0b] and its
+//!   graphs 10/20/25/50%" → 0x58 [e, p] [0.1 ...] ([re:4d9d0b] and its
 //!   lambdas [re:284606].., undo "Engine %d Pad %d auto velocity split" /
 //!   "... auto velocity overlap N%").
 //! - Eight [re:1582ce]s (style `VSplitStyle`) stacked in
 //!   `LayoutBox`, one per layer, enabled when the layer has audio, is not
 //!   locked and the pad is in velocity-split mode. Releasing a drag posts
 //!   min 0x7e, min turnover 0x7f, max turnover 0x81, max 0x80 [e, p, l]
-//!   ($_9 [re:57f001], undo "Engine %d Pad %d velocity split" from $_10).
+//!   ([re:57f001], undo "Engine %d Pad %d velocity split" from a second callback).
 //!
 //! [re:1582ce] ([re:f2232e]..): velocity v sits at x = v·(w−8)/127
-//! (`DoUpdateToMatchLayer` [re:245576]; back with +0.5 truncation,
-//! `GetVelocityScaledParameters` [re:925e3b]). Four 8×8 handles: lowest at the
-//! bottom, the turnovers at the top, highest at the bottom (`SetRect`
-//! [re:007f2d]). `Draw` [re:648037]: 126 grid lines at floor(i·w/127) in colBorder
+//! ([re:245576]; back with +0.5 truncation,
+//! [re:925e3b]). Four 8×8 handles: lowest at the
+//! bottom, the turnovers at the top, highest at the bottom (layout
+//! [re:007f2d]). Drawing [re:648037]: 126 grid lines at floor(i·w/127) in colBorder
 //! (colAltBorder every 8th), the bounds in colBorder; enabled, the
 //! trapezoid (lowest, h) → (low turn, 0) → (high turn + 8, 0) → (highest + 8,
 //! h) filled colFill α0.4 and stroked colFill, then the handles: dragged
 //! colAltFill, others colAltFill darker 0.4 at α0.5 (hover lighter 0.4 is not
-//! tracked). `OnMouseLButtonDown` [re:155142] grabs a handle, or the whole
-//! split when none is hit; `OnMouseMove` [re:98a9bc] applies the clamps of
+//! tracked). A left press [re:155142] grabs a handle, or the whole
+//! split when none is hit; a mouse move [re:98a9bc] applies the clamps of
 //! [`drag`].
 
 use dreist_engine::binding::id;
@@ -66,7 +66,7 @@ pub fn hit(px: [f32; 4], h: f32, x: f32, y: f32) -> Option<usize> {
     (0..4).find(|&k| (ys[k]..ys[k] + HANDLE).contains(&y) && (px[k]..px[k] + HANDLE).contains(&x))
 }
 
-/// `OnMouseMove` [re:98a9bc]: move `handle` (or everything) by `dx` pixels.
+/// Mouse move [re:98a9bc]: move `handle` (or everything) by `dx` pixels.
 pub fn drag(px: &mut [f32; 4], handle: Option<usize>, dx: f32, w: f32) {
     let max = w - HANDLE;
     let [p0, p1, p2, p3] = px;
@@ -172,7 +172,7 @@ pub struct VelSplit {
     panel: Option<Vec<usize>>,
     layer_panel: Option<Vec<usize>>,
     show: bool,
-    /// The panel is sliding in or out (`$_3`): sync leaves visibility alone.
+    /// The panel is sliding in or out: sync leaves visibility alone.
     sliding: bool,
     drag: Option<Drag>,
     menu: Option<Menu>,
@@ -269,7 +269,7 @@ impl VelSplit {
         });
     }
 
-    /// [re:fe83c5] $_3 [re:29de0f]: a double click on v2a resets it
+    /// [re:fe83c5] [re:29de0f]: a double click on v2a resets it
     /// ([re:d6dc6f]).
     pub fn reset_value(&self, path: &[usize], name: &str) -> Option<f32> {
         (name == "v2a" && self.panel.as_ref().is_some_and(|pp| path.starts_with(pp))).then(|| dreist_formats::PadParam::V2A.default_value())
@@ -281,9 +281,9 @@ impl VelSplit {
         let ep = [e as i32, p as i32];
         let in_panel = |path: &[usize]| self.panel.as_ref().is_some_and(|pp| path.starts_with(pp));
         match ev {
-            // [re:281f54] $_3 [re:6b84c1]: on, the panel starts at
+            // [re:281f54] [re:6b84c1]: on, the panel starts at
             // the layer panel's right edge and slides over it (350 ms,
-            // `Exponential`), then the layer panel hides; off, the layer
+            // exponential), then the layer panel hides; off, the layer
             // panel shows and the panel slides back out (250 ms) and hides.
             // The button is disabled while sliding.
             UiEvent::Clicked { path, name, on, .. } if name == "ShowSplits" => {
@@ -350,7 +350,7 @@ impl VelSplit {
                 out.push(msg(id::SET_PAD_LINKAGE, &ep, &[(j - 1) as f32, *on as i32 as f32]));
                 true
             }
-            // `$_4` [re:411697]: right-click → Reset (0x4e with
+            // [re:411697]: right-click → Reset (0x4e with
             // [re:e79ca7]) / Edit
             // ([re:c8b896]: type the value in its units).
             UiEvent::RightClicked { path, name } if in_panel(path) && name == "v2a" => {

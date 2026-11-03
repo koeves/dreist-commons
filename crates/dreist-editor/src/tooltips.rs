@@ -1,5 +1,5 @@
 //! Tooltip texts ([re:36b15b]s, the panels' tooltip lambdas
-//! and `GetToolTipText` overrides): asked of the control under the
+//! and per-control text overrides): asked of the control under the
 //! pointer, then its parents, after each pointer event
 //! ([re:eb2a9b]). Controls without a provider show
 //! none (there is no generic fallback); static texts are the skin
@@ -12,15 +12,15 @@ use crate::Editor;
 use crate::conv::{Conv, bool_text, db15, db15_text, depth_text, long_percent_text, midi_text, transmod_text};
 
 /// Buttons given a [re:38d526] ("N: On" / "N: Off"; the
-/// `Connect<T>(.., provider, ..)` calls and `+0x80` stores).
+/// controls connected to a provider).
 const BOOL_BUTTONS: [&str; 33] = [
     "Mute", "Solo", "MuteButton", "SoloButton", "QuantizeButton", "PlayButton", "RecButton", "RecordButton", "LearnButton", "MetroButton", "SongButton", "LoopButton", "PrePostButton", "PrePost",
     "Gated", "Restart", "Remix", "EraseButton", "FullLevelButton", "MultiLayersButton", "LoopPreview", "ArmButton", "ThruButton", "AllLayers", "AllPads", "ShowSplits", "AutoAllocateButton",
     "SliceModeButton", "ActiveButton", "PatternPower", "PowerButton", "RepeatButton", "View",
 ];
 
-/// Fixed help texts of the pattern tool bar ($_3, $_8, $_10, $_22) and
-/// sampler ($_7..$_9) tooltip lambdas.
+/// Fixed help texts of the pattern tool bar and
+/// sampler tooltip lambdas.
 const HELP: [(&str, &str); 7] = [
     ("StepLengthCombo", "Length of time each step lasts"),
     ("LengthBox", "Number of steps in the pattern"),
@@ -66,7 +66,7 @@ impl Editor {
             let oy = self.app.origin(path).1;
             return Some(dreist_gui::ctrl::Rect::new(self.app.mouse_pos().0 as i32, oy - 2, 0, 0));
         }
-        // [re:45e9a3] $_5: the out rect's y = 10 pushes it down.
+        // [re:45e9a3]: the out rect's y = 10 pushes it down.
         if c.name == "PlusButton" {
             let mut r = self.app.abs_rect(path);
             r.y += 10;
@@ -75,7 +75,7 @@ impl Editor {
         None
     }
 
-    /// The shown transmod source's label and index (`+0x470` etc.).
+    /// The shown transmod source's label and index.
     fn tooltip_source(&self) -> Option<(String, usize)> {
         let s = self.model.source;
         if s == 0 {
@@ -105,7 +105,7 @@ impl Editor {
                 if c.class == "CtrlPopupButton" {
                     return None;
                 }
-                // `AddConversionHandlers` $_31 [re:fbe4f3].
+                // Conversion handler [re:fbe4f3].
                 if name == "TimestretchMode" {
                     return below(format!("{}: {}", c.display_name, if c.on { "Low CPU Mode (Fast)" } else { "High Precision Mode" }));
                 }
@@ -119,7 +119,7 @@ impl Editor {
                 .map(|(l, s)| (l.as_str(), node.and_then(|n| dreist_engine::engine::doc::attr_name(par.name(), *s).and_then(|a| n.f32(&a))).unwrap_or(0.0)));
             return below(transmod_text(Conv::layer(par, predelay_ms), &label, v, s));
         }
-        // [re:fe83c5] $_8 [re:9ac3aa].
+        // [re:fe83c5] [re:9ac3aa].
         if self.inspector.is_v2a(path, name) {
             let r = v * 100.0;
             return below(format!("Velocity To Amplitude: {}%", (r + if r < 0.0 { -0.5 } else { 0.5 }) as i64));
@@ -134,9 +134,9 @@ impl Editor {
             return Some((t, pos));
         }
         match name {
-            // [re:4139f8] $_4 [re:f8b6cc].
+            // [re:4139f8] [re:f8b6cc].
             "GlobalGain" => return below(Conv::Decibels.named("Master Level", v)),
-            // [re:45e9a3] $_16, [re:bc7b1d] $_14.
+            // [re:45e9a3], [re:bc7b1d].
             "SwingKnob" => return below(Conv::Percent.named("Swing Depth", v)),
             "VarianceKnob" => return below(Conv::Depth.named("Variance", v)),
             "ScaleKnob" | "CompKnob" | "RandKnob" => return below(depth_text(&c.display_name, v)),
@@ -146,7 +146,7 @@ impl Editor {
             "MixKnob" => return below(Conv::Percent.named("Mix", v)),
             "OutputKnob" => return below(Conv::Percent.named("Level", v)),
             "TrimKnob" => return below(Conv::Percent.named("Trim", v)),
-            // [re:9fbf48] $_2 / $_3 (the start one above).
+            // [re:9fbf48] (with the start one above).
             "StartThresholdSlider" => return Some((format!("Start threshold: {}", db15(v)), Pos::Above)),
             "StopThresholdSlider" => return below(format!("Stop threshold: {}", db15(v))),
             "PreviewVolume" if !c.display_name.is_empty() => return below(db15_text(&c.display_name, v)),
@@ -160,7 +160,7 @@ impl Editor {
             }
             _ => {}
         }
-        // [re:284b3d] $_4 (macros) / $_5 (sources, above).
+        // [re:284b3d] (macros; sources above).
         if let Some(k) = name.strip_prefix("Macro").and_then(|k| k.parse::<usize>().ok()).filter(|_| c.class.contains("Knob")) {
             return below(Conv::Percent.named(&format!("Macro {k}"), v));
         }

@@ -1,7 +1,7 @@
 //! State shared by [re:de3bd1] and [re:9f5917]: two input chains
 //! (predelay → two allpass diffusers → main delay), four multi-tap
 //! readers with two LFO-swept taps each, the size-change crossfade and the
-//! wet/dry smoothers. Field offsets are [re:9a68cc]'s / [re:6507ff]'s.
+//! wet/dry smoothers. Fields follow [re:9a68cc] / [re:6507ff].
 
 use super::blocks::*;
 
@@ -36,7 +36,7 @@ pub struct Core {
     pub pre: [DelayItem; 2],
     pub lfo: [Lfo; 2],
     pub depth: i64,
-    /// `PickAddVariable` positions (16.16).
+    /// Variable tap positions (16.16).
     pub pav: [i64; 6],
     /// Main taps LL, LR, RL, RR.
     pub taps: [Taps; 4],
@@ -95,18 +95,18 @@ impl Core {
         }
     }
 
-    /// The two `SetLFO(sine, 0.21 / 0.18, 0.5)` calls of the ctors.
+    /// The two LFO setups (sine, 0.21 / 0.18 Hz, 0.5) at construction.
     pub fn init_lfos(&mut self) {
         self.lfo[0].set(3, f32::from_bits(0x3e570a3d), 0.5);
         self.lfo[1].set(3, f32::from_bits(0x3e3851ec), 0.5);
     }
 
-    /// Size factor of `ChangeSizes`.
+    /// Size factor of the size change.
     pub fn size_factor(&self) -> f32 {
         ((self.size * 36.0 + 4.0) * (self.sr / 44100.0)) / 20.0
     }
 
-    /// Allpass and main-delay lengths plus main taps (`ChangeSizes`).
+    /// Allpass and main-delay lengths plus main taps (size change).
     pub fn change_sizes(&mut self, f: f32, tap_offset: i64) {
         for (d, n) in self.ap.iter_mut().zip([224.0, 369.0, 194.0, 304.0]) {
             d.set_length((f * n) as i32 as i64);
@@ -119,7 +119,7 @@ impl Core {
         }
     }
 
-    /// `ChangeDiffusion`.
+    /// Diffusion change.
     pub fn change_diffusion(&mut self) {
         let g2 = self.diffusion * -0.64;
         let g1 = self.diffusion * -0.725;
@@ -129,7 +129,7 @@ impl Core {
         self.ap[2].gain = g1;
     }
 
-    /// `ChangeSpin`: rate `20^spin · 0.1` Hz (×0.9 / ×1.1), sweep depth
+    /// Spin change: rate `20^spin · 0.1` Hz (×0.9 / ×1.1), sweep depth
     /// `min(16·wander / rate, 64)` samples.
     pub fn change_spin(&mut self) {
         let f = (20f64.powf(self.spin as f64) * 0.1f32 as f64) as f32;
@@ -139,7 +139,7 @@ impl Core {
         self.lfo[1].set_freq(f * 1.1);
     }
 
-    /// `ChangePredelay`.
+    /// Predelay change.
     pub fn change_predelay(&mut self) {
         let s = if self.sync == 0 { self.predelay } else { (self.sync_mult * 60.0) / self.bpm };
         let n = predelay_len(s, self.sr);
@@ -156,7 +156,7 @@ impl Core {
         }
     }
 
-    /// Start of `ChangeWaveInfo` once the rate changed by more than 1 Hz.
+    /// Start of the rate change once the rate changed by more than 1 Hz.
     pub fn set_rate(&mut self, sr: f32) {
         self.sr = sr;
         for l in &mut self.lfo {
@@ -164,7 +164,7 @@ impl Core {
         }
     }
 
-    /// Size-change crossfade at the top of `Process`; returns true when
+    /// Size-change crossfade at the top of processing; returns true when
     /// the fade reached zero and the caller must apply sizes and reset.
     pub fn fade_tick(&mut self) -> bool {
         match self.fade_state {

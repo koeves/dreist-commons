@@ -1,15 +1,15 @@
 //! Missing files ([re:f7e56f], [re:37765e]): the audio files
 //! a project refers to that could not be found while loading.
 //!
-//! - Auto Find (`DoAutoFind` [re:513f9b]): choose a start folder (remembered
+//! - Auto Find ([re:513f9b]): choose a start folder (remembered
 //!   as `FileFindLastLocation`), then [re:cdeafd]
 //!   [re:3c8277] walks it recursively and matches files by name (a trailing
 //!   ".truncated" extension is ignored); a match is loaded into every layer
 //!   that asked for that file.
-//! - Find Selected (`DoManualFind` [re:46ada2]): locate one file by hand; the
+//! - Find Selected ([re:46ada2]): locate one file by hand; the
 //!   other missing files present in the same folder are fixed too
-//!   (`FindOtherRequestsInThisFolder` [re:607607]).
-//! - Remove Selected (`DoRemoveSelected` [re:174ddf]): the layers drop the
+//!   ([re:607607]).
+//! - Remove Selected ([re:174ddf]): the layers drop the
 //!   reference. Select All / Select None / Finished.
 
 use std::collections::BTreeSet;
@@ -76,9 +76,9 @@ fn match_name(p: &Path) -> Option<String> {
 /// A running [re:fb2fba]: what the worker reports.
 #[derive(Debug, Default)]
 pub struct JobState {
-    /// `JobProgress`: 0..1, each file adding its share of its folder.
+    /// Progress: 0..1, each file adding its share of its folder.
     pub progress: f32,
-    /// The entry being looked at (+0x98, shown in ScanLabel).
+    /// The entry being looked at (shown in ScanLabel).
     pub current: String,
     pub abort: bool,
     pub done: bool,
@@ -185,10 +185,10 @@ impl FileFind {
     }
 
     pub fn sync(&mut self, app: &mut App) {
-        // [re:89e6b8] / `Close` [re:48676b]: slides from the
+        // [re:89e6b8] / closing [re:48676b]: slides from the
         // top (500 ms Exponential in, Logarithmic out).
         let open = self.overlay.clone().map(|p| self.slide.sync(app, &p, self.open)).unwrap_or(false);
-        // `DoUpdateButtonState` [re:7315e8]: everything but Select All needs a
+        // [re:7315e8]: everything but Select All needs a
         // selection.
         let any = !self.selected.is_empty();
         if let Some(o) = self.overlay.clone().and_then(|p| app.ctrl_mut(&p)) {
@@ -237,7 +237,7 @@ impl FileFind {
         }
     }
 
-    /// `DoAutoFind` [re:513f9b]: HoldingPanel hidden, ScanningPanel shown,
+    /// Auto Find [re:513f9b]: HoldingPanel hidden, ScanningPanel shown,
     /// ScanLabel cleared, the title "Scanning folders to find missing
     /// files...", the panel shrinks to the scanning panel's bottom (750 ms
     /// Logarithmic) and the [re:fb2fba] searches `root` on a worker.
@@ -449,7 +449,7 @@ impl FileFind {
                 Colour::TRANSPARENT
             };
             p.fill_rect(RectF::new(0.0, y, w, ROW), bg);
-            // `DoUpdateList` [re:28fc2e]: the file name (".truncated" dropped),
+            // [re:28fc2e]: the file name (".truncated" dropped),
             // then engine / pad / layer counted from 1.
             let name = match_name(&m.path).unwrap_or_default();
             let (e, pad, l) = m.layers.first().copied().unwrap_or_default();

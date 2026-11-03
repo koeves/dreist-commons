@@ -6,21 +6,19 @@
 //!   browser's Slice mode on an audio file); the wave editor resets its zoom
 //!   and the analysis (a `.gsa` sidecar, else [re:c5ff4b])
 //!   fills the slices.
-//! - `SliceAudioFile` [re:77d1da]: Transient mode keeps the slices usable at the
-//!   sensitivity (`GetUserSliceAnalysisForSensitivity`), Chop mode cuts
-//!   equal divisions (`ChopAudioFile`); locked slices are carried over
-//!   (`CopyLockedSlicesFrom`).
-//! - `DoUpdateControlsBasedOnSlicingMode` [re:cc20ff]: Transient shows the
+//! - Slicing [re:77d1da]: Transient mode keeps the slices usable at the
+//!   sensitivity, Chop mode cuts
+//!   equal divisions; locked slices are carried over.
+//! - Controls per slicing mode [re:cc20ff]: Transient shows the
 //!   Sensitivity slider, Chop the ChopDivisionBox.
-//! - `DoHandleMetaDataChange` [re:168d6a]: BPM 20..1000, Bars 0..1000, Beats
+//! - Meta data changes [re:168d6a]: BPM 20..1000, Bars 0..1000, Beats
 //!   0..100; with Auto on, beats ≥ 4 carry into bars and tempo ↔ bars/beats
-//!   follow the region length (`DoDetermineBarsAndBeatsFromTempo` /
-//!   `DoDetermineTempoFromBarsAndBeats`).
-//! - `AllocateAudioFile` [re:90734a] / job [re:f09ec6]: `ExtractPatternFromAnalysis`
+//!   follow the region length.
+//! - Allocation [re:90734a] / job [re:f09ec6]: the pattern is extracted from the analysis,
 //!   then the allocation manager assigns slices to pads (and the pattern).
-//! - `DoRevertChanges` [re:db19a5] (Cancel) restores the engine saved when the
+//! - Revert [re:db19a5] (Cancel) restores the engine saved when the
 //!   panel opened.
-//! - [re:b13346] / `DrawSliceMarker` [re:be5846]:
+//! - [re:b13346] / slice markers [re:be5846]:
 //!   a line per slice with a 12×10 head at the top (filled box when locked,
 //!   else a triangle, yellow when selected, Slate otherwise).
 
@@ -98,13 +96,13 @@ pub struct Slicer {
     previewing: bool,
     loop_preview: bool,
     /// A REX file: its own slices and tempo (Sensitivity and BPM disabled,
-    /// `DoEnableControls` [re:4cb63d] / `DoUpdateMetaDataFromAudioFile`
+    /// [re:4cb63d] / meta data from the file
     /// [re:17c579]).
     rex: bool,
 }
 
 /// Preference "Quantize REX" (`AllocatorQuantizeREX`): extracted steps get
-/// no timing offset (`ExtractPatternFromAnalysis` [re:150941] sets lane 3 to
+/// no timing offset (pattern extraction [re:150941] sets lane 3 to
 /// 0.5 instead of the slice's distance from the step) — for every slicing,
 /// not only REX files.
 fn quantize_rex() -> bool {
@@ -183,12 +181,12 @@ impl Slicer {
         Ok(out)
     }
 
-    /// `HandleSlicingStarted`: load `file` and its analysis, remember the
+    /// Slicing started: load `file` and its analysis, remember the
     /// document for Cancel.
     pub fn start(&mut self, model: &Model, file: &Path) -> bool {
-        // `DoLoadLoopOnPath` $_8 [re:660edf]: a REX ".truncated" path does not
+        // Loop load [re:660edf]: a REX ".truncated" path does not
         // slice; a REX file loads its slices end to end with the file's
-        // own slice points (`LoadViaREX`).
+        // own slice points.
         let (_, truncated) = dreist_engine::rex::strip_truncated(file);
         let rex = dreist_engine::rex::is_rex(file);
         if rex && truncated {
@@ -251,7 +249,7 @@ impl Slicer {
     }
 
     /// Zoom slider thumb (x, width) in a track `tw` wide: start and size as
-    /// fractions of the file ([re:214f77] / +0x220).
+    /// fractions of the file ([re:214f77]).
     fn zoom_thumb(&self, tw: f32) -> (f32, f32) {
         let n = self.frames().max(1) as f32;
         let (a, b) = self.view;
@@ -273,7 +271,7 @@ impl Slicer {
         self.audio.as_ref().map(|a| a.data.left.len() as u32).unwrap_or(0)
     }
 
-    /// `SliceAudioFile`.
+    /// Slice the file again.
     pub fn reslice(&mut self) {
         let locked: Vec<SlicePoint> = self.slices.iter().filter(|s| s.locked).copied().collect();
         let (start, end) = self.region();
@@ -295,7 +293,7 @@ impl Slicer {
         self.pattern = slice::extract_pattern(&self.slices, start, end, self.analysis.bars, self.analysis.beats, self.multi_layer, quantize_rex());
     }
 
-    /// `DoDetermineTempoFromBarsAndBeats`.
+    /// Tempo from bars and beats.
     fn tempo_from_bars(&mut self) {
         let (start, end) = self.region();
         let Some(sr) = self.audio.as_ref().map(|a| a.data.sample_rate) else { return };
@@ -306,7 +304,7 @@ impl Slicer {
         }
     }
 
-    /// `DoDetermineBarsAndBeatsFromTempo`.
+    /// Bars and beats from the tempo.
     fn bars_from_tempo(&mut self) {
         let (start, end) = self.region();
         let Some(sr) = self.audio.as_ref().map(|a| a.data.sample_rate) else { return };
@@ -319,7 +317,7 @@ impl Slicer {
         let Some(op) = self.overlay.clone() else { return };
         let editing = app.is_editing();
         // [re:695294] 0x13a / 0x145: slides down over MainPanel
-        // (350 ms `Exponential`), back up on close (350 ms `Logarithmic`,
+        // (350 ms exponential), back up on close (350 ms logarithmic,
         // then [re:5e9662]).
         if let Some(m) = self.main.clone() {
             let panel = [op.clone(), vec![0]].concat();
@@ -409,7 +407,7 @@ impl Slicer {
         out.push(model.rebuild_command());
     }
 
-    /// Preview frames `start..end` ([re:e80b43] vfunc 0xa8 with the
+    /// Preview frames `start..end` ([re:e80b43] with the
     /// region markers).
     fn preview(&self, start: u32, end: u32, looping: bool, out: &mut Vec<Command>) {
         if let Some(a) = &self.audio {
@@ -417,7 +415,7 @@ impl Slicer {
         }
     }
 
-    /// `DoPreviewSliceUnderClickPosition` [re:e50ea1]: the last slice starting
+    /// Slice preview at the click [re:e50ea1]: the last slice starting
     /// at or before `frame`, up to the next slice, clamped to the region;
     /// the whole region when there are no slices.
     pub fn slice_span(&self, frame: u32) -> Option<(u32, u32)> {
@@ -473,7 +471,7 @@ impl Slicer {
                     return true;
                 }
                 match name.as_str() {
-                    // `LoadSkin` lambdas $_19 [re:6886ec] / $_18 [re:de2e31].
+                    // Skin lambdas [re:6886ec] / [re:de2e31].
                     "PreviewWave" => {
                         self.previewing = *on;
                         if *on {
@@ -629,7 +627,7 @@ impl Slicer {
                         }
                         true
                     }
-                    // `OnZoneMouseButtonRightDown` [re:d538e0]: audition the slice.
+                    // Right press in a zone [re:d538e0]: audition the slice.
                     MouseKind::RightDown => {
                         if let Some((a, b)) = self.slice_span(self.frame_at(*x, w)) {
                             self.preview(a, b, false, out);
@@ -643,7 +641,7 @@ impl Slicer {
                 let Some((tw, h)) = app.ctrl(path).map(|c| (c.rect.w as f32, c.rect.h as f32)) else { return false };
                 let (mut tx, mut thw) = self.zoom_thumb(tw);
                 match kind {
-                    // `OnMouseLButtonDown` [re:89f320]: within 2 px of an edge
+                    // Left press [re:89f320]: within 2 px of an edge
                     // resizes, inside the thumb moves it.
                     MouseKind::Down => {
                         let inside_y = *y >= 0.0 && *y < h;
@@ -665,16 +663,16 @@ impl Slicer {
                         let Some((mode, last)) = self.zoom_drag else { return false };
                         let min_w = self.min_zoom_proportion() * tw;
                         match mode {
-                            // `DoCenterClickZoneDrag` [re:109246].
+                            // Centre zone drag [re:109246].
                             1 => tx = (tx + *x - last).clamp(0.0, (tw - thw).max(0.0)),
-                            // `DoLeftClickZoneDrag` [re:3ef21b].
+                            // Left zone drag [re:3ef21b].
                             2 => {
                                 let right = tx + thw;
                                 let nx = x.min(right - 20.0).min(right - min_w).max(0.0);
                                 thw = (right - nx).max(0.0);
                                 tx = nx;
                             }
-                            // `DoRightClickZoneDrag` [re:4f55d9].
+                            // Right zone drag [re:4f55d9].
                             _ => {
                                 let right = x.max(tx + 20.0f32.max(min_w)).min(tw);
                                 thw = (right - tx).max(0.0);
@@ -688,13 +686,13 @@ impl Slicer {
                     MouseKind::RightDown => false,
                 }
             }
-            // `OnMouseLButtonDblClick` [re:009295]: the whole file.
+            // Double click [re:009295]: the whole file.
             UiEvent::DoubleClicked { path, .. } if self.mine(path) && app.ctrl(path).is_some_and(|c| c.overload == "WaveDisplayZoomSlider") => {
                 self.zoom_drag = None;
                 self.view = (0, self.frames().max(1));
                 true
             }
-            // `OnMouseWheel` [re:207f1c]: the thumb moves 5 px.
+            // Mouse wheel [re:207f1c]: the thumb moves 5 px.
             UiEvent::Wheel { path, overload, dy } if self.mine(path) && overload == "WaveDisplayZoomSlider" => {
                 let Some(tw) = app.ctrl(path).map(|c| c.rect.w as f32) else { return false };
                 let (tx, thw) = self.zoom_thumb(tw);
@@ -715,7 +713,7 @@ impl Slicer {
     ///   layer;
     /// - else every (pad, layer) of the engine: a slice → the layer gets the
     ///   file with the slice's region; none → the layer's sample is removed
-    ///   (`DoClearLayer` [re:7d1e9f], 0xe1, unless pad or layer is locked);
+    ///   (layer clear [re:7d1e9f], 0xe1, unless pad or layer is locked);
     /// - each loaded layer: `e_resetLayerEnvelopes` (0x86,
     ///   [re:4220aa]) then AmpEnvAttack 0.1;
     /// - pattern (unless the current pattern is locked): a new pattern
@@ -929,7 +927,7 @@ fn zoom_view(x: f32, w: f32, tw: f32, n: u32, min: f32) -> (u32, u32) {
 }
 
 /// [re:4220aa]: amp and free envelopes to attack 0,
-/// decay 0.02, sustain 1, release 0.001, curves 0.5, then `ResetHoldTime`
+/// decay 0.02, sustain 1, release 0.001, curves 0.5, then the hold reset
 /// (no pitch compensation) for both holds.
 fn reset_envelopes(layer: &mut Node, region: f64, total: f64, sr: f32) {
     use dreist_formats::params::LayerParam as P;

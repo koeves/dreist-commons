@@ -1,4 +1,4 @@
-//! [re:d40288] (Driver; `Voice::ProcessBuffer` [re:24da21]) and
+//! [re:d40288] (Driver; processing [re:24da21]) and
 //! [re:0ca5a3] (Shaped Distortion; [re:5dade8], with
 //! [re:8f2521]..[re:856f3d] and [re:31ef56]
 //! [re:d39957]..[re:837667]) built on [re:fdc386].
@@ -89,7 +89,7 @@ impl Companding {
     fn set_sample_rate(&mut self, sr: f32) {
         self.dist.set_sample_rate(sr);
         self.dyn_.set_sample_rate(sr);
-        // SetMode(1).
+        // Mode 1.
         self.release = 0.5;
     }
 

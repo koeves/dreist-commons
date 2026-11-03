@@ -1,8 +1,8 @@
 //! Modal panels over the editor: About ([re:c045a2],
 //! [re:3c1e07]) and Preferences ([re:00fdfe],
-//! [re:0624c1] / `Show` [re:397244]).
+//! [re:0624c1] / [re:397244]).
 //!
-//! Preferences controls ↔ options (`Show`): QuantizeREXButton
+//! Preferences controls ↔ options (on showing): QuantizeREXButton
 //! `AllocatorQuantizeREX`, PreFadeButton `AuxesArePreFade`, MultiButton
 //! `PatternEditorRightClickMode`, ForceModeButton `ForcedLayersFallThrough`,
 //! ResetLayersButton `AllocatorClearLayersOnLoad`, ActiveSensingButton
@@ -13,20 +13,20 @@
 //! `RespondToExtendedKeyboard`, AutoAssign `AutoMIDICC` (on); MIDIModeGroup
 //! `MIDINumbering` (child ids, default 1); MetroType `MetronomeSound`
 //! (metronome folders, "Default"); ShadingMode `PatternEditorShadingMode`
-//! (Fixed, Adaptive, Cyclic, Off — `CreateShadingModeMap` [re:c192c5]);
+//! (Fixed, Adaptive, Cyclic, Off — [re:c192c5]);
 //! RemMod `RemoveModBehavour` (Prompt, AlwaysClear, NeverClear,
-//! ClearOnModifier — `CreateRemoveBehaviourMap` [re:d96028]); UIScaling
-//! `LastEditorScaleFactor` (100–300 %, `GetSupportedScaling` [re:ce8c40]);
+//! ClearOnModifier — [re:d96028]); UIScaling
+//! `LastEditorScaleFactor` (100–300 %, [re:ce8c40]);
 //! UIStyle (stylesheets); UndoStages `MaxUndoSteps` (1..250, default 20);
 //! DocumentsPath `LocalDocumentsPath`. Confirm writes, Cancel discards.
 //!
 //! The documents path is written at once, not on Confirm (ev_7e0eff81…,
-//! ev_b8fdc944…): Browse ($_22 [re:448611]) asks for a folder ("Please choose
+//! ev_b8fdc944…): Browse ([re:448611]) asks for a folder ("Please choose
 //! a new the original documents folder", starting at the current one); Reset
-//! ($_21 [re:9ab38e]) asks "Are you sure you want to reset the Documents path
-//! to %s?"; the text box ($_23 [re:c24122]) reverts to the stored path unless
+//! ([re:9ab38e]) asks "Are you sure you want to reset the Documents path
+//! to %s?"; the text box ([re:c24122]) reverts to the stored path unless
 //! the typed folder exists. Each write alerts "Changes will be applied the
-//! next time you start Dreist" once per panel showing (+0x201).
+//! next time you start Dreist" once per panel showing.
 
 use dreist_gui::app::{App, MouseKind, UiEvent};
 use dreist_gui::paint::{Painter, RectF};
@@ -146,20 +146,19 @@ pub fn docs_restart() -> String {
 #[cfg_attr(not(feature = "window"), allow(dead_code))]
 pub const DOCS_BROWSE_TITLE: &str = "Please choose a new documents folder";
 
-/// [re:0d12fb] $_15: the question asked 2 s after a new UI
+/// [re:0d12fb]: the question asked 2 s after a new UI
 /// scale was applied.
 pub const KEEP_SCALE: &str = "Do you want to keep this UI scaling ratio?";
 
 /// Dialog slide tags (`UiEvent::Animated`).
 pub(crate) const DIALOG_IN: u32 = 0xd1a0;
 pub(crate) const DIALOG_OUT: u32 = 0xd1a1;
-/// `AddDialogControlWithAnimation` / `RemoveDialogControlWithAnimation`
-/// duration used by every dialog (0x43fa0000).
+/// Slide in / out duration used by every dialog (0x43fa0000).
 pub(crate) const DIALOG_MS: f32 = 500.0;
 
 /// [re:56a48f] with the top
 /// edge (every caller): the dialog starts above the window, x centred
-/// (W/2 − w/2), and slides down to y = 0 (`Exponential`).
+/// (W/2 − w/2), and slides down to y = 0 (exponential).
 pub(crate) fn slide_in(app: &mut App, overlay: &[usize]) {
     let w = app.ctrl(overlay).map(|c| c.rect.w).unwrap_or(0);
     let mut p = overlay.to_vec();
@@ -169,8 +168,8 @@ pub(crate) fn slide_in(app: &mut App, overlay: &[usize]) {
     app.animate_rect(&p, Rect::new(x, -r.h, r.w, r.h), Rect::new(x, 0, r.w, r.h), DIALOG_MS, dreist_gui::collapse::exponential, DIALOG_IN);
 }
 
-/// `RemoveDialogControlWithAnimation` [re:2e49b1] (top edge, `Logarithmic`):
-/// back above the window; `RemovalAnimationDidFinish` then drops the shade.
+/// Slide out [re:2e49b1] (top edge, logarithmic):
+/// back above the window; the shade goes when it finishes.
 pub(crate) fn slide_out(app: &mut App, overlay: &[usize]) {
     let mut p = overlay.to_vec();
     p.push(0);
@@ -246,7 +245,7 @@ impl Modals {
         let about = overlay(skin, root, "AboutPanel.skin", "AboutOverlay")?;
         let prefs = overlay(skin, root, "OptionsPanel.skin", "PreferencesOverlay")?;
         let export = overlay(skin, root, "ExportPanel.skin", "ExportOverlay")?;
-        // The progress bar shows only while a job runs (`ATC_Tick`).
+        // The progress bar shows only while a job runs (timer tick).
         if let Some(c) = export.as_ref().and_then(|p| {
             let mut c = &mut *root;
             for &i in p {
@@ -422,7 +421,7 @@ impl Modals {
                     (_, "NormalizeComboBox") => app.open_menu(path, NORMALIZE.iter().map(|s| s.to_string()).collect(), None),
                     (_, "LoopButton") => self.options.set("ExportLoop", *on),
                     (_, "AutoCropButton") => self.options.set("ExportAutoCrop", *on),
-                    // $_8: Cancel aborts a running job, else closes.
+                    // Cancel aborts a running job, else closes.
                     (_, "CancelButton") => match &self.export_job {
                         Some(j) => {
                             if let Ok(mut g) = j.lock() {
@@ -569,7 +568,7 @@ impl Modals {
         if let Some(q) = self.docs_prompt {
             if let UiEvent::MenuSelected { index, .. } = ev {
                 self.docs_prompt = None;
-                // `DialogYesNo` 0 = Yes (item 2).
+                // Yes / No prompt: 0 = Yes (item 2).
                 if q == DocsPrompt::Reset && *index == 2 {
                     self.write_documents_path(app, &default_documents());
                 }
@@ -666,10 +665,10 @@ impl Modals {
                     "MetroType" => self.staged.set("MetronomeSound", v),
                     "ShadingMode" => self.staged.set("PatternEditorShadingMode", v),
                     "RemMod" => self.staged.set("RemoveModBehavour", REMOVE_BEHAVIOUR[(*index).min(3)]),
-                    // [re:0d12fb] $_15 [re:e257c1]: a new scale
+                    // [re:0d12fb] [re:e257c1]: a new scale
                     // applies at once (scale, host resize, options
                     // `LastEditorScaleFactor` / `LastEditorSize`), and 2 s
-                    // later the [re:275d67] lambda asks whether to keep it.
+                    // later the [re:275d67] callback asks whether to keep it.
                     "UIScaling" => {
                         let new = (SCALINGS[(*index).min(10)] * 100.0).floor() as i64;
                         let old = self.options.int("LastEditorScaleFactor", 100);
@@ -685,7 +684,7 @@ impl Modals {
                             self.options.save();
                         }
                     }
-                    // [re:0d12fb] $_1 [re:dfe5ca]: written at once
+                    // [re:0d12fb] [re:dfe5ca]: written at once
                     // and applied ([re:cac947], repaint).
                     "UIStyle" => {
                         let name = if v == DEFAULT_STYLE_LABEL { dreist_gui::skin::default_theme().to_string() } else { v.to_string() };
@@ -728,7 +727,7 @@ impl Modals {
         if c.overload != "ModalOverlay" {
             return false;
         }
-        // The dialog shade (`AddDialogControl`: colour 9 = (32, 32, 32, 180)).
+        // The dialog shade (colour 9 = (32, 32, 32, 180)).
         p.fill_rect(RectF::new(0.0, 0.0, c.rect.w as f32, c.rect.h as f32), Colour::rgba(32, 32, 32, 180));
         true
     }

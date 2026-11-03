@@ -117,8 +117,8 @@ impl SampleCache {
     }
 
     /// Tempo from the sample's `.gsa` sidecar (positive): the active
-    /// analysis (User, else Master; [re:fb32a7] / +0x118 →
-    /// [re:1d38e7], read by `UpdateTimestretchParameters` at
+    /// analysis (User, else Master; [re:fb32a7] →
+    /// [re:1d38e7], read by the timestretch parameter update at
     /// [re:dc2d9d]). Read again only when the file changed.
     pub fn sidecar_bpm(&mut self, sample: &Path) -> Option<f32> {
         let gsa = sample.with_extension("gsa");

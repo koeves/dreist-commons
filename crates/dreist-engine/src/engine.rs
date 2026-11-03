@@ -1,4 +1,4 @@
-//! The engine runtime: [re:93ab44] → `ProcessVoices` [re:e720f7].
+//! The engine runtime: [re:93ab44] → voice processing [re:e720f7].
 //! Splits each host block into sub-blocks of at most 32 frames (cut at song
 //! changes), runs the song sequencer and step sequencer, starts voices and
 //! mixes layer → pad → engine → master ([re:eba3c6]
@@ -33,7 +33,7 @@ use crate::sequencer::{Clock, EngineState, EngineTiming, NoteRequest, PadInfo, R
 use crate::song::{Change, ChangeKind, EngineView, Song, SongCursor, phase_mod};
 use dreist_dsp::fx::Ctx;
 
-/// Maximum sub-block length (`ProcessVoices`: `start + 0x20`).
+/// Maximum sub-block length (`start + 0x20`).
 pub const SUB_BLOCK: usize = 32;
 
 /// Host block the per-block buffers are reserved for at construction (the
@@ -45,7 +45,7 @@ const MIDI_PENDING_MAX: usize = 0x1ff;
 pub const ENGINES: usize = 8;
 pub const LAYERS: usize = 8;
 
-/// A parameter and its transmod depths (`GetParameterAndItsModulation`).
+/// A parameter and its transmod depths.
 pub type Row = [f32; SOURCES];
 
 fn row(node: &Node, name: &str, default: f32) -> Row {
@@ -70,7 +70,7 @@ pub fn param_sum(r: &Row, m: &[f32; SOURCES]) -> f32 {
 /// Number of stereo sub outputs ([re:ebd7d8] locations 2..=33).
 pub const SUB_OUTPUTS: usize = 32;
 
-/// [re:7ea458] (`GetNameOfOutputLocation` [re:bae6b8]):
+/// [re:7ea458] (names [re:bae6b8]):
 /// 0 Parent, 1 Master, 2..=33 "Sub output 1..32", 34..=37 "Aux 1..4".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Route {
@@ -82,8 +82,8 @@ pub enum Route {
 }
 
 impl Route {
-    /// `AudioObject::SerializeOutputState` stores the name; unknown → Parent
-    /// (`GetOutputLocationForName` [re:fb17d5]).
+    /// The output state stores the name; unknown → Parent
+    /// ([re:fb17d5]).
     pub fn from_name(s: &str) -> Route {
         if s == "Master" {
             return Route::Master;
@@ -96,7 +96,7 @@ impl Route {
         }
     }
 
-    /// `EAudioOutputs` index (the mixer OutputCombo item).
+    /// Output location index (the mixer OutputCombo item).
     pub fn from_index(i: usize) -> Route {
         match i {
             1 => Route::Master,
@@ -106,7 +106,7 @@ impl Route {
         }
     }
 
-    /// `GetNameOfOutputLocation(.., false)`: the stored name.
+    /// The stored name (not the display name).
     pub fn name(self) -> String {
         match self {
             Route::Parent => "Parent".into(),
@@ -136,10 +136,10 @@ fn add_into(dst: [&mut [f32]; 2], src: [&[f32]; 2]) {
     }
 }
 
-/// Route a stage's output (`ProcessLayerFX` [re:a74178].., `ProcessGlobalAux`
+/// Route a stage's output (layer effects [re:a74178].., global aux
 /// [re:25503d]..): Parent → `parent` (the master bus when `None`), Master →
 /// master bus, Sub n → output pair n, Aux n → the [re:fd4dd3] bus
-/// (`IsOutputBuss` [re:21a3c8]). `allow_aux` is false for [re:fd4dd3] returns,
+/// ([re:21a3c8]). `allow_aux` is false for [re:fd4dd3] returns,
 /// whose Aux locations index host channels past the sub outputs (dropped).
 fn route(r: Route, src: [&[f32]; 2], parent: Option<[&mut [f32]; 2]>, o: &mut Outs, allow_aux: bool) {
     match r {
@@ -250,7 +250,7 @@ struct EngineRt {
     mute: bool,
     solo: bool,
     links: Box<[[bool; TRACKS]; TRACKS]>,
-    /// [re:fe3f2a] dummy pad steps (+0x8cd8, 0x1a0 per pad): the lanes
+    /// [re:fe3f2a] dummy pad steps: the lanes
     /// live notes read; set by 0xd9 while the pattern is off. None = the
     /// default step.
     dummy: Vec<Option<dreist_dsp::voice::Lanes>>,
@@ -261,7 +261,7 @@ struct AuxRt {
     muted: bool,
     fx: FxChain,
     route: Route,
-    /// [re:490645] "IsPreFade" (+0x58), copied to
+    /// [re:490645] "IsPreFade", copied to
     /// [re:b02356].
     pre_fade: bool,
 }
@@ -274,16 +274,16 @@ struct VoiceSlot {
     cut: CutMode,
     /// Samples until the note starts ([re:ec8699]).
     delay: f64,
-    /// Note length counter (`+0x9e0`), -1 = none.
+    /// Note length counter, -1 = none.
     duration: f64,
     pending: Option<(Arc<SampleData>, NoteSetup)>,
     /// Effect tail counter while in the tail state ([re:59365b]).
     tail: i64,
     has_step: bool,
-    /// Live note and its semitone offset ([re:ea5bc5] / +0xa10).
+    /// Live note and its semitone offset ([re:ea5bc5]).
     live: bool,
     semitone: f64,
-    /// Live-note recording (`StartVoiceDelayed` phase, MIDI velocity).
+    /// Live-note recording (delayed-start phase, MIDI velocity).
     record: Option<f64>,
     velocity: u32,
 }
@@ -313,7 +313,7 @@ pub struct RenderOptions {
     /// (default off), read by [re:b7d4aa].
     pub pad_follow: bool,
     pub engine_follow: bool,
-    /// Option `PreDelayInMsec` (default on; `Convertor::Start` [re:58734c]):
+    /// Option `PreDelayInMsec` (default on; [re:58734c]):
     /// layer pre-delay in ms, else tempo-synced note values.
     pub predelay_ms: bool,
 }
@@ -337,8 +337,8 @@ impl Default for RenderOptions {
 }
 
 /// The step a live note records: on, velocity, coarse pitch and octave
-/// (semitones folded into ±12 by octaves; `ConvertPitchToNormalisedValue`
-/// / `ConvertOctaveToNormalisedValue`).
+/// (semitones folded into ±12 by octaves, as normalised
+/// pitch and octave values).
 fn live_step(velocity: u32, semitone: f64) -> crate::pattern::StepData {
     let (mut st, mut oct) = (semitone, 0.0f32);
     while st > 12.0 {
@@ -357,16 +357,16 @@ fn live_step(velocity: u32, semitone: f64) -> crate::pattern::StepData {
     data
 }
 
-/// A held live note extending its recorded step (`DoDurationRecording`).
+/// A held live note extending its recorded step (duration recording).
 #[derive(Clone, Copy, Debug)]
 struct DurRec {
     engine: usize,
     pad: usize,
     pattern: usize,
-    /// Step the note started on (+0x9fc) and the current one (+0x9f8).
+    /// Step the note started on and the current one.
     start: usize,
     step: usize,
-    /// Samples into the current step (+0x9e8) and samples per step (+0x9f0).
+    /// Samples into the current step and samples per step.
     accum: f64,
     sps: f64,
     velocity: u32,
@@ -394,7 +394,7 @@ pub struct Dreist {
     aux: Vec<AuxRt>,
     master: Mixable,
     master_fx: FxChain,
-    /// [re:78f636] `Pitch` (+0xc8, default 0.5).
+    /// [re:78f636] `Pitch` (default 0.5).
     master_pitch: f32,
     ctx: Ctx,
     song: Song,
@@ -403,13 +403,13 @@ pub struct Dreist {
     time_sig: (u32, u32),
     /// Transport running ([re:a7ef14]).
     playing: bool,
-    /// Host playing flag of the previous block (`ProcessTransport`
+    /// Host playing flag of the previous block (the transport
     /// compares against it: only host starts / stops move the transport).
     host_playing: bool,
     /// Record armed ([re:458d51] / [re:abd5a0]) and record quantize
     /// ([re:527c20], saved as [re:aa2b5e]).
     recording: bool,
-    /// Pre-roll / record options ([re:781091], +0xac, +0xad, +0x90).
+    /// Pre-roll / record options ([re:781091]).
     preroll_mode: u32,
     preroll_only_rec: bool,
     wait_midi: bool,
@@ -419,7 +419,7 @@ pub struct Dreist {
     preroll_left: i64,
     /// Started, waiting for a MIDI pad note ([re:21794e]).
     waiting_midi: bool,
-    /// Selection follows live MIDI notes ([re:dd8304] pad, +0x6b3 engine).
+    /// Selection follows live MIDI notes ([re:dd8304] pad, engine).
     pad_follow: bool,
     engine_follow: bool,
     /// Layer pre-delay in ms (else tempo-synced), `PreDelayInMsec`.
@@ -446,11 +446,11 @@ pub struct Dreist {
     /// MIDI out send buffer ([re:504644], 511 events): (frame from the
     /// current block start, bytes); later blocks' events wait here.
     midi_pending: Vec<(f64, [u8; 3])>,
-    /// MIDI out due this block, sorted by frame (`ProcessVSTMIDIEventsSend`).
+    /// MIDI out due this block, sorted by frame.
     pub midi_out: Vec<(u32, [u8; 3])>,
     /// Sub-block start within the host block (for MIDI out timing).
     sub_pos: usize,
-    /// Live notes being duration-recorded ([re:085301]..+0x9fc).
+    /// Live notes being duration-recorded ([re:085301]).
     dur_recs: Vec<DurRec>,
     /// Per engine: (gate, pattern) last seen by the recorder, and whether
     /// the song changed it since (song changes are not recorded).
@@ -561,7 +561,7 @@ fn solo_pass(solo_any: bool, solo: bool, mute: bool) -> bool {
 
 /// Peak-hold output levels (`EngineState`/[re:e46e77]
 /// [re:8c0459] keep the running max of |sample| per channel; the editor reads
-/// them through `Get*OutputLevels` and resets with `ClearAllMeters`
+/// them through the output level getters and resets them
 /// [re:cfaf98]). Levels are taken post-fader, before routing.
 /// A step the engine wrote (see [re:f53b53]).
 #[derive(Clone, Debug)]
@@ -575,17 +575,17 @@ pub struct StepWrite {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Meters {
-    /// `ProcessMasterChannel` (+[re:8805c2]/+[re:5327eb]).
+    /// Master channel ([re:8805c2]/[re:5327eb]).
     pub master: [f32; 2],
-    /// Global aux returns (+0x870..+0x888).
+    /// Global aux returns.
     pub aux: [[f32; 2]; 4],
     pub engine: [[f32; 2]; ENGINES],
     /// `engine * TRACKS + pad`.
     pub pad: Vec<[f32; 2]>,
     /// `(engine * TRACKS + pad) * LAYERS + layer`.
     pub layer: Vec<[f32; 2]>,
-    /// A block carried host MIDI ([re:ed467d] sets +[re:a59474]
-    /// when the VstEvents count is positive; `WasMidiMessageRecieved`
+    /// A block carried host MIDI ([re:ed467d] sets [re:a59474]
+    /// when the VstEvents count is positive; the received check
     /// [re:3fd4a6] reads and clears it for the header's MIDIIndi).
     pub midi_received: bool,
     /// [re:6395b3] had to steal a voice (posts
@@ -659,7 +659,7 @@ impl Dreist {
     }
 
     /// Preview frames `start..end` of `data`, optionally looping (the
-    /// slicer's PreviewWave / slice audition, `PreviewAudioFile` with
+    /// slicer's PreviewWave / slice audition, file preview with
     /// markers; `e_setPreviewLoopMode` 0xdd toggles the loop).
     pub fn start_preview_region(&mut self, data: Arc<SampleData>, start: u32, end: u32, looping: bool) {
         let n = data.left.len() as u32;
@@ -932,7 +932,7 @@ impl Dreist {
             mirror_doc: true,
             metronome: {
                 let mut m = project.raw.children_of("Metronome").next().map(Metronome::from_node).unwrap_or_default();
-                // [re:8ca869] `Metro` (+0x8f): metronome on → mute off (message 0x18).
+                // [re:8ca869] `Metro`: metronome on → mute off (message 0x18).
                 if let Some(on) = project.raw.children_of("TimeInfo").next().and_then(|t| t.bool("Metro")) {
                     m.muted = !on;
                 }
@@ -1003,8 +1003,8 @@ impl Dreist {
         (self.song.active && self.song.length_qn() > 0.0).then(|| (self.song.length_qn() * 60.0 / self.bpm * self.sr as f64).ceil() as u64)
     }
 
-    /// Transport start (`HandlePlaybackChange` [re:755e2b]): the song's last
-    /// stop time (`GetLastStopTimeQN`) with the song active, else 0.
+    /// Transport start ([re:755e2b]): the song's last
+    /// stop time with the song active, else 0.
     pub fn start(&mut self) {
         let at = if self.song.active { self.locate } else { 0.0 };
         self.start_at(at);
@@ -1012,12 +1012,12 @@ impl Dreist {
 
     /// The internal play button ([re:04f8ef]
     /// [re:755e2b]). With the song inactive it waits for a MIDI pad note when
-    /// `WaitForMIDI` is set (`IsPlaying` already reports it), else counts in
+    /// `WaitForMIDI` is set (playing already reports it), else counts in
     /// 1, 2 or 4 bars (`PrerollTime`; not when pre-rolling only while
     /// recording and not recording): the transport runs from
-    /// −bars·`BeatsPerBar` QN before the start (`SamplesPerBar`·bars
+    /// −bars·beats-per-bar QN before the start (samples per bar·bars
     /// samples, rounded) with the patterns stopped, so only the metronome
-    /// sounds, and `ProcessTransportStarted` follows at the start.
+    /// sounds, and the transport start follows at the start.
     pub fn play(&mut self) {
         self.in_preroll = false;
         self.preroll_left = -1;
@@ -1051,7 +1051,7 @@ impl Dreist {
         self.in_preroll
     }
 
-    /// `ProcessMIDINoteOn` [re:c0544f]: a mapped pad note while waiting for
+    /// MIDI note-on [re:c0544f]: a mapped pad note while waiting for
     /// MIDI starts the transport.
     pub(crate) fn end_midi_wait(&mut self) {
         if self.waiting_midi {
@@ -1060,7 +1060,7 @@ impl Dreist {
         }
     }
 
-    /// `ProcessTransportStarted` [re:1ba742] at host position `ppq`.
+    /// Transport start [re:1ba742] at host position `ppq`.
     pub fn start_at(&mut self, ppq: f64) {
         self.in_preroll = false;
         self.preroll_left = -1;
@@ -1093,10 +1093,10 @@ impl Dreist {
         }
     }
 
-    /// `ProcessTransportStopped` [re:0fd382]: every engine's gate off and
+    /// Transport stop [re:0fd382]: every engine's gate off and
     /// steps reset, pending scene changes dropped, Transport source 0.
     pub fn stop(&mut self) {
-        // A count-in never reached ProcessTransportStarted.
+        // A count-in never reached the transport start.
         let started = !self.in_preroll && !self.waiting_midi;
         self.in_preroll = false;
         self.preroll_left = -1;
@@ -1127,7 +1127,7 @@ impl Dreist {
 
     /// `e_panic` 0x12 ([re:d6b694]):
     /// [re:bf71ff] returns every pad voice, the preview
-    /// voice and both metronome voices at once; `PanicAllEffects` [re:a67204]
+    /// voice and both metronome voices at once; the effects panic [re:a67204]
     /// resets every effect (engine, pad, layer chains, the four global
     /// auxes and the master chain); the internal transport stops.
     pub fn panic(&mut self) {
@@ -1158,7 +1158,7 @@ impl Dreist {
     }
 
     /// [re:84504f] (`e_setCurrentTime` 0x1c): the
-    /// transport position; the song resyncs (`ResyncSong`) when active,
+    /// transport position; the song resyncs when active,
     /// else every engine needs a resync. Stopped, it is also where the
     /// next start begins.
     pub fn set_current_time(&mut self, t: f64) {
@@ -1216,8 +1216,8 @@ impl Dreist {
         self.song.host_loop.is_some()
     }
 
-    /// Host cycle (QN) when the host reports an active loop ([re:5cc709]
-    /// +0x50/+0x58/+0x60); it replaces the internal song loop meanwhile.
+    /// Host cycle (QN) when the host reports an active loop ([re:5cc709]);
+    /// it replaces the internal song loop meanwhile.
     pub fn set_host_loop(&mut self, range: Option<(f64, f64)>) {
         self.song.host_loop = range.filter(|(s, e)| e > s);
     }
@@ -1228,7 +1228,7 @@ impl Dreist {
         self.metronome.load_sounds(&default_metronomes_dir(), name);
     }
 
-    /// Host transport for the next block (`ProcessTimeInfo` / `ProcessTransport`
+    /// Host transport for the next block (time info / transport
     /// [re:b8baf0]): tempo (clamped 20..999), play state, and the host position
     /// when known (a jump relocates the song).
     pub fn set_transport(&mut self, playing: bool, bpm: f64, ppq: Option<f64>) {
@@ -1359,8 +1359,8 @@ impl Dreist {
         let n = left.len();
         left.fill(0.0);
         right.fill(0.0);
-        // HandleMessage: messages posted last block, then the binding
-        // interpolators (UpdateInterpolatedParameters at the block start).
+        // Messages posted last block, then the binding
+        // interpolators (interpolated parameters at the block start).
         self.apply_messages();
         // Messages queued from here on are this block's (for the next).
         let block_from = self.messages.len();
@@ -1382,7 +1382,7 @@ impl Dreist {
             let nv = self.engines.len().min(8);
             self.cursor.cue(&self.song, self.ppq, n as u32, spbeat, &views[..nv], &mut self.changes);
         }
-        // ProcessVSTMIDIEvents(0, n): host MIDI at the block start.
+        // Host MIDI at the block start.
         self.process_midi_in(n);
         let mut ppq_now = self.ppq;
         let mut pos = 0usize;
@@ -1391,11 +1391,11 @@ impl Dreist {
         let mut sampler_from = if self.in_preroll { n } else { 0 };
         while pos < n {
             let mut end = (pos + SUB_BLOCK).min(n);
-            // ComputeBlockEnd (scenes, automation; the song's below), then
+            // Block end (scenes, automation; the song's below), then
             // [re:02c086], [re:cb7749].
             end = self.scenes.block_end(pos as u32, end as u32) as usize;
             end = self.automation_block_end(pos as u32, end as u32) as usize;
-            // ProcessVoices [re:2ee984]: sub-blocks end where the count-in does.
+            // Voice processing [re:2ee984]: sub-blocks end where the count-in does.
             if self.in_preroll && self.preroll_left > 0 && (self.preroll_left as usize) < end - pos {
                 end = pos + self.preroll_left as usize;
             }
@@ -1478,8 +1478,8 @@ impl Dreist {
                 p[1][pos..end].copy_from_slice(&self.buf.sub[k][1]);
             }
             ppq_now += (end - pos) as f64 * self.bpm * (1.0 / 60.0) / self.sr as f64;
-            // ProcessVoices [re:f5a5d0]: the count-in ends → the transport
-            // starts (ProcessTransportStarted) at the start position.
+            // Voice processing [re:f5a5d0]: the count-in ends → the transport
+            // starts at the start position.
             if self.in_preroll {
                 self.preroll_left -= (end - pos) as i64;
                 if self.preroll_left <= 0 {
@@ -1500,9 +1500,9 @@ impl Dreist {
         self.flush_midi_out(n);
         self.scenes.end_of_block(n as u32);
         self.automation_end_of_block(n as u32);
-        // `ProcessVoices` → [re:897d27] after the
+        // Voice processing → [re:897d27] after the
         // master channel: the host input, or an output location's channels
-        // (`GetChannelsForOutputLocation` [re:bbe355]: Master → the main pair,
+        // ([re:bbe355]: Master → the main pair,
         // Sub output k → its pair); MITM sources (out of scope) record
         // nothing.
         let clock = self.sampler_clock();
@@ -1537,7 +1537,7 @@ impl Dreist {
         }
     }
 
-    /// `ActivateTrackChange` [re:dce201]: song changes post 0xa8/0xa9/0xaa
+    /// Track change [re:dce201]: song changes post 0xa8/0xa9/0xaa
     /// (start) or 0xab (stop) to the engine, song-triggered.
     fn activate(&mut self, c: &Change, _ppq_now: f64) {
         if c.engine >= self.engines.len() {
@@ -1556,7 +1556,7 @@ impl Dreist {
             }
             ChangeKind::Stop => self.msg_stop(c.engine, true),
             ChangeKind::Resync => {
-                // ResyncSong [re:662b0c].
+                // Song resync [re:662b0c].
                 if self.song.active {
                     for e in &mut self.engines {
                         e.state.gate = false;
@@ -1566,7 +1566,7 @@ impl Dreist {
         }
     }
 
-    /// `HandlePatternMessage` 0xa8: pattern power. Turning power on gates a
+    /// Pattern message 0xa8: pattern power. Turning power on gates a
     /// free-running (sync < 2) current pattern when the song is inactive, and
     /// for non-restart patterns may suppress every pad for one step.
     fn msg_power(&mut self, e: usize, on: bool) {
@@ -1592,7 +1592,7 @@ impl Dreist {
         }
     }
 
-    /// `SelectPatternForEngine` [re:87ab86] (message 0xa9).
+    /// Select an engine's pattern [re:87ab86] (message 0xa9).
     fn select_pattern(&mut self, e: usize, pattern: usize, song: bool) {
         let (host, bpm) = (&self.host, self.bpm as f32);
         for m in self.mods.iter_mut().flatten() {
@@ -1605,7 +1605,7 @@ impl Dreist {
         }
         st.current_pattern = pattern;
         st.song_triggered = song;
-        // SetPatternTriggerPPQPos: the trigger, rounded down to a pattern
+        // Pattern trigger position: the trigger, rounded down to a pattern
         // cycle unless the pattern restarts.
         st.trigger_ppq = self.ppq;
         if let Some(p) = eng.patterns.get(pattern) {
@@ -1635,7 +1635,7 @@ impl Dreist {
         let st = &mut eng.state;
         let Some(p) = eng.patterns.get(st.current_pattern) else { return };
         if let Some(phase) = phase {
-            // ConvertPartPhaseToLastPlayPosition [re:219452].
+            // Part phase to last play position [re:219452].
             let len = p.length_16ths();
             st.phase_resync = if len >= 0.001 { phase_mod(phase * 4.0 * bpm * eng.timing.tempo_multiplier * (1.0 / bpm), len) } else { 0.0 };
         }
@@ -1677,7 +1677,7 @@ impl Dreist {
                 self.msg_phase(e, None, false);
             }
         }
-        // The tail of `ActivateSceneOn`: current scene (+0x9330), 0x1ee, then
+        // The tail of scene activation: current scene, 0x1ee, then
         // 0x1ec.
         self.scenes.current = scene as i32;
         self.scenes.notify(crate::scene::SceneEvent::Selected(scene));
@@ -1748,7 +1748,7 @@ impl Dreist {
         &mut self.scenes
     }
 
-    /// [re:483907] / `SetInternalLoopRange`
+    /// [re:483907] / internal loop range
     /// [re:a489b9] (range rounded to 1/960 QN).
     pub fn set_song_loop(&mut self, enabled: bool, start_qn: f64, end_qn: f64) {
         self.song.loop_enabled = enabled;
@@ -1766,7 +1766,7 @@ impl Dreist {
         self.quantize = on;
     }
 
-    /// [re:0b7874] + `HandleRecordingMessage`
+    /// [re:0b7874] + the recording message
     /// [re:0691ab]: a live note starting while playing writes a step at the
     /// engine's current step (velocity, coarse pitch/octave, and the timing
     /// offset in Shift unless quantize is on), mono-izing the column.
@@ -1784,7 +1784,7 @@ impl Dreist {
         let mut data = live_step(velocity, semitone);
         data.lanes[lane::SHIFT] = if quantize { 0.5 } else { (phase as f32 + 0.5).clamp(0.0, 1.0) };
         // Held notes of gated (not one-shot) pads extend the step while the
-        // pattern plays (`DoDurationRecording` [re:802b5d]).
+        // pattern plays (duration recording [re:802b5d]).
         if !eng.one_shot.get(pad).copied().unwrap_or(true) && eng.state.gate {
             if let Some(p) = eng.patterns.get(pattern_index) {
                 let step_qn = p.length_16ths() * 0.25 * eng.timing.tempo_multiplier / p.steps.max(1) as f64;
@@ -1798,7 +1798,7 @@ impl Dreist {
         self.write_recorded_step(e, pattern_index, pad, step_index, data);
     }
 
-    /// `ReadAndPlayStep` [re:9496b8]: queued graph record values that reached a
+    /// Step playback [re:9496b8]: queued graph record values that reached a
     /// step go straight into it ([re:28d242], no linkage).
     fn apply_graph_writes(&mut self, e: usize) {
         let eng = &mut self.engines[e];
@@ -1829,7 +1829,7 @@ impl Dreist {
     }
 
     /// A recorded step ([re:4e20da]): always to the retro recorder,
-    /// into the pattern when record is on (`HandleRecordingMessage`
+    /// into the pattern when record is on (the recording message
     /// [re:0691ab], mono-izing the column).
     fn write_recorded_step(&mut self, e: usize, pattern_index: usize, pad: usize, step_index: usize, data: crate::pattern::StepData) {
         if self.retro_events.len() < 4096 {
@@ -1845,7 +1845,7 @@ impl Dreist {
         *step = data;
         pattern.monoize(step_index, pad);
         self.doc_step(e, pattern_index, pad, step_index);
-        // MonoizeSteps may have turned off this column on other tracks.
+        // Mono-izing may have turned off this column on other tracks.
         let mono = self.engines[e].patterns[pattern_index].mono;
         if mono {
             for t in 0..TRACKS {
@@ -1915,13 +1915,13 @@ impl Dreist {
         self.metronome.muted = !on;
     }
 
-    /// Host time signature (numerator, denominator; `ProcessTimeInfo`
+    /// Host time signature (numerator, denominator; time info
     /// [re:c9d833] takes VstTimeInfo's when non-zero); else the document's.
     pub fn set_time_signature(&mut self, num: u32, den: u32) {
         self.time_sig = (num.max(1), den.max(1));
     }
 
-    /// [re:59d08c] / `SendVoiceMIDICC` [re:5c9583]:
+    /// [re:59d08c] / voice MIDI CC [re:5c9583]:
     /// queue a MIDI out event `at` samples from the block start (dropped
     /// past 511 pending, like the original's buffer).
     fn queue_midi(&mut self, at: f64, data: [u8; 3]) {
@@ -1993,7 +1993,7 @@ impl Dreist {
         let step = if r.step < 0 || r.live { &default_step } else { track.step(r.step as u32) };
         let mut rand = || self.rng.next_f32();
         let force = (randomised(step.lanes[lane::FORCE_LAYER], track.rand[lane::FORCE_LAYER], &mut rand) * 8.0).floor() as i32 - 1;
-        // SetupNoteOnParameters: each lane randomised, then stored through
+        // Note-on parameters: each lane randomised, then stored through
         // [re:28d242] (on/off lanes snap at 0.5, so a randomised
         // Reverse is a coin flip, not almost never on) [decomp] ev_59538a6c….
         let mut lanes: dreist_dsp::voice::Lanes = std::array::from_fn(|l| randomised(step.lanes[l], track.rand[l], &mut rand));
@@ -2018,7 +2018,7 @@ impl Dreist {
             setup.semitone_offset += r.semitone;
             setup.pad_v2a = v2a;
             // [re:b5f726]: PreDelay in ms, int(1000·v³)
-            // (`ConvertNormalisedValueToPreDelayInMsec`), or with
+            // (normalised value to ms), or with
             // `PreDelayInMsec` off a note value: floor(15v) indexes
             // 1/128d .. 1/8t, 240000/(BPM·div)·factor ms.
             let v = setup.layer[LayerParam::PreDelay as usize][0];
@@ -2043,7 +2043,7 @@ impl Dreist {
             let out_lanes = if r.live { eng.dummy.get(r.pad).copied().flatten().unwrap_or_else(|| crate::pattern::StepData::off().lanes) } else { lanes };
             let at = self.sub_pos as f64 + r.start;
             if nstarts == 0 {
-                // SendNonSoundNoteAsMIDIOut: off after the step's Duration.
+                // Non-sounding note as MIDI out: off after the step's Duration.
                 let dur = out_lanes.get(lane::DURATION).copied().unwrap_or(1.0) as f64;
                 self.midi_out_note(e, r, &out_lanes, at, dur * step_len);
             } else {
@@ -2103,7 +2103,7 @@ impl Dreist {
         let mut order = std::mem::take(&mut self.voice_order);
         order.clear();
         order.extend((0..self.voices.len()).filter(|&i| self.voices[i].state != VoiceState::Idle));
-        // AddVoiceToSortedList: by engine, pad, layer, then voice index (an
+        // Voice order: by engine, pad, layer, then voice index (an
         // unstable sort with the index in the key: no merge buffer).
         order.sort_unstable_by_key(|&i| {
             let s = self.voices[i].slot;
@@ -2131,7 +2131,7 @@ impl Dreist {
             }
         }
         self.voice_order = order;
-        // Metronome voices (ProcessAllVoices tail), routed by its OutputLocation.
+        // Metronome voices (end of the voice processing), routed by its OutputLocation.
         {
             let Buffers { aux, sub, metro, .. } = &mut self.buf;
             let [ml, mr] = metro;
@@ -2144,7 +2144,7 @@ impl Dreist {
             route(self.metronome.route, [&ml[..], &mr[..]], None, &mut o, false);
         }
         self.metronome.process(n);
-        // ProcessGlobalAux [re:733339]: effects with the host transmod vector, gain/pan, into the master.
+        // Global aux [re:733339]: effects with the host transmod vector, gain/pan, into the master.
         let hm = self.host.m();
         if self.options.aux_returns {
             for (i, a) in self.aux.iter_mut().enumerate() {
@@ -2163,7 +2163,7 @@ impl Dreist {
                 aux[i] = [l, r];
             }
         }
-        // ProcessMasterChannel [re:3e19f6].
+        // Master channel [re:3e19f6].
         self.master_fx.update(&hm, None);
         self.master_fx.process(&self.ctx, out_l, out_r);
         self.master.process(out_l, out_r);
@@ -2179,7 +2179,7 @@ impl Dreist {
         meter(&mut self.meters.master, out_l, out_r);
     }
 
-    /// [re:0d9e3a] / `ProcessInnner` [re:bfc66d] into the layer buffer.
+    /// [re:0d9e3a] / [re:bfc66d] into the layer buffer.
     fn run_voice(&mut self, vi: usize, n: usize) {
         if self.voices[vi].state == VoiceState::Tail {
             return;
@@ -2190,7 +2190,7 @@ impl Dreist {
                 return;
             }
             let (data, setup) = self.voices[vi].pending.take().expect("pending voice");
-            // SetupVoiceForPlayback: cut voices this note cuts.
+            // Voice setup: cut voices this note cuts.
             let (slot, mode) = (self.voices[vi].slot, self.voices[vi].cut);
             for (j, o) in self.voices.iter_mut().enumerate() {
                 if j != vi && o.state == VoiceState::Playing && is_cut(o.slot, o.cut, slot, mode) {
@@ -2199,7 +2199,7 @@ impl Dreist {
             }
             let random = self.rng.next_f32();
             let v = &mut self.voices[vi];
-            // SetupVoiceForPlayback: per-note Random source.
+            // Voice setup: per-note Random source.
             v.voice.transmod_values[src::RANDOM] = random;
             v.voice.transmod_values[src::SLOT1..].copy_from_slice(&self.host.values[src::SLOT1..]);
             v.voice.transmod_scale = self.host.scale();
@@ -2260,7 +2260,7 @@ impl Dreist {
             v.voice.process(&mut bl[pos..n], &mut br[pos..n]);
             pos = n;
         }
-        // KillVoice [re:fad130]: the note ended; effect tails keep the voice alive.
+        // Voice kill [re:fad130]: the note ended; effect tails keep the voice alive.
         if !v.voice.is_active() {
             v.state = VoiceState::Tail;
         }
@@ -2347,7 +2347,7 @@ impl Dreist {
     }
 }
 
-/// How a strip is silenced (`ProcessLayerFX` zeroes an inaudible layer
+/// How a strip is silenced (layer effects zero an inaudible layer
 /// after its gain stage; a muted pad or engine skips the gain stage).
 #[derive(Clone, Copy)]
 enum Silence {
@@ -2408,7 +2408,7 @@ fn mix_strip(
     send(st.sends, st.aux_rows, m, [l, r], o.aux, |k| !pre[k]);
 }
 
-/// Aux sends whose pre/post flag matches `pick` (`ProcessAuxSend` [re:591274]).
+/// Aux sends whose pre/post flag matches `pick` ([re:591274]).
 fn send(sends: &mut [SendGain; 4], rows: &[Row; 4], m: &[f32; SOURCES], src: [&[f32]; 2], aux: &mut [[Vec<f32>; 2]], pick: impl Fn(usize) -> bool) {
     for k in 0..4 {
         if pick(k) {
@@ -2562,7 +2562,7 @@ fn empty_pad() -> PadRt {
 /// file without a `.gsa` ([re:3df5f2] builds
 /// its Master analysis from it): 1, 2, 4 or 8 bars of the whole buffer
 /// (240 / 480 / 960 / 1920 ÷ seconds, single rounding) in 90..=180, else
-/// a tempo in the file name (`GuessKeyDataFromFilename` [re:49b646]: the
+/// a tempo in the file name ([re:49b646]: the
 /// first digit run, 85..=180; bars = rounded length in bars, beats =
 /// tenths of the remainder), else 120 / 1 bar (and 440 Hz: the last
 /// flag).
@@ -2636,7 +2636,7 @@ fn load_layer(l: &dreist_formats::Layer, samples: &Path, _sr: f32, audible: bool
         matrix[pi][0] = l.param(*p);
     }
     l.depths(|p, s, v| matrix[p as usize][s as usize] = v);
-    // [re:87acba] → `ResetHoldTime(true, true, true)` for layers
+    // [re:87acba] → hold times reset for layers
     // without (or with negative) holds and pre-3000 layers.
     if let Some(s) = sample.as_ref().filter(|_| crate::hold::needs_reset_on_load(n)) {
         let region = l.start_end.map(|m| (m.end as f64 - m.start as f64).max(0.0)).unwrap_or(0.0);
@@ -2678,8 +2678,8 @@ fn load_layer(l: &dreist_formats::Layer, samples: &Path, _sr: f32, audible: bool
         slot: LayerSlot { valid: sample.is_some(), vel_low, vel_high },
         sample,
         template,
-        // [re:87acba] reads CutMode with the default `ToString(1)`
-        // ([re:f08395]): an omitted value is "Self" [disasm].
+        // [re:87acba] reads CutMode with the default 1
+        // ([re:f08395]): an omitted value is "Self".
         cut: n.attr("CutMode").map(CutMode::from_name).unwrap_or(CutMode::BySelf),
         gain: matrix[LayerParam::Gain as usize],
         pan: matrix[LayerParam::Pan as usize],

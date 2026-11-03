@@ -4,7 +4,7 @@
 //! <SlicePoint …/>…</Slices><AudioFileMetaData name="Meta" …/></SliceAnalysis>
 //! <AudioFileMarkers name="StartEndPoints" …/></root>`, with an optional
 //! second [re:cd08a0] (legacy `Orig` / `Curr`). The
-//! "active" analysis everywhere ([re:fb32a7] User, else +0x118
+//! "active" analysis everywhere ([re:fb32a7] User, else
 //! Master) is the one these fields hold; the other is kept verbatim.
 
 use std::path::Path;

@@ -61,7 +61,7 @@ struct Peaks {
     frames: usize,
     /// File sample rate (envelope overlay times).
     rate: f32,
-    /// Zero crossings of the left channel (`BuildZeroCrossingSearchMap`).
+    /// Zero crossings of the left channel.
     zeros: Vec<u32>,
 }
 
@@ -136,7 +136,7 @@ pub struct Inspector {
     pad_header: Option<Vec<usize>>,
     peaks: RefCell<PeaksCache>,
     /// Marker drag: object 1 start, 2 end, 3 loop start, 4 loop end
-    /// (`GetDragObject`), and the markers when it started.
+    /// (the dragged object), and the markers when it started.
     drag: Option<(u8, WaveMarkers)>,
     /// Visible part of the file (start, length) as fractions.
     pub(crate) view: (f32, f32),
@@ -275,7 +275,7 @@ impl Inspector {
 
     /// Cursor for the pointer over the layer wave display (a marker:
     /// [re:840c1e] → left / right when
-    /// `GetDragObject` finds one) or its zoom slider.
+    /// one is under it) or its zoom slider.
     pub fn hover_cursor(&self, app: &App, model: &Model, path: &[usize], overload: &str, x: f32, y: f32) -> Option<dreist_gui::cursor::Cursor> {
         use dreist_gui::cursor::Cursor;
         let (w, h) = app.ctrl(path).map(|c| (c.rect.w as f32, c.rect.h as f32))?;
@@ -368,7 +368,7 @@ impl Inspector {
         }
     }
 
-    /// SP / EP / LS / LE (`LoadToolbarControls` names PS / PE / LS / LE):
+    /// SP / EP / LS / LE (the toolbar names PS / PE / LS / LE):
     /// hidden, shown only in MIDI learn mode ([re:7fd1e4]
     /// [re:cca449]) as learn targets for the markers.
     pub fn learn_buttons(&self, app: &mut App, learning: bool) {
@@ -386,7 +386,7 @@ impl Inspector {
     }
 
     /// The marker message a learn press on SP / EP / LS / LE binds
-    /// (`GetBindingForControl` [re:ad8531]: 0x7a..0x7d "Play Start", "Play End",
+    /// ([re:ad8531]: 0x7a..0x7d "Play Start", "Play End",
     /// "Loop Start", "Loop End").
     pub fn marker_learn(&self, app: &App, path: &[usize]) -> Option<(u32, &'static str)> {
         if !self.params.as_ref().is_some_and(|p| path.starts_with(p)) {
@@ -454,7 +454,7 @@ impl Inspector {
                 }
                 walk(c, &|k: &mut Ctrl| {
                     // [re:ca7824] toggles
-                    // (states from `DoUpdateLayerSetting`).
+                    // (states from the layer settings).
                     if k.class == "CtrlButton" {
                         if let Some(on) = layer_toggle_state(node, &k.name) {
                             k.on = on;
@@ -540,8 +540,8 @@ impl Inspector {
                 let (v0, vl) = self.view;
                 let to_frame = |x: f32| (((x / w.max(1.0)) * vl + v0).clamp(0.0, 1.0) * frames as f32) as u32;
                 let to_x = |f: u32| ((f as f32 / frames.max(1) as f32) - v0) / vl * w;
-                // Envelope handles (`GetEnvelopeHandlesForMousePosition`
-                // [re:b4faea], `HandleEnvelopeDrag` [re:86bd9d]) come first.
+                // Envelope handles ([re:b4faea],
+                // [re:86bd9d]) come first.
                 let h = app.ctrl(path).map(|c| c.rect.h as f32).unwrap_or(0.0) - crate::timeline::WAVE_TOP;
                 let geo = EnvGeo {
                     w,
@@ -590,7 +590,7 @@ impl Inspector {
                 }
                 match kind {
                     dreist_gui::app::MouseKind::Down => {
-                        // `GetDragObject`: a marker within 4 px.
+                        // The dragged object: a marker within 4 px.
                         let m = wave_markers(model, e, p, l, frames);
                         let mut cands = vec![(1u8, m.start), (2, m.end)];
                         if m.looping {
@@ -621,7 +621,7 @@ impl Inspector {
                         }
                         true
                     }
-                    // `OnMouseLButtonUp` [re:9718db]: the auto zoom follows the markers.
+                    // Release [re:9718db]: the auto zoom follows the markers.
                     dreist_gui::app::MouseKind::Up => {
                         let was = self.drag.take().is_some();
                         if was {
@@ -652,14 +652,14 @@ impl Inspector {
                 self.view = crate::zoomslider::zoom_in(self.view, if *dy > 0.0 { 2.0 } else { 0.5 }, at, tw, frames);
                 true
             }
-            // Zoom bar (`SetZoomButtons` $_3 / $_4: ZoomIn(2, 0.5) / (0.5, 0.5)).
+            // Zoom bar (zoom in by 2 / 0.5 around 0.5).
             UiEvent::Clicked { path, name, .. } if (name == "ZoomInButton" || name == "ZoomOutButton") && app.ctrl(path).is_some_and(|c| c.attr("layerZoom").is_some()) => {
                 let Some((_, frames)) = self.layer_frames(model) else { return true };
                 let tw = find_tagged(&app.root, "WaveZoomSlider").map(|c| c.rect.w as f32).unwrap_or(1.0);
                 self.view = crate::zoomslider::zoom_in(self.view, if name == "ZoomInButton" { 2.0 } else { 0.5 }, 0.5, tw, frames);
                 true
             }
-            // A / F: `UpdateDisplayOptions` [re:682bc8] reads `AmpEnvVisible` /
+            // A / F: [re:682bc8] reads `AmpEnvVisible` /
             // `FreeEnvVisible` (default on).
             UiEvent::Clicked { path, name, on, .. } if (name == "ShowAmpEnvButton" || name == "ShowFreeEnvButton") && app.ctrl(path).is_some_and(|c| c.attr("layerZoom").is_some()) => {
                 let key = if name == "ShowAmpEnvButton" { "AmpEnvVisible" } else { "FreeEnvVisible" };
@@ -673,7 +673,7 @@ impl Inspector {
                 o.save();
                 true
             }
-            // `SetZoomModeButtons` $_9: store the mode and apply it.
+            // Zoom mode buttons: store the mode and apply it.
             UiEvent::Clicked { path, .. } if path.len() > 1 && app.ctrl(&path[..path.len() - 1]).is_some_and(|c| c.name == "AutoZoomGroup" && c.attr("layerZoom").is_some()) => {
                 self.zoom_mode = path[path.len() - 1] as i64;
                 let mut o = crate::options::Options::load();
@@ -700,12 +700,12 @@ impl Inspector {
                     dreist_gui::app::MouseKind::RightDown => false,
                 }
             }
-            // `OnMouseLButtonDblClick` [re:009295]: the whole file.
+            // Double click [re:009295]: the whole file.
             UiEvent::DoubleClicked { path, .. } if app.ctrl(path).is_some_and(|c| c.overload == "WaveDisplayZoomSlider" && c.attr("layerZoom").is_some()) => {
                 self.view = (0.0, 1.0);
                 true
             }
-            // `OnMouseWheel` [re:207f1c]: the thumb moves 5 px.
+            // Wheel [re:207f1c]: the thumb moves 5 px.
             UiEvent::Wheel { path, overload, dy } if overload == "WaveDisplayZoomSlider" && app.ctrl(path).is_some_and(|c| c.attr("layerZoom").is_some()) => {
                 let Some(tw) = app.ctrl(path).map(|c| c.rect.w as f32) else { return false };
                 self.view = crate::zoomslider::clamp((self.view.0 + if *dy > 0.0 { 5.0 } else { -5.0 } / tw.max(1.0), self.view.1));
@@ -743,7 +743,7 @@ impl Inspector {
                 }
                 if let Some(hp) = &self.pad_header {
                     if path.starts_with(hp) && matches!(name.as_str(), "AllPads" | "AllLayers") {
-                        // [re:281f54] $_0 / $_1: `e_setModifiers`
+                        // [re:281f54]: `e_setModifiers`
                         // 0x26 [all layers, all pads, false].
                         if name == "AllPads" {
                             model.all_pads = *on;
@@ -791,11 +791,11 @@ impl Inspector {
     }
 
     /// The transmod sources (bit per source 1..=28) modulating the layer
-    /// parameter of the knob at `path` (`Layer::GetLayerParameter
-    /// ModulationBitField`), None off the layer knobs.
+    /// parameter of the knob at `path` (the parameter's modulation bit
+    /// field), None off the layer knobs.
     pub fn modulation_mask(&self, app: &App, model: &Model, path: &[usize]) -> Option<u32> {
         if !self.params.as_ref().is_some_and(|pp| path.starts_with(pp)) {
-            // [re:fe83c5] $_6: v2a ([re:fadd5a]).
+            // [re:fe83c5]: v2a ([re:fadd5a]).
             let e = model.engine;
             return self
                 .vsplit
@@ -834,7 +834,7 @@ impl Inspector {
         self.vsplit.reset_value(path, name).map(|_| dreist_formats::PadParam::V2A.curve())
     }
 
-    /// [re:efb170] $_26 "Remove all modulation from this control"
+    /// [re:efb170] "Remove all modulation from this control"
     /// ([re:bed354]): 0x68 per source; port: the parameter's depth 0 for
     /// sources 1..=28.
     pub fn remove_modulation(&self, app: &App, model: &Model, path: &[usize]) -> Vec<Command> {
@@ -848,7 +848,7 @@ impl Inspector {
     }
 
     /// A knob double click's reset value ([re:ed3c05]
-    /// $_27 [re:f0ac00]: [re:6b28ff], the base
+    /// [re:f0ac00]: [re:6b28ff], the base
     /// value whatever transmod source is shown; the velocity split's v2a).
     pub fn reset_value(&self, path: &[usize], name: &str) -> Option<f32> {
         if self.params.as_ref().is_some_and(|pp| path.starts_with(pp)) {
@@ -902,7 +902,7 @@ impl Inspector {
             draw_sampling(sm, r, p, w, h);
             return;
         }
-        // `ComputeComponentAreas` [re:d9085e]: timeline 0..15, marker strip
+        // Areas [re:d9085e]: timeline 0..15, marker strip
         // 15..30, the waveform below.
         let (wy, full_h) = (crate::timeline::WAVE_TOP, h);
         let h = (full_h - wy).max(1.0);
@@ -940,7 +940,7 @@ impl Inspector {
             let y1 = wy + h / 2.0 - lo.clamp(-1.0, 1.0) * h / 2.0;
             p.fill_rect(RectF::new(x as f32, y0, 1.0, (y1 - y0).max(1.0)), line);
         }
-        // Timeline (`DrawTimeline` [re:ad103f]) and the marker strip.
+        // Timeline ([re:ad103f]) and the marker strip.
         let frames = pk.frames.max(1) as f32;
         {
             let rate = pk.rate.max(1.0) as f64;
@@ -948,8 +948,8 @@ impl Inspector {
             let (start_s, len_s) = ((v0 * frames) as f64 / rate, (vl * frames) as f64 / rate);
             crate::timeline::draw(p, s, WAVE_STYLE, w, h, start_s, len_s, m.start as f64 / rate, self.timeline_beats, model.tempo(), &x_of);
         }
-        // Markers (`DrawStartAndEndMarkers` / `DrawLoopMarkers` →
-        // `DrawMarkers` [re:25235f]): a 2 px line from the marker strip down and
+        // Markers (start / end and loop markers →
+        // [re:25235f]): a 2 px line from the marker strip down and
         // a 12 px disc (15·0.75 rounded up to even) with a black inset at
         // the top of the strip.
         let marker = |p: &mut Painter, f: u32, col: Colour| {
@@ -1059,7 +1059,7 @@ fn env_param(amp: bool, k: usize) -> dreist_formats::LayerParam {
     dreist_formats::LayerParam::ALL[14 + if amp { 0 } else { 8 } + k]
 }
 
-/// `GetEnvelopeXYPositions` [re:b1431d]: x of start, A, D, H / note-off, R end
+/// Envelope positions [re:b1431d]: x of start, A, D, H / note-off, R end
 /// and the sustain level.
 fn env_xs(model: &Model, e: usize, p: usize, l: usize, amp: bool, gated: bool, g: &EnvGeo) -> ([f32; 5], f32) {
     let v = |k: usize| model.layer_param(e, p, l, env_param(amp, k));
@@ -1072,7 +1072,7 @@ fn env_xs(model: &Model, e: usize, p: usize, l: usize, amp: bool, gated: bool, g
     ([g.x_of(st), g.x_of(ta), g.x_of(td), g.x_of(th), g.x_of(tr)], v(2))
 }
 
-/// `DetermineEnvelopeHandles` [re:be46a1] + `CanEnvelopeCurvesBeSeenAndEdited`
+/// Envelope handles [re:be46a1] + curve visibility
 /// [re:0f85ea]: the visible 10 × 10 handles — 0 attack peak, 1 decay end, 2
 /// sustain (mid of the sustain line), 3 hold end (one-shot modes), 4
 /// release end, 5 / 6 / 7 the attack / decay / release curves.
@@ -1125,11 +1125,10 @@ fn env_hit(model: &Model, e: usize, p: usize, l: usize, vis: (bool, bool), g: &E
     None
 }
 
-/// `HandleEnvelopeDrag` [re:86bd9d]: the layer parameter values for a handle
+/// Envelope drag [re:86bd9d]: the layer parameter values for a handle
 /// dragged to (x, y) — times from x (`((t − base)/range)^¼`, A / D 10 s, H
 /// 60 s, R 15 s), sustain / curves from y; dragging the decay or hold
-/// handle also sets the sustain from y unless shift is held
-/// (`SendSustainChangeMessage`).
+/// handle also sets the sustain from y unless shift is held.
 fn env_drag_values(model: &Model, e: usize, p: usize, l: usize, amp: bool, handle: usize, vis: (bool, bool), g: &EnvGeo, x: f32, y: f32, shift: bool) -> Vec<(u8, f32)> {
     let Some((ay, ah)) = g.area(amp, vis) else { return Vec::new() };
     let mode = model.layer_node(e, p, l).and_then(|n| n.attr("PlaybackMode")).map_or("OneShot", dreist_dsp::voice::PlaybackMode::canonical).to_string();
@@ -1175,8 +1174,8 @@ fn env_drag_values(model: &Model, e: usize, p: usize, l: usize, amp: bool, handl
 }
 
 /// Envelope curve points (time in seconds, level) for the layer's Amp or
-/// Free envelope, run through the engine's `Envelope` (`GetEnvelopeParameters`
-/// [re:a4c7b1] / `GetEnvelopeXYPositions` [re:b1431d]: A, D to sustain, then hold
+/// Free envelope, run through the engine's `Envelope` ([re:a4c7b1] /
+/// [re:b1431d]: A, D to sustain, then hold
 /// in one-shot modes or sustain until the end marker in gated / looping
 /// modes, then the release), starting at the start marker.
 fn envelope_points(model: &Model, e: usize, p: usize, l: usize, amp: bool, mode: &str, start_t: f32, end_t: f32) -> Vec<(f32, f32)> {
@@ -1192,7 +1191,7 @@ fn envelope_points(model: &Model, e: usize, p: usize, l: usize, amp: bool, mode:
         decay_curve: lp(LP::AmpEnvDecayCurve, LP::FreeEnvDecayCurve),
         release_curve: lp(LP::AmpEnvReleaseCurve, LP::FreeEnvReleaseCurve),
     };
-    // `DrawAnEnvelopeLengthBound`: the AHR envelope laid over the played
+    // Length-bound envelope: the AHR envelope laid over the played
     // part (start..end marker).
     if mode == "OneShotLengthBound" {
         let n = 600u32;
@@ -1229,7 +1228,7 @@ fn envelope_points(model: &Model, e: usize, p: usize, l: usize, amp: bool, mode:
 }
 
 /// Sampling mode: the whole take fills the display (the take's start and
-/// end markers sit at its edges, `UpdateWaveDisplay` [re:05551e]).
+/// end markers sit at its edges, [re:05551e]).
 fn draw_sampling(sm: &crate::model::Sampling, r: &Renderer, p: &mut Painter, w: f32, h: f32) {
     let s = r.styles;
     let purple = Colour::rgba(128, 0, 128, 255);

@@ -207,7 +207,7 @@ impl Editor {
                     let p = self.model.pad[e];
                     let stem = self.model.layer_sample(e, p, l).and_then(|f| f.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
                     if let Some(mut dst) = self.dialog(Dialog::SaveSample(format!("{stem}.wav"))) {
-                        // `RunSaveFileDialogWithForcedExtension(.., "wav")`.
+                        // The save dialog forces the "wav" extension.
                         dst.set_extension("wav");
                         if let Err(msg) = padmenu::save_layer_sample(&self.model, e, p, l, &dst) {
                             let anchor = anchor.clone();

@@ -1,12 +1,12 @@
 //! Song tab (`SongPanel.skin`, [re:f184d3]): one row per
 //! engine (`SongTrackHeaderPanel.skin` headers), a timeline and the parts.
 //!
-//! - Rows start 20 px down (`ConvertTrackIDToY` [re:5029dc]: `20 + id·h`).
+//! - Rows start 20 px down ([re:5029dc]: `20 + id·h`).
 //! - Grid ([re:f7dd45]): bar lines in
 //!   `colGridBar`, beat lines at α0.5, labels "bar.beat" (fine zoom) or the
 //!   bar number, in `SongTimelineStyle`.
 //! - Parts ([re:b452f0] /
-//!   `DrawPartPatternSection` [re:6c3c15]): rounded sections per pattern
+//!   [re:6c3c15]): rounded sections per pattern
 //!   repeat in `colPart` ([re:86878c] 0x20), border `colBorder`, the
 //!   pattern name in `colText` at the top left.
 //! - The blackout overlay (`SongPanelBlackoutPanelStyle`) covers the tracks
@@ -36,7 +36,7 @@ const TIMELINE_H: f32 = 20.0;
 const SONG_TAB: usize = 2;
 const PART_STYLE: &str = "SongPartStyle";
 
-/// [re:207106] (`GetLeftButtonOperationForTool` [re:588ddb]).
+/// [re:207106] (left-button operation per tool [re:588ddb]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum OpKind {
     Move,
@@ -87,9 +87,9 @@ pub struct SongPanel {
     /// Pixels per quarter note.
     zoom: f32,
     insert_pattern: usize,
-    /// EraseButton held (`OnErase`, 0x123 `e_songSetEraseState`).
+    /// EraseButton held (0x123 `e_songSetEraseState`).
     erase: bool,
-    /// Last clicked part (`+0xc40`, the part buttons' part).
+    /// Last clicked part (the part buttons' part).
     anchor: Option<(usize, i64)>,
     /// The pattern popup is open (for the selection).
     pattern_menu: bool,
@@ -107,7 +107,7 @@ pub struct SongPanel {
     quantize_mode: usize,
     /// Context menu actions and the right-click time.
     menu: Option<(Vec<MenuAction>, f64)>,
-    /// Insert marker (QN): paste position (`SetInsertMarkerPosition`).
+    /// Insert marker (QN): paste position.
     marker: f64,
     /// Timeline drag: operation 13 loop start, 14 loop end, 15 move loop,
     /// 16 marker; with the grab QN and the loop at the start.
@@ -115,7 +115,7 @@ pub struct SongPanel {
     body_w: std::cell::Cell<f32>,
     /// Song recording ([re:463c61]: one part per track being
     /// recorded, with whether the song played when it started) and the
-    /// retro buffer (+0xa60).
+    /// retro buffer.
     pub rec_state: u8,
     recording: [Option<(SongPart, bool)>; ENGINES],
     retro: [Vec<(SongPart, bool)>; ENGINES],
@@ -127,7 +127,7 @@ pub(crate) fn retro_len_for_test(model: &Model, t: usize, pattern: usize) -> f64
 }
 
 /// Pattern length for retro placement: 1 QN for stopped parts or unknown
-/// lengths (`ApplyRetroRecordToTracks` [re:2cd575], vfunc 0x140).
+/// lengths ([re:2cd575]).
 fn retro_len(model: &Model, t: usize, pattern: usize) -> f64 {
     if pattern == STOP_PART {
         return 1.0;
@@ -146,7 +146,7 @@ fn selected_parts(song: &Song, sel: &BTreeSet<(usize, i64)>) -> Vec<(usize, Song
 }
 
 /// Pattern length in QN divided by the engine tempo multiplier
-/// (`GetPatternLengthInQN / GetTempoMultiplierFloat`).
+/// (pattern length in QN / tempo multiplier).
 fn cycle_qn(model: &Model, e: usize, p: usize) -> f64 {
     let mult = model.engine_node(e).map(|n| {
         let num = n.f32("TempoNumerator").unwrap_or(1.0).max(1.0) as f64;
@@ -232,7 +232,7 @@ impl SongPanel {
         })
     }
 
-    /// `GetSnapQN` [re:e72501]: with fewer than 4 bars visible a 16th, under 16
+    /// Snap [re:e72501]: with fewer than 4 bars visible a 16th, under 16
     /// bars a beat, else whole bars (a power of two of them per 32 bars).
     pub(crate) fn snap_qn(&self) -> f64 {
         let bars = self.body_w.get() as f64 / (4.0 * self.zoom as f64);
@@ -276,7 +276,7 @@ impl SongPanel {
                 self.selected = set;
                 return;
             }
-            // `MoveSelectedParts`: no earlier than 0.
+            // Move: no earlier than 0.
             OpKind::Move => {
                 let min_start = picked.iter().map(|(_, p)| p.start).fold(f64::MAX, f64::min);
                 let d = delta.max(-min_start);
@@ -292,7 +292,7 @@ impl SongPanel {
                 }
                 self.selected = new_sel;
             }
-            // `ChangeSelectedPartStarts` [re:ccc0f2]: end fixed, phase follows.
+            // Start change [re:ccc0f2]: end fixed, phase follows.
             OpKind::Start => {
                 let min_len = picked.iter().map(|(_, p)| p.length).fold(f64::MAX, f64::min);
                 let min_start = picked.iter().map(|(_, p)| p.start).fold(f64::MAX, f64::min);
@@ -307,7 +307,7 @@ impl SongPanel {
                 }
                 self.selected = new_sel;
             }
-            // `ResizeSelectedParts`: length, at least one snap step.
+            // Resize: length, at least one snap step.
             OpKind::Resize => {
                 for (t, p) in &picked {
                     let len = (p.length + delta).max(snapq);
@@ -315,7 +315,7 @@ impl SongPanel {
                     song.add_part(*t, SongPart { length: len, ..p.clone() });
                 }
             }
-            // `ChangeSelectedPartPhases` [re:64218f]: phase wraps in the cycle.
+            // Phase change [re:64218f]: phase wraps in the cycle.
             OpKind::Phase => {
                 for (t, p) in &picked {
                     let cycle = cycle_qn(model, *t, p.pattern).max(1e-6);
@@ -348,8 +348,8 @@ impl SongPanel {
         }
     }
 
-    /// `ChangePatternIDsByDelta` [re:7474af] (delta clamped so every selected
-    /// part stays in 0..=23) / `SetPatternIDs` [re:5a5315] on the selection,
+    /// Pattern IDs by delta [re:7474af] (delta clamped so every selected
+    /// part stays in 0..=23) / set [re:5a5315] on the selection,
     /// committed as "Change pattern IDs".
     fn change_patterns(&mut self, model: &Model, delta: Option<i32>, set: Option<usize>, out: &mut Vec<Command>) {
         let before = song_of(model);
@@ -394,7 +394,7 @@ impl SongPanel {
         self.pattern_menu = true;
     }
 
-    /// `ShowPartButtons` [re:90f6ff]: the three part buttons inside the anchor
+    /// Part buttons [re:90f6ff]: the three part buttons inside the anchor
     /// part's top-right corner, hidden when the part is narrower than the
     /// buttons plus 8 px.
     fn place_part_buttons(&self, app: &mut App, model: &Model) {
@@ -464,7 +464,7 @@ impl SongPanel {
         app.open_menu(anchor, labels, None);
     }
 
-    /// `QuantizeSelectedParts` [re:156a89]: start (and end) to the snap grid;
+    /// Quantize [re:156a89]: start (and end) to the snap grid;
     /// the phase follows the start in "Maintain Sync", stays in "Maintain
     /// Start Phase", and in "Auto" follows unless the pattern restarts.
     fn quantize(&self, model: &Model, song: &mut Song, end: bool) {
@@ -506,7 +506,7 @@ impl SongPanel {
             b.passive = true;
         }
         let _ = name;
-        // `UpdatePatternButtons` [re:ea233f]: enabled with a selection.
+        // Pattern buttons [re:ea233f]: enabled with a selection.
         let any = !self.selected.is_empty();
         for n in ["SelectPatternButton", "NextPatternButton", "PrevPatternButton"] {
             if let Some(b) = page.find_mut(n) {
@@ -533,7 +533,7 @@ impl SongPanel {
     }
 
     /// Hover cursor over the song body: the operation a left press would
-    /// start (as `handle`'s Down) through `GetCursorForOperation` [re:01ad57] —
+    /// start (as `handle`'s Down) through the operation's cursor [re:01ad57] —
     /// 2/3 band Selection, 5 change start ResizeRight, 6 resize ResizeLeft,
     /// 7 phase ResizeBiDir, 10 insert Pen, 13 / 14 / 15 loop start / end /
     /// move ResizeLeft / ResizeRight / ResizeBiDir, others the arrow.
@@ -605,7 +605,7 @@ impl SongPanel {
                 let Some(c) = app.ctrl(path) else { return false };
                 let rh = row_h(c);
                 let qn = (*x / self.zoom + self.scroll) as f64;
-                // Timeline (`TimelineMouseLeftDown` [re:d8f27a] / `TimelineMouseMove`).
+                // Timeline (left press [re:d8f27a] / mouse move).
                 if let Some((op, grab, s0, e0)) = self.timeline {
                     let snap = |v: f64| quantize_round((v / self.snap_qn()).round() * self.snap_qn()).max(0.0);
                     match kind {
@@ -647,7 +647,7 @@ impl SongPanel {
                         }
                     } else {
                         self.marker = quantize_round((qn / self.snap_qn()).round() * self.snap_qn()).max(0.0);
-                        // `ResetCurrentTime` [re:a4e021]: with the song on and the
+                        // Current time reset [re:a4e021]: with the song on and the
                         // transport stopped, 0x1c `e_setCurrentTime`.
                         if song.active && !model.playing {
                             out.push(msg(id::SET_CURRENT_TIME, &[], &[self.marker as f32]));
@@ -701,7 +701,7 @@ impl SongPanel {
                             return true;
                         }
                         let Some(p) = hit else {
-                            // Empty space: `InsertNewDefaultPart` (op 10).
+                            // Empty space: a new default part (op 10).
                             let len = pattern_qn(model, track, self.insert_pattern);
                             let start = (qn / len.max(0.25)).floor() * len.max(0.25);
                             out.push(msg(id::SONG_ADD_PART, &[track as i32], &[start as f32, len as f32, self.insert_pattern as f32]));
@@ -744,13 +744,13 @@ impl SongPanel {
                     _ => false,
                 }
             }
-            // `OnErase(true)` on press.
+            // Erase on while pressed.
             UiEvent::Pressed { path, name } if name == "EraseButton" && path.starts_with(&self.page) => {
                 self.erase = true;
                 out.push(msg(id::SONG_SET_ERASE_STATE, &[model.engine as i32], &[1.0]));
                 true
             }
-            // `PopupPatternSelected(false, n)` → `SetPatternIDs`.
+            // A pattern picked from the popup → pattern IDs set.
             UiEvent::MenuSelected { index, .. } if self.pattern_menu => {
                 self.pattern_menu = false;
                 self.change_patterns(model, None, Some((*index).min(23)), out);
@@ -787,7 +787,7 @@ impl SongPanel {
             }
             UiEvent::Clicked { path, name, .. } if path.starts_with(&self.page) => {
                 match name.as_str() {
-                    // `HandleControlEvent` [re:e3a0fd] → `ChangePatternIDsByDelta`.
+                    // Control event [re:e3a0fd] → pattern IDs by delta.
                     "NextPatternButton" => self.change_patterns(model, Some(1), None, out),
                     "PrevPatternButton" => self.change_patterns(model, Some(-1), None, out),
                     "SelectPatternButton" => self.open_pattern_menu(app, model, path),
@@ -858,7 +858,7 @@ impl SongPanel {
                     next.add_part(t, np);
                 }
             }
-            // `OnDuplicate` [re:5e972b]: everything when nothing is selected;
+            // Duplicate [re:5e972b]: everything when nothing is selected;
             // copies follow the selection's end and become the selection.
             MenuAction::Duplicate => {
                 let picked = if picked.is_empty() { song.tracks.iter().enumerate().flat_map(|(t, ps)| ps.iter().map(move |p| (t, p.clone()))).collect() } else { picked };
@@ -930,7 +930,7 @@ impl SongPanel {
         true
     }
 
-    /// Recorder messages (`HandleMessage` [re:2af005]: 500, 0x1f2, 499, 0x1f8).
+    /// Recorder messages ([re:2af005]: 500, 0x1f2, 499, 0x1f8).
     /// Returns whether a new recording started (the editor's undo point
     /// "Record Song Parts").
     pub fn song_event(&mut self, model: &Model, ev: &SongEvent, out: &mut Vec<Command>) -> bool {
@@ -978,7 +978,7 @@ impl SongPanel {
         }
     }
 
-    /// `ATC_Tick_After_Messages` [re:220222]: parts being recorded grow to the
+    /// Timer tick [re:220222]: parts being recorded grow to the
     /// song position; a jump back before a part's start drops it.
     pub fn tick(&mut self, model: &Model) {
         let Some(pos) = model.song_pos else { return };
@@ -997,7 +997,7 @@ impl SongPanel {
         self.retro.iter().any(|t| !t.is_empty())
     }
 
-    /// `ApplyRetroRecordToTracks` [re:2cd575] (Retro button): the buffered
+    /// Retro record [re:2cd575] (Retro button): the buffered
     /// parts go into the song, selected. Unless every part was played with
     /// the song running they are moved to start after the song's end (each
     /// track's last part rounded up to its pattern length), keeping their

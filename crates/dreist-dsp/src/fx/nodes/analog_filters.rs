@@ -1,12 +1,12 @@
-//! [re:637b7b] (Japan Filter, kind 36; `ProcessBuffer` [re:73307f]) and
-//! [re:cb76f5] (Little Fatty Filter, kind 34; `ProcessBuffer` [re:3f1bf2]),
+//! [re:637b7b] (Japan Filter, kind 36; processing [re:73307f]) and
+//! [re:cb76f5] (Little Fatty Filter, kind 34; processing [re:3f1bf2]),
 //! both dual-mono.
 //!
 //! SH101: OTA ladder whose stages are the integrators themselves
-//! (`ms_otalim_s_tab`, already ×32), diode-limited resonance feedback
-//! (`ms_diodelim_s_tab`), `SetModeSh101` [re:cbe6ef] output matrix (22
+//! (the OTA table already ×32), diode-limited resonance feedback
+//! (the scaled diode table), SH101 mode setup [re:cbe6ef] output matrix (22
 //! modes), FM from `ModIn`, wet/dry. The analogue-noise inputs
-//! ([re:ae6557]/+0xe0) are never written, so the noise terms are zero.
+//! ([re:ae6557]) are never written, so the noise terms are zero.
 //!
 //! MS20: two tanh-limited integrators with a diode feedback path and four
 //! routings (Mode 0–3), otalim output and 10 Hz DC blocker.

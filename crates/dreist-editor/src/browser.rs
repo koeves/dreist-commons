@@ -45,7 +45,7 @@ struct Source {
     label: String,
     path: Option<PathBuf>,
     header: bool,
-    /// Its category (`GetSourceListCategoryStringForCell` [re:1624e1]).
+    /// Its category ([re:1624e1]).
     cat: &'static str,
     /// Colour label index (0 = none).
     colour: usize,
@@ -107,10 +107,10 @@ pub struct Browser {
     menu_entry: Option<usize>,
     /// Actions of the open file list menu.
     menu: Vec<FileAction>,
-    /// Header Options menu open ([re:5eecea] $_1): 1 the
+    /// Header Options menu open ([re:5eecea]): 1 the
     /// menu, 2 its Preview output submenu.
     header_menu: u8,
-    /// Preview output pair (1-based, `ShowPreviewOutputMenu`).
+    /// Preview output pair (1-based).
     pub preview_output: usize,
     /// "Pads track browser location" (option `PadsTrackBrowser`).
     pub pads_track: bool,
@@ -131,7 +131,7 @@ pub struct Browser {
     nav_menu: Option<(PathBuf, Vec<NavAction>)>,
 }
 
-/// [re:2717b8] / `GloballyLockAllPatterns`
+/// [re:2717b8] /
 /// [re:970ae8]: lock everything unless everything is locked, then unlock.
 pub fn toggle_lock_all(model: &mut Model, class: &str, count: usize) {
     let e = model.engine;
@@ -163,7 +163,7 @@ pub fn all_locked(model: &Model, class: &str, count: usize) -> bool {
 
 const HEADER_MENU: [&str; 9] = ["New shortlist", "New shortlist from selection", "", "Preview output ▸", "", "(Un)Lock all pads", "(Un)Lock all patterns", "", "Pads track browser location"];
 
-/// File list context menu items ([re:05c1d3] $_6
+/// File list context menu items ([re:05c1d3]
 /// [re:9dbfe6]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FileAction {
@@ -258,7 +258,7 @@ fn save_shortlists(v: &[(String, Vec<PathBuf>)]) {
     let _ = dreist_formats::file::write_atomic(p, text);
 }
 
-/// Up to 64 random audio files under `dir` (`$_6` lambda #17 [re:64ec65],
+/// Up to 64 random audio files under `dir` ([re:64ec65],
 /// "Load random sounds to pads").
 pub fn random_sounds(dir: &Path, seed: u64) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -305,8 +305,8 @@ fn save_favourites(v: &[PathBuf]) {
     let _ = dreist_formats::file::write_atomic(p, text);
 }
 
-/// Source list item names and colour labels ([re:15ef1c] /
-/// `SetColour`; the original keeps them in its Favourites / Searches /
+/// Source list item names and colour labels ([re:15ef1c];
+/// the original keeps them in its Favourites / Searches /
 /// Shortlists XML): the port's `SourceLabels.txt`, one
 /// `key<TAB>name<TAB>colour index` line per item (key = its path).
 fn labels_path() -> Option<PathBuf> {
@@ -355,8 +355,8 @@ fn labels_set(path: &Path, name: Option<Option<&str>>, colour: Option<usize>) {
     let _ = dreist_formats::file::write_atomic(f, text);
 }
 
-/// Content packs removed from the source list (`RemoveItemsFromBrowser
-/// ObjectArrays` [re:3b2adc] drops them from the content list; the folders
+/// Content packs removed from the source list ([re:3b2adc]
+/// drops them from the content list; the folders
 /// stay): `HiddenContent.txt`.
 fn hidden_content() -> Vec<PathBuf> {
     crate::options::settings_dir().and_then(|d| std::fs::read_to_string(d.join("HiddenContent.txt")).ok()).map(|t| t.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect()).unwrap_or_default()
@@ -372,7 +372,7 @@ fn hide_content(p: &Path) {
 }
 
 /// A path navigator segment button ([re:68bb96]
-/// [re:ef9964] / `ConstructButton` [re:22723d]).
+/// [re:ef9964] / [re:22723d]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct NavButton {
     pub x: f32,
@@ -380,7 +380,7 @@ pub struct NavButton {
     pub label: String,
     /// Display name (its tooltip).
     pub display: String,
-    /// Path index it navigates to (`NavigateToPathIndex`): keeps that many
+    /// Path index it navigates to: keeps that many
     /// + 1 components; -1 for the single non-path button.
     pub index: i32,
     pub last: bool,
@@ -388,7 +388,7 @@ pub struct NavButton {
 
 /// Lay out the navigator for `parts` (path components, or one label for
 /// search results / a shortlist when `path` is false) in `width`:
-/// - `DividePath` [re:b77cf0]: each part text width + 10, the last + 20 when
+/// - Widths [re:b77cf0]: each part text width + 10, the last + 20 when
 ///   slicing is disallowed there.
 /// - Fitting (total < width − 15): every part left to right.
 /// - Else a ".." button (text width; "Navigate to parent folder", index
@@ -441,7 +441,7 @@ pub fn nav_layout(measure: &mut dyn FnMut(&str) -> f32, parts: &[String], path: 
     out
 }
 
-/// Path navigator segment menu (`ConstructButton` $_0 [re:1edecf]).
+/// Path navigator segment menu ([re:1edecf]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum NavAction {
     DeleteSliceInfo,
@@ -569,7 +569,7 @@ pub fn sample_stem(file: &Path) -> String {
 /// ([re:24af02]): nothing when the pad
 /// or the layer is locked; the layer keeps its parameters unless the
 /// `AllocatorClearLayersOnLoad` preference is on (then a fresh layer);
-/// `ResetHoldTime` sets both envelope holds from the sample's length; the
+/// both envelope holds are set from the sample's length; the
 /// pad is named "P<n> <file>" when its name is automatic (matches one of
 /// its layers' files) or it has no samples, and it has at most one sample.
 /// Returns whether the sample was loaded.
@@ -578,7 +578,7 @@ pub fn load_sample_into_layer(model: &mut Model, e: usize, p: usize, l: usize, f
     if locked(model.pad_node(e, p)) || locked(model.layer_node(e, p, l)) {
         return false;
     }
-    // `DoLoadAudioFileOnPath` $_7 [re:c5d89e]: a REX file loads as
+    // [re:c5d89e]: a REX file loads as
     // "<file>.truncated" (slices at their musical positions, see
     // `dreist_engine::rex`).
     let rex_path;
@@ -656,9 +656,9 @@ impl Browser {
         if let Some(h) = host.find_mut("Header") {
             skin.mount(h, "Header.skin").map_err(err)?;
             // [re:9c477d]..[re:af9e3a]:
-            // `SetUserEnableState(false)` on the Spinner (shown only while an
+            // disabled: the Spinner (shown only while an
             // asynchronous search runs; the port's search is synchronous) and
-            // on LockPadsButton / LockPatternsButton (never shown again; the
+            // LockPadsButton / LockPatternsButton (never shown again; the
             // Options menu has the (Un)Lock all items).
             for n in ["Spinner", "LockPadsButton", "LockPatternsButton"] {
                 if let Some(c) = h.find_mut(n) {
@@ -821,7 +821,7 @@ impl Browser {
         }
     }
 
-    /// The folder button `index` navigates to (`NavigateToPathIndex`).
+    /// The folder button `index` navigates to.
     fn nav_target(&self, index: i32) -> Option<PathBuf> {
         let d = self.dir.as_ref()?;
         let (parts, path) = self.nav_parts();
@@ -846,7 +846,7 @@ impl Browser {
         self.nav_hit(x).and_then(|i| self.nav.borrow().get(i).cloned())
     }
 
-    /// `ConstructButton` $_0 [re:1edecf]: the segment's folder menu.
+    /// [re:1edecf]: the segment's folder menu.
     fn nav_items(&self, dir: &Path) -> Vec<(String, NavAction)> {
         let allowed = slicing_allowed(dir);
         let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "/".into());
@@ -916,7 +916,7 @@ impl Browser {
         }
     }
 
-    /// `LaunchItemMenu` [re:eee232] for source row `i` (category items only):
+    /// The item menu [re:eee232] for source row `i` (category items only):
     /// Content — Remove, Reveal, colour; Places / Drives — Reveal;
     /// Favourites — Remove, Reveal, Set name, colour; Searches / Shortlists
     /// — Remove, Set name, colour, then Refresh search / Export to folder
@@ -967,7 +967,7 @@ impl Browser {
             app.open_menu(anchor, labels, None);
         };
         match a {
-            // `RemoveNode` [re:95bd08] asks (Yes / No) first.
+            // Removing [re:95bd08] asks (Yes / No) first.
             SourceAction::Remove => {
                 let q = format!("Are you sure you want to remove \"{}\". This action cannot be undone...", src.label);
                 open(
@@ -977,7 +977,7 @@ impl Browser {
                 );
                 false
             }
-            // `RemoveItemsFromBrowserObjectArrays` [re:3b2adc]: favourites
+            // [re:3b2adc]: favourites
             // leave the list, saved searches and shortlists lose their
             // files, content packs leave the content list.
             SourceAction::ConfirmRemove => {
@@ -1014,7 +1014,7 @@ impl Browser {
                 let _ = std::process::Command::new("open").arg("-R").arg(&path).spawn();
                 false
             }
-            // `BeginNameEdit` [re:ecaf90]: an edit box over the row.
+            // [re:ecaf90]: an edit box over the row.
             SourceAction::SetName => {
                 let Some(c) = app.ctrl(anchor).cloned() else { return false };
                 let y = c.rect.y + (i as f32 * SOURCE_ROW) as i32 + 2;
@@ -1028,13 +1028,13 @@ impl Browser {
                 app.open_menu(anchor, vec![crate::padmenu::colour_grid_item()], None);
                 false
             }
-            // `SetColourOfBrowserObject` [re:86689a] (cell 0 = none).
+            // Colour label [re:86689a] (cell 0 = none).
             SourceAction::Colour(k) => {
                 labels_set(&path, None, Some(k));
                 self.sources = sources(&self.favourites, &self.searches, &self.shortlists);
                 true
             }
-            // `RefreshSearch` [re:51bf3d]: run it again.
+            // [re:51bf3d]: run it again.
             SourceAction::Refresh => {
                 let key = path.to_string_lossy().into_owned();
                 match key.strip_prefix("search:") {
@@ -1078,8 +1078,8 @@ impl Browser {
         Ok(to)
     }
 
-    /// The rename commit (`EndNameEdit` [re:16e4b7] →
-    /// `SetNameOfBrowserObject` [re:b5847b]): shortlists take the new name,
+    /// The rename commit ([re:16e4b7] →
+    /// [re:b5847b]): shortlists take the new name,
     /// other items show it.
     fn commit_source_name(&mut self, app: &mut App, path: &[usize], text: &str) {
         let parent = path[..path.len() - 1].to_vec();
@@ -1122,9 +1122,9 @@ impl Browser {
         self.shortlists.len() - 1
     }
 
-    /// The file list context menu for entry `i` (`DisplayFileInfo` $_6
-    /// [re:9dbfe6]): with two or more rows selected the reveal / shortlist /
-    /// favourite items act on the whole selection.
+    /// The file list context menu for entry `i` ([re:9dbfe6]): with two or
+    /// more rows selected the reveal / shortlist / favourite items act on
+    /// the whole selection.
     fn file_menu(&mut self, i: usize) -> Vec<(String, FileAction)> {
         use dreist_gui::menu::item;
         let entry = self.entries.get(i).cloned();
@@ -1190,7 +1190,7 @@ impl Browser {
                 }
                 true
             }
-            // `DoSaveSearch` [re:d4b4cd] → [re:edf64c]
+            // [re:d4b4cd] → [re:edf64c]
             // [re:fa659c]: the saved search joins the Searches category.
             FileAction::SaveSearch => {
                 let files: Vec<PathBuf> = self.entries.iter().map(|e| e.path.clone()).collect();
@@ -1201,7 +1201,7 @@ impl Browser {
                 }
                 true
             }
-            // `DoDeleteSliceAnalysis` [re:0b8b32] asks first.
+            // Deleting the slice analysis [re:0b8b32] asks first.
             FileAction::DeleteSliceInfo | FileAction::DeleteAllSliceInfo => {
                 let all = a == FileAction::DeleteAllSliceInfo;
                 let q = if all { "Remove the slice information for all the files in this folder?" } else { "Remove the slice information for all the selected files?" };
@@ -1218,7 +1218,7 @@ impl Browser {
                 );
                 false
             }
-            // `DoDeleteSliceAnalysis` [re:0b8b32]: every selected row's `.gsa`.
+            // [re:0b8b32]: every selected row's `.gsa`.
             FileAction::ConfirmDelete { all } => {
                 let files: Vec<PathBuf> = if all { self.entries.iter().filter(|e| !e.dir).map(|e| e.path.clone()).collect() } else { self.menu_targets().into_iter().map(|e| e.path).collect() };
                 for f in files {
@@ -1284,7 +1284,7 @@ impl Browser {
                 self.show_shortlist(name);
                 true
             }
-            // Folders only (`IsSelectionExclusivelyFolders`); already
+            // Folders only; already
             // present favourites stay.
             FileAction::Favourite | FileAction::FavouriteFolder => {
                 let ts: Vec<PathBuf> = if a == FileAction::Favourite { self.menu_targets().into_iter().filter(|e| e.dir).map(|e| e.path).collect() } else { self.dir.clone().into_iter().collect() };
@@ -1331,7 +1331,7 @@ impl Browser {
         self.multi.clear();
     }
 
-    /// Search locations (`GetSearchLocations` [re:b4f753]): the last folder
+    /// Search locations ([re:b4f753]): the last folder
     /// shown, plus the favourites when "Search within favourites" is on.
     fn scan(&self, opts: &[crate::search::SearchOption], match_all: bool) -> Vec<Entry> {
         let deep = self.pane.sub_folders;
@@ -1446,7 +1446,7 @@ impl Browser {
         }
         let ext = en.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         self.loading = Some((en.path.clone(), 0.0));
-        // Guru files (`DoLoadFile`): preset → a new document, kit → the
+        // Guru files: preset → a new document, kit → the
         // current engine, pattern → the current slot, bank → all slots.
         if let Some(k) = crate::guru::kind(&en.path) {
             let e = model.engine;
@@ -1514,8 +1514,8 @@ impl Browser {
                 true
             }
             // Path navigator buttons: a click navigates
-            // (`HandleControlEvent` [re:0bd1bd] → `NavigateToPathIndex` [re:77c628]),
-            // a right press opens the folder menu ($_0).
+            // ([re:0bd1bd] → [re:77c628]),
+            // a right press opens the folder menu.
             UiEvent::Mouse { overload, kind: MouseKind::Down, x, .. } if overload == "BrowserPathNavigator" => {
                 self.nav_pressed = self.nav_hit(*x);
                 false
@@ -1569,7 +1569,7 @@ impl Browser {
                 self.commit_source_name(app, &path, &text);
                 true
             }
-            // File list context menu (`DisplayFileInfo` $_6).
+            // File list context menu.
             UiEvent::Mouse { path, overload, kind: MouseKind::RightDown, y, .. } if overload == "BrowserFileList" => {
                 if self.dir.is_none() && self.entries.is_empty() {
                     return false;
@@ -1658,7 +1658,7 @@ impl Browser {
                 }
                 true
             }
-            // Header Options ([re:5eecea] $_1 [re:ea2f28]).
+            // Header Options ([re:5eecea] [re:ea2f28]).
             UiEvent::MenuSelected { index, .. } if self.header_menu == 2 => {
                 self.header_menu = 0;
                 self.preview_output = (*index + 1).min(32);

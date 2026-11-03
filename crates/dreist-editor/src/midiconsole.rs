@@ -2,7 +2,7 @@
 //! incoming MIDI as text in `OutputView`, filtered by the Notes / CCs /
 //! Other toggles, Clear empties it. Lines come from
 //! [re:e53b37] with
-//! `IntToKeyName` [re:59f16c] note names.
+//! [re:59f16c] note names.
 
 use dreist_gui::app::{App, MouseKind, UiEvent};
 use dreist_gui::paint::{Painter, RectF};
@@ -15,7 +15,7 @@ use crate::EditorError;
 const ROW: f32 = 15.0;
 const MAX_LINES: usize = 1000;
 
-/// `IntToKeyName`: "C#3" style; `mode` 0 → C0 at 0, 1 → C-2, 2 → C-1;
+/// Note name: "C#3" style; `mode` 0 → C0 at 0, 1 → C-2, 2 → C-1;
 /// `numbers` gives the note number instead.
 pub fn key_name(n: u8, mode: u8, numbers: bool) -> String {
     if n > 127 {
@@ -36,7 +36,7 @@ pub fn key_name(n: u8, mode: u8, numbers: bool) -> String {
     format!("{a}{b}{oct}")
 }
 
-/// `ConvertMIDIMsgBytesToString`.
+/// A MIDI message as text.
 pub fn describe(m: [u8; 3], mode: u8) -> String {
     let ch = (m[0] & 0x0f) + 1;
     match m[0] >> 4 {

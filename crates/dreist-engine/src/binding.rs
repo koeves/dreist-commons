@@ -276,7 +276,7 @@ impl Message {
     }
 }
 
-/// `Binding::BindingType` (`CreateBindingTypeMap` [re:eaa2d1]).
+/// Binding type ([re:eaa2d1]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BindingType {
     #[default]
@@ -369,7 +369,7 @@ pub struct Binding {
     pub stuffer: Stuffer,
     pub prototype: Message,
     pub editor_only: bool,
-    /// Last controller value (+0x110).
+    /// Last controller value.
     last: f32,
     interp: Interpolator,
 }
@@ -460,7 +460,7 @@ impl Binding {
         Some(m)
     }
 
-    /// `PushABindingToInterpolator` [re:9e40b6].
+    /// Hand a value to the interpolator [re:9e40b6].
     fn push(&mut self, v: f32, out: &mut Vec<Message>) -> bool {
         if self.last - v <= 0.2 {
             self.interp.set(v);
@@ -518,7 +518,7 @@ enum Key {
 pub struct BindingMap {
     midi: Vec<Vec<Binding>>,
     host: Vec<Vec<Binding>>,
-    /// Bindings being interpolated (+0xce50).
+    /// Bindings being interpolated.
     active: Vec<Key>,
 }
 
@@ -630,7 +630,7 @@ impl BindingMap {
         self.push(Key::Host(param), v, out);
     }
 
-    /// `UpdateInterpolatedParameters` [re:4ea5a7] (block start and every sub-block).
+    /// Interpolated parameter update [re:4ea5a7] (block start and every sub-block).
     /// Keys whose interpolation finished drop out (in place: this runs on
     /// the audio thread every sub-block).
     /// Continuous bindings replace their own message queued since `from`

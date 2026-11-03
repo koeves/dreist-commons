@@ -6,8 +6,8 @@
 //!   Quantize pattern timing (0xad), Extract groove from pattern (editor
 //!   message 0x136), Convert timing (Pattern Convertor panel); Swap with /
 //!   Copy to / Move to ▸ patterns ([re:c23a58] /
-//!   `CopyPattern` / `MovePattern`); Export as audio (current pattern).
-//! - [re:ca3223] $_7 [re:3c8b75] (track name area):
+//!   copy / move); Export as audio (current pattern).
+//! - [re:ca3223] [re:3c8b75] (track name area):
 //!   Cut / Cut with pad, Copy / Copy with pad, Paste / Paste with pad;
 //!   Clear track, Clear all tracks, Clear pad, Select tracks' pad; Lock all
 //!   tracks (0xb8), Unlock all tracks (0xb9), Lock / Unlock track (0xb7),
@@ -127,7 +127,7 @@ pub(crate) fn put_pattern(model: &mut Model, e: usize, p: usize, mut node: Node)
     }
 }
 
-/// Steps off, lanes and names kept (`StepPattern::Clear` keeps settings).
+/// Steps off, lanes and names kept (clearing a pattern keeps its settings).
 pub(crate) fn clear_pattern(n: &mut Node) {
     for t in n.children.iter_mut().filter(|c| c.class == "Track") {
         t.children.retain(|c| c.class != "Step");
@@ -302,7 +302,7 @@ impl PatMenu {
                 out.push(msg(id::QUANTIZE_PATTERN_TIMING, &[e as i32, -1, -1, n as i32, -1, -1], &[0.0]));
                 true
             }
-            // e_extractGrooveFromPattern (0x136) → `DoCreateGrooveForPattern`.
+            // e_extractGrooveFromPattern (0x136) → the groove from the pattern.
             Action::ExtractGroove => {
                 self.groove = Some(n);
                 false
@@ -342,9 +342,9 @@ impl PatMenu {
                 rebuild(model, out);
                 true
             }
-            // $_7 lambda #1 [re:4436e5]: Cut copies the pattern
+            // lambda #1 [re:4436e5]: Cut copies the pattern
             // ([re:aa54c8]), keeps only the editor-selected
-            // steps in the copy (`DeleteAllNonEditorSelectedSteps`) and posts
+            // steps in the copy and posts
             // 0xb1 `e_clearSelectedStepsInPattern` [e, −1, −1, pattern].
             Action::CutTrack { pad: false } => {
                 let cur = model.current_pattern(e);

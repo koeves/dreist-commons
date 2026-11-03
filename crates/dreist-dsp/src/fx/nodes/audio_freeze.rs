@@ -1,13 +1,13 @@
 //! [re:4f768c] (Audio Freezer, kind 38, dual-mono; `Reset`
-//! [re:0eea55], `SetMaxDelay` [re:144838], `ProcessBuffer` [re:c43ffb]): while the
+//! [re:0eea55], buffer sizing [re:144838], processing [re:c43ffb]): while the
 //! gate is off the input is recorded into a loop buffer; when it opens the
 //! loop length is latched (`LoopLength` beats) and, at the next 16th-note
 //! boundary, playback switches to grains read from the frozen loop: each
 //! grain starts at the (Speed-drifting) start position plus a manual/random
 //! jump of whole grains, plays at the Scratch rate and crossfades from the
 //! previous grain over `Smooth · grain`. The dry path is delayed by one
-//! sample. The grain length uses `ConvertToUnits(v, mode, [re:88cd77])`,
-//! i.e. bpm/60 rather than 60/bpm in beat mode, as in the binary.
+//! sample. The grain length uses the unit conversion with [re:88cd77],
+//! i.e. bpm/60 rather than 60/bpm in beat mode, as in the original.
 
 use super::math::{clip01, cubic, pow2_at_least};
 use crate::fx::convert::time_beat_to_units;
@@ -82,7 +82,7 @@ impl Voice {
         v
     }
 
-    /// `SetMaxDelay(2 · 384000)`: power-of-two buffer.
+    /// Buffer sizing for 2 · 384000 samples: power-of-two buffer.
     fn set_max_delay(&mut self, d: f32) {
         self.max_grain = d;
         let n = d.round() as i32;

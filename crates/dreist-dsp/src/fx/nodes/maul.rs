@@ -1,4 +1,4 @@
-//! [re:e1d705] (Maul; `Voice::PrepareStream` [re:06ee28], `ProcessBuffer`
+//! [re:e1d705] (Maul; stream setup [re:06ee28], processing
 //! [re:5d97fa]): two parallel bands — low-pass and high-pass
 //! ([re:e2af9b], single stage) each into its own
 //! [re:fdc386] and gain — averaged and soft-saturated.
@@ -21,7 +21,7 @@ impl Band {
         Band { filter, dist: MultiModeDistortion::default(), gain: Gain::default() }
     }
 
-    /// `PrepareStream` for the band.
+    /// Stream setup for the band.
     fn prepare(&mut self, sr: f32, mode: u32) {
         self.dist.set_sample_rate(sr);
         self.filter.set_sample_rate(sr);

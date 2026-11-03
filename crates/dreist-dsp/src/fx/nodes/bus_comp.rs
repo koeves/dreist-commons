@@ -1,5 +1,5 @@
-//! [re:68112c] (Bus Compressor, kind 9; `Voice::Reset`
-//! [re:256986], `Voice::ProcessBuffer` [re:5658cd]) around [re:8a3887]
+//! [re:68112c] (Bus Compressor, kind 9; reset
+//! [re:256986], processing [re:5658cd]) around [re:8a3887]
 //! ([re:5ab80f]..[re:07c121]): a feedback bus compressor modelled as a circuit.
 //! The high-passed side-chain, scaled by the current gain, goes through a
 //! ratio transfer table (ideal or "analog limit" clip curves); two diodes
@@ -221,7 +221,7 @@ impl Node for BusComp {
         &mut self.ports
     }
 
-    // `Voice::Reset` [re:256986] only zeroes the gain-reduction control-out,
+    // Reset [re:256986] only zeroes the gain-reduction control-out,
     // which is not modelled.
 
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {

@@ -64,7 +64,7 @@ impl Comb {
         }
     }
 
-    /// `SetSampleRate` [re:07aa89]: power-of-two buffer of at least 0.2 s.
+    /// Sample-rate setup [re:07aa89]: power-of-two buffer of at least 0.2 s.
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sr = sr;
         self.inv_sr = 1.0 / sr;
@@ -88,7 +88,7 @@ impl Comb {
         self.damp_coef = ((b + 1.0) - (b - 1.0).abs()) * 0.5;
     }
 
-    /// `Initialize` [re:af406e].
+    /// Setup [re:af406e].
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.positive = 0.5 <= mode;
         let c = cutoff * 12.0;

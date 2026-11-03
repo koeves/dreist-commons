@@ -1,14 +1,14 @@
 //! Pattern retro recording ([re:6b0323], owned by the pattern
 //! editor): every live-recorded step goes into the front buffer
-//! (`RecordStep` [re:0b14ce], [re:135172] for each
+//! ([re:0b14ce], [re:135172] for each
 //! [re:4e20da], record on or off); when the selected engine's
 //! pattern cycles (`e_updatePatternCycled` 0x1a2) a non-empty front becomes
-//! the back buffer (`SwapFrontAndBackPatterns` [re:dfedb0]). Engine selection
-//! changes and preset loads clear both (`ClearAllBuffers` [re:180e71]).
+//! the back buffer ([re:dfedb0]). Engine selection
+//! changes and preset loads clear both ([re:180e71]).
 //!
 //! The header Retro button with the song off ([re:fc4a20]
 //!  [re:667221]) copies the back buffer's steps into the
-//! current pattern (`ApplyToPattern` [re:46cb15]: steps below the pattern's
+//! current pattern ([re:46cb15]: steps below the pattern's
 //! step count; undo "Retro recorded") and clears the buffers. The original
 //! replaces the pattern (0xa7); the port posts the steps.
 

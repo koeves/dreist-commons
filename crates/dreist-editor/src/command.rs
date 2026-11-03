@@ -115,8 +115,8 @@ pub fn msg(kind: u32, index: &[i32], value: &[f32]) -> Command {
     Command::Message(Message::new(kind, index, value))
 }
 
-/// An export job as the panel sees it ([re:8c1655]: `JobProgress`,
-/// `AbortJob`, the clipping prompt, `IsFatalError` / the error text).
+/// An export job as the panel sees it ([re:8c1655]: progress,
+/// abort, the clipping prompt, a fatal error / the error text).
 #[derive(Debug, Default)]
 pub struct ExportStatus {
     pub progress: f32,

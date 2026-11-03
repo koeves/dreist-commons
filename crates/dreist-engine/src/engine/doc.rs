@@ -66,7 +66,7 @@ fn doc_layer(doc: &mut Node, e: usize, p: usize, l: usize) -> &mut Node {
 /// Effect slot node under a layer/pad/engine (−1 = the enclosing level).
 fn doc_chain(doc: &mut Node, e: i32, p: i32, l: i32) -> Option<&mut Node> {
     let owner = if e == -4 && p >= 0 {
-        // `GetEffectChain`: −4 = global aux `p`, −3 = master.
+        // Effect chain lookup: −4 = global aux `p`, −3 = master.
         doc.child_mut_or_insert("GlobalAux", &format!("GlobalAux{p}"))
     } else if e == -3 {
         doc.child_mut_or_insert("MasterChannel", "MasterChannel")
@@ -637,7 +637,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
 }
 
 impl Dreist {
-    /// Mirror a recorded step (`HandleRecordingMessage`).
+    /// Mirror a recorded step (recording message).
     pub(super) fn doc_step(&mut self, e: usize, pattern: usize, track: usize, step: usize) {
         let Some(s) = self.engines.get(e).and_then(|x| x.patterns.get(pattern)).and_then(|p| p.tracks.get(track)).and_then(|t| t.steps.get(step)).cloned() else {
             return;

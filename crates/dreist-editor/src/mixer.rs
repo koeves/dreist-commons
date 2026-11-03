@@ -9,20 +9,20 @@
 //! Selection and the shown effect chain (ev_37b25110…, ev_06897cf5…,
 //! ev_975c5a77…, ev_550d1ba0…, ev_705113971…, ev_e8192a36…):
 //! - A press on a strip outside its controls ([re:fcb381]
-//!   $_2 [re:42d973], aux $_10 [re:4a3270]) selects it: an
-//!   engine selects that engine (the global mixer's $_0 [re:1068c4]), a pad goes
+//!   [re:42d973], aux [re:4a3270]) selects it: an
+//!   engine selects that engine (the global mixer's [re:1068c4]), a pad goes
 //!   through the pad selection (cmd toggles, shift extends), a layer becomes
-//!   the current layer; an aux or the master strip ($_1 [re:070ea3] / $_2
-//!   [re:d1e5bd]) shows its own chain (`SetIdentity` 3 / 4) until an engine is
-//!   picked again (+0x3b8).
+//!   the current layer; an aux or the master strip ([re:070ea3] /
+//!   [re:d1e5bd]) shows its own chain (identity 3 / 4) until an engine is
+//!   picked again.
 //! - The NameLabel takes `MixerChannelEditTitleSelectedStyle` on the chain's
 //!   strip, `…SubSelStyle` on the other selected pads, else
 //!   `MixerChannelEditTitleStyle` ([re:ba4a66]
 //!   [re:d09042], [re:f5104b]).
-//! - EffectViewGroup ("Show FX", [re:faf56f] $_1 →
-//!   `UpdateVisibleEffect`): items E1–E8, A1–A4, M (global), 1–64 (pads),
+//! - EffectViewGroup ("Show FX", [re:faf56f] →
+//!   the visible effect): items E1–E8, A1–A4, M (global), 1–64 (pads),
 //!   1–8 (layers); picking one selects that channel.
-//! - Layout ([re:faf56f] $_2 [re:50c976]): up to 384 px tall the
+//! - Layout ([re:faf56f] [re:50c976]): up to 384 px tall the
 //!   chain and the strips share the space — Effects (mode 2) shows the
 //!   chain right of the mode buttons with the Show FX popup, Mix / Sends
 //!   the strips; taller, the chain sits 200 px high on top, the strips
@@ -58,7 +58,7 @@ enum Channel {
     Layer(usize),
 }
 
-/// OutputCombo items (`ConnectControls` [re:1123ca]: the 38
+/// OutputCombo items ([re:1123ca]: the 38
 /// [re:0dccd3] names — subs in
 /// the short "S n" form).
 pub fn output_items() -> Vec<String> {
@@ -86,7 +86,7 @@ fn output_index(name: &str) -> usize {
 }
 
 /// Output locations used anywhere in the document (marked in the menu, the
-/// original's `GetBlockImage` for used outputs above Master).
+/// original's block image for used outputs above Master).
 fn used_outputs(doc: &Node) -> std::collections::BTreeSet<usize> {
     fn walk(n: &Node, out: &mut std::collections::BTreeSet<usize>) {
         if let Some(o) = n.attr("OutputLocation") {
@@ -119,8 +119,7 @@ pub struct Mixer {
     /// The output selector's right-click menu is open (its strip kind).
     route_all_menu: Option<Channel>,
     fx: Option<crate::fxchain::FxPanel>,
-    /// Global mixer: an aux or the master shows its chain ([re:51d49b]
-    /// +0x3b8).
+    /// Global mixer: an aux or the master shows its chain ([re:51d49b]).
     bus_view: Option<Channel>,
     /// The Show FX popup is open.
     view_menu: bool,
@@ -265,7 +264,7 @@ impl Mixer {
         }
     }
 
-    /// Show FX items (`ConstructMixerChannels`).
+    /// Show FX items.
     fn view_items(&self) -> Vec<String> {
         match self.kind {
             Kind::Global => (1..=ENGINES).map(|k| format!("E{k}")).chain((1..=4).map(|k| format!("A{k}"))).chain(std::iter::once("M".to_string())).collect(),
@@ -304,7 +303,7 @@ impl Mixer {
         }
     }
 
-    /// [re:faf56f] $_2: the chain / strips split for the
+    /// [re:faf56f]: the chain / strips split for the
     /// panel height and mode.
     fn layout(&mut self, app: &mut App) {
         let Some(page) = app.ctrl(&self.page) else { return };
@@ -409,7 +408,7 @@ impl Mixer {
             };
             let sends: Vec<f32> = (0..4).map(|k| attr_f32(node, &dreist_formats::params::aux_send_name(k), 0.0)).collect();
             let output = output_items()[output_index(node.and_then(|n| n.attr("OutputLocation")).unwrap_or("Parent"))].clone();
-            // `UpdateEffectIndicators` [re:01fdd4]: FxIndi k lit when slot k
+            // [re:01fdd4]: FxIndi k lit when slot k
             // holds an effect.
             let fx_on: Vec<bool> = (0..6)
                 .map(|k| {
@@ -441,7 +440,7 @@ impl Mixer {
                 "GainSlider" => k.value = gain,
                 "PanKnob" => k.value = pan,
                 // [re:ab799e] hides Pitch
-                // (`SetUserEnableState(false)`); the engine ([re:05d928]) and pad
+                // (disabled); the engine ([re:05d928]) and pad
                 // ([re:a584ed]) channels show it again, layer and aux keep it
                 // hidden. The master strip's knob is the master tune.
                 "Pitch" => {
@@ -511,7 +510,7 @@ impl Mixer {
     }
 
     /// "Remove all modulation from this control" for strip knobs
-    /// (`RemoveAllTransmodFromControl`) and the strip's effects: depth 0
+    /// and the strip's effects: depth 0
     /// for sources 1..=28.
     pub fn remove_modulation(&self, app: &App, model: &Model, path: &[usize]) -> Vec<Command> {
         if let Some(f) = &self.fx {
@@ -580,7 +579,7 @@ impl Mixer {
         Some(crate::model::modulation_mask(node, &key))
     }
 
-    /// The strip knob tooltip ([re:fcb381] $_7
+    /// The strip knob tooltip ([re:fcb381]
     /// [re:dafd34] and the derived strips): Decibels "Gain", Pan "Pan",
     /// Percent "Send n", Semitones "Pitch", with the transmod description
     /// and modulated value when a source is shown; the master gain is a
@@ -626,7 +625,7 @@ impl Mixer {
 
     /// A knob double click's reset value: the strip's effects, then
     /// [re:7b12f8] (Gain
-    /// ∛0.5, Pan 0.5, Pitch 0.5 in the derived strips, sends 0); aux strips ([re:223b19] $_14 [re:c32b02]) only
+    /// ∛0.5, Pan 0.5, Pitch 0.5 in the derived strips, sends 0); aux strips ([re:223b19] [re:c32b02]) only
     /// reset the gain.
     pub fn reset_value(&self, app: &App, path: &[usize]) -> Option<f32> {
         let name = app.ctrl(path)?.name.clone();
@@ -657,7 +656,7 @@ impl Mixer {
     }
 
     /// The pad whose strip background (or a passive child: label, panel)
-    /// is at `path`: [re:bfddf4] $_17
+    /// is at `path`: [re:bfddf4]
     /// [re:c455d6] opens the pad menu there (right clicks on the knobs keep
     /// their own menus).
     pub fn pad_strip_at(&self, app: &App, path: &[usize]) -> Option<usize> {
@@ -683,7 +682,7 @@ impl Mixer {
         let e = model.engine;
         match ch {
             Channel::Engine(k) => {
-                // The global mixer's $_0 [re:1068c4]: [re:352eb9] (cmd
+                // The global mixer's [re:1068c4]: [re:352eb9] (cmd
                 // toggles, shift extends) → `e_setEngineSelections` 0x43.
                 self.bus_view = None;
                 let cur = crate::multipad::select_engine(model, k, cmd, shift);
@@ -713,7 +712,7 @@ impl Mixer {
         let p = model.pad[model.engine] as i32;
         if let UiEvent::MenuSelected { index, .. } = ev {
             if std::mem::take(&mut self.view_menu) {
-                // `UpdateVisibleEffect`: the item's channel.
+                // Show FX: the item's channel.
                 let ch = match self.kind {
                     Kind::Global if *index < ENGINES => Channel::Engine(*index),
                     Kind::Global if *index < 12 => Channel::Aux(*index - 8),
@@ -724,8 +723,8 @@ impl Mixer {
                 self.select(model, ch, false, false, out);
                 return true;
             }
-            // [re:703e6d] $_12 [re:60ed40], [re:b8ab71]
-            // $_11 [re:2788cc], [re:ab1a4e] $_11
+            // [re:703e6d] [re:60ed40], [re:b8ab71]
+            // [re:2788cc], [re:ab1a4e]
             // [re:c9fdd9]: route every pad / layer / engine to parent (0),
             // master (1) or "Sub output n" in order (i + 2).
             if let Some(ch) = self.route_all_menu.take() {
@@ -859,7 +858,7 @@ impl Mixer {
                     (Channel::Layer(k), "SoloButton") => msg(id::SET_LAYER_SOLO, &[e, p, k as i32], &[v]),
                     (Channel::Aux(k), "MuteButton") => msg(id::MUTE_GLOBAL_AUX, &[k as i32], &[v]),
                     (Channel::Aux(k), "SoloButton") => msg(id::SOLO_GLOBAL_AUX, &[k as i32], &[v]),
-                    // [re:0a9148] $_5 [re:a4e09c]: 0xa3
+                    // [re:0a9148] [re:a4e09c]: 0xa3
                     // [aux] [pre].
                     (Channel::Aux(k), "PrePostButton") => msg(id::SET_GLOBAL_AUX_PRE_POST, &[k as i32], &[v]),
                     _ => return false,

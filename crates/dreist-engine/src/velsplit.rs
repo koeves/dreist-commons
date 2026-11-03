@@ -1,16 +1,16 @@
-//! Layer velocity splits ([re:30df67], Layer+0x4f0) and the pad
+//! Layer velocity splits ([re:30df67]) and the pad
 //! "auto split" / "auto overlap" actions (`e_autoVelocitySplitPad` 0x57,
 //! `e_autoVelocityCross` 0x58, [re:5723c8]).
 //!
-//! A split is `[lowest, low turnover, high turnover, highest]` (+0x14..+0x20),
+//! A split is `[lowest, low turnover, high turnover, highest]`,
 //! every setter clamped to 127. Only lowest..=highest gates a layer
-//! (`IsVelocityInsideSplit` [re:39b7ef]); the turnovers are drawn by the
+//! ([re:39b7ef]); the turnovers are drawn by the
 //! editor and saved, nothing else reads them.
 
 /// `[lowest, low turnover, high turnover, highest]`.
 pub type Split = [u32; 4];
 
-/// [re:30df67] default (also `IsInDefaultState`).
+/// [re:30df67] default (also the default-state check).
 pub const DEFAULT: Split = [0, 0, 127, 127];
 
 /// Child node of a layer ([re:77e04b]).

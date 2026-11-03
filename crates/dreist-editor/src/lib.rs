@@ -68,7 +68,7 @@ pub enum Dialog {
     ExportAudio,
     /// Missing files: Auto Find start folder.
     ChooseFolder,
-    /// Source list › Export to folder (`ExportShortlist` [re:24982a]): the
+    /// Source list › Export to folder ([re:24982a]): the
     /// folder to copy the shortlist into (from the desktop).
     ExportFolder,
     /// Missing files: Find Selected.
@@ -78,7 +78,7 @@ pub enum Dialog {
     /// Pad menu › Save layer sample...: where to write the copy.
     /// Default file name.
     SaveSample(String),
-    /// FX chain menu › Save preset (`DoSaveCurrentPreset`): a `.fxchain`.
+    /// FX chain menu › Save preset: a `.fxchain`.
     SaveChainPreset,
     /// Effect menu › Save preset: a `.fxpreset` for the effect type.
     SaveEffectPreset(usize),
@@ -105,7 +105,7 @@ pub fn product() -> &'static str {
     dreist_formats::profile::get().product
 }
 
-/// File menu items ([re:4139f8] $_21 [re:3ce6a1]).
+/// File menu items ([re:4139f8] [re:3ce6a1]).
 #[derive(Debug, Clone)]
 enum FileAction {
     None,
@@ -161,7 +161,7 @@ fn save_split(key: &str, pos: i32) {
     o.save();
 }
 
-/// `Editor::open` → [re:4ca6d7] for every
+/// Opening the editor → [re:4ca6d7] for every
 /// splitter: a saved position ≥ 0 is clamped and applied.
 fn restore_splits(c: &mut Ctrl, o: &options::Options) {
     if c.class == "CtrlSplitterPanel" {
@@ -218,7 +218,7 @@ pub struct Editor {
     /// Last file per part type and engine ([re:4196af] dialog paths): what
     /// "Save Engine" / "Save Kit" / … write to without asking.
     part_paths: std::collections::HashMap<(&'static str, usize), std::path::PathBuf>,
-    /// Undo name of the last drop (`CreateEngineUndo` texts).
+    /// Undo name of the last drop (the original's undo texts).
     drop_label: String,
     pub model: Model,
     /// Commands produced since the last `take_commands`.
@@ -400,7 +400,7 @@ impl Editor {
         // `LastEditorScaleFactor` (Preferences › UI scaling), applied when
         // the window opens.
         ed.app.ui_scale = (ed.modals.options.int("LastEditorScaleFactor", 100).clamp(50, 300) as f32) / 100.0;
-        // `Editor::open`: the window sizer; `ComputeStartupSize` [re:4aa577]:
+        // Opening the editor: the window sizer; startup size [re:4aa577]:
         // `LastEditorSize` (window pixels, "0,0" = the default size).
         ed.app.set_has_window_sizer();
         let default = ed.app.size();
@@ -416,7 +416,7 @@ impl Editor {
         }
         let ui = ed.app.ui_scale;
         ed.window_size = (default, ((size.0 as f32 * ui).floor() as i32, (size.1 as f32 * ui).floor() as i32));
-        // [re:f98edd] (`PostMessagingInitialized`).
+        // [re:f98edd] (messaging initialized).
         let startup = sampler::Sampler::startup_messages(&mut ed.model);
         // The document follows, as the engine's does (`mirror_message`).
         for c in &startup {
@@ -424,7 +424,7 @@ impl Editor {
         }
         ed.outbox.extend(startup);
         // `e_registryOptionsChanged` [ForcedLayersFallThrough,
-        // SendActiveSensing] ([re:0d12fb] $_0 posts it on
+        // SendActiveSensing] ([re:0d12fb] posts it on
         // Confirm; the engine also reads it when built).
         let o = &ed.modals.options;
         let reg = command::msg(dreist_engine::binding::id::REGISTRY_OPTIONS_CHANGED, &[], &[o.bool("ForcedLayersFallThrough", false) as i32 as f32, o.bool("SendActiveSensing", false) as i32 as f32]);
@@ -488,7 +488,7 @@ impl Editor {
         self.sync();
     }
 
-    /// `Editor::open` $_3 (root rect changed): `LastEditorSize` = the size
+    /// Root rect changed: `LastEditorSize` = the size
     /// × scale, floored ("%d,%d"); written once a live resize ends.
     fn save_window_size(&mut self) {
         let (w, h) = self.app.size();

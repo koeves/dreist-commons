@@ -121,8 +121,8 @@ impl Editor {
                 }
                 true
             }
-            // The file's pattern (`LoadFromMIDIFile`) as a groove
-            // (`ConvertPatternToSwingTemplate`) in the user swing folder.
+            // The file's pattern as a groove
+            // (swing template) in the user swing folder.
             Request::ImportMidiTemplate => {
                 if let Some(f) = self.dialog(Dialog::OpenMidiTemplate) {
                     self.import_midi_template(&f);
@@ -139,7 +139,7 @@ impl Editor {
                 }
                 true
             }
-            // [re:0d12fb] $_22: the documents folder, written
+            // [re:0d12fb]: the documents folder, written
             // at once.
             Request::BrowseDocuments => {
                 let start = PathBuf::from(self.modals.documents_path());
@@ -168,7 +168,7 @@ impl Editor {
                 true
             }
             // [re:c39372] → the export job; the panel stays
-            // open with its progress (`PromptAndStartJob` [re:d6b539]).
+            // open with its progress ([re:d6b539]).
             Request::ExportAudio => {
                 if let Some(p) = self.dialog(Dialog::ExportAudio) {
                     let p = if p.extension().is_none() { p.with_extension("wav") } else { p };
@@ -185,8 +185,8 @@ impl Editor {
         }
     }
 
-    /// Open a project (`DoLoadPresetOnPath`) or a Guru preset
-    /// (`DoLoadGuruPresetOnPath`: converted, no samples folder of its own)
+    /// Open a project or a Guru preset
+    /// (converted, no samples folder of its own)
     /// and rebuild the engine; whether it opened.
     fn open_project(&mut self, path: &std::path::Path) -> bool {
         if guru::kind(path) == Some(guru::Kind::Preset) {
@@ -213,7 +213,7 @@ impl Editor {
         let Some((raw, converted)) = (dreist_formats::profile::get().read_project)(path) else { return false };
         let own = path.extension().is_some_and(|e| e.eq_ignore_ascii_case(dreist_formats::profile::get().save.project));
         self.project_path = (!converted && own).then(|| path.to_path_buf());
-        // `DoLoadPresetOnPath` $_14: the preset joins the recent list.
+        // The preset joins the recent list.
         if !cfg!(test) {
             add_recent_preset(path);
         }

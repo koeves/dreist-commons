@@ -9,7 +9,7 @@ pub const TIMESTRETCH_VOICES: usize = 16;
 /// Fade length when a voice is cut by another ([re:afd305]).
 pub const CUT_FADE: f64 = 250.0;
 
-/// `Layer::LayerCutMode`.
+/// Layer cut mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CutMode {
     NotCut,
@@ -36,7 +36,7 @@ impl CutMode {
         }
     }
 
-    /// A stored `CutMode`: the display name (`ReplaceLayerCutMode` rewrites
+    /// A stored `CutMode`: the display name (the original rewrites
     /// the map [re:87acba] uses, so factory files say "Self + Other",
     /// "Pad type", …); enum names are accepted too, as older port builds
     /// wrote them. Unknown → NotCut.
@@ -47,13 +47,13 @@ impl CutMode {
     }
 }
 
-/// `CutMode` enum names (`CreateLayerCutModeMap`), by index.
+/// `CutMode` enum names, by index.
 pub const CUT_MODE_NAMES: [&str; 16] = [
     "NotCut", "BySelf", "ByPad", "ByOtherPads", "ByOtherPadsAndSelf", "ByType", "ByEngineGroup1", "ByEngineGroup2", "ByGlobalGroup1", "ByGlobalGroup2", "ByGlobalGroup3", "ByGlobalGroup4",
     "ByGlobalGroup5", "ByGlobalGroup6", "ByGlobalGroup7", "ByGlobalGroup8",
 ];
 
-/// Display names ([re:ceabd7], `ReplaceLayerCutMode`).
+/// Display names ([re:ceabd7]).
 pub const CUT_MODE_LABELS: [&str; 16] = [
     "Not cut", "Self", "Pad", "By other pads", "Self + Other", "Pad type", "Engine group 1", "Engine group 2", "Global group 1", "Global group 2", "Global group 3", "Global group 4",
     "Global group 5", "Global group 6", "Global group 7", "Global group 8",
@@ -67,7 +67,7 @@ pub struct Slot {
     pub layer: u32,
 }
 
-/// `IsVoiceCutByOtherVoice`: does a new note on `new` (whose layer's cut mode
+/// Voice cutting: does a new note on `new` (whose layer's cut mode
 /// is `new_mode`) cut a playing voice at `old` whose layer's mode is `old_mode`?
 pub fn is_cut(old: Slot, old_mode: CutMode, new: Slot, new_mode: CutMode) -> bool {
     let same_engine = old.engine == new.engine;
@@ -87,7 +87,7 @@ pub fn is_cut(old: Slot, old_mode: CutMode, new: Slot, new_mode: CutMode) -> boo
 /// [re:b9e7b0] strings (the `PadMode` attribute).
 pub const LAYER_MODE_NAMES: [&str; 5] = ["All layers", "Velocity split", "Round robin", "Round robin reset", "Random"];
 
-/// `Pad::EPadLayerMode` ([re:b9e7b0]).
+/// Pad layer mode ([re:b9e7b0]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayerMode {
     AllLayers,
@@ -153,7 +153,7 @@ impl FromIterator<usize> for Picked {
     }
 }
 
-/// Pad layer selection state (`Pad + 0x2dc`, the round-robin cursor).
+/// Pad layer selection state (the round-robin cursor).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LayerPicker {
     cursor: i32,
@@ -252,14 +252,14 @@ where
     best
 }
 
-/// Silence threshold used to end effect tails (`DoDetermineKillStatus` [re:b401db]).
+/// Silence threshold used to end effect tails (kill status [re:b401db]).
 pub const TAIL_SILENCE: f32 = 5e-05;
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn cut_modes_read_by_display_name() {
-        // Factory content stores the display names (`ReplaceLayerCutMode`).
+        // Factory content stores the display names.
         assert_eq!(CutMode::from_name("Self + Other"), CutMode::ByOtherPadsAndSelf);
         assert_eq!(CutMode::from_name("By other pads"), CutMode::ByOtherPads);
         assert_eq!(CutMode::from_name("Pad type"), CutMode::ByType);

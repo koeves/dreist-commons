@@ -1,4 +1,4 @@
-//! Parameter tables for Layer, Pad and Engine, recovered from the engine binary.
+//! Parameter tables for Layer, Pad and Engine, as the original engine has them.
 //!
 //! Files store every parameter as a normalized `0..=1` float and omit values
 //! equal to the default. These tables give each parameter's serialized name,
@@ -7,13 +7,13 @@
 //! - names: [re:aa9ed1], [re:b4517a]
 //!   [re:e480d7], [re:386b20]
 //! - defaults: [re:39d754], [re:bbfa97]
-//! - ranges/curves: `*::GetParameterMinMaxRange`, `*::ConvertValue{To,From}MinMaxRange`
-//! - dB curve: [re:e947f6] / `DecibelsToValue01` [re:d8eda3]
+//! - ranges/curves: the per-object range and range-conversion functions
+//! - dB curve: [re:e947f6] / dB to normalized [re:d8eda3]
 
 /// Normalized value that maps to 0 dB: the cube root of 0.5 (`0x3f4b2ff5`).
 pub const UNITY_GAIN: f32 = f32::from_bits(0x3f4b_2ff5);
 
-/// `Envelope::kMax*InSeconds` ([re:f36b8e]..[re:ac5929]).
+/// Envelope stage maxima in seconds ([re:f36b8e]..[re:ac5929]).
 pub const MAX_ATTACK_SECS: f32 = 10.0;
 pub const MAX_DECAY_SECS: f32 = 10.0;
 pub const MAX_HOLD_SECS: f32 = 60.0;
@@ -116,10 +116,10 @@ macro_rules! param_enum {
 }
 
 param_enum! {
-    /// `Layer::LayerParameters`, in enum order. [re:c38326]
+    /// Layer parameters, in enum order. [re:c38326]
     /// renames five entries of the map [re:87acba] uses
-    /// (`ReplaceLayerParameters` [re:bec18e]: 0, 1, 8, 9, 7), so files store
-    /// `Cutoff`, `Cutoff_FreeEnvelope`, … [disasm].
+    /// ([re:bec18e]: 0, 1, 8, 9, 7), so files store
+    /// `Cutoff`, `Cutoff_FreeEnvelope`, ….
     LayerParam {
         Gain = "LayerGain", Pan = "LayerPan", VoiceGain, VoicePan, Octave, CoarseTune, FineTune, PreDelay = "PreDelayTime",
         FilterCutoff = "Cutoff", FilterResonance = "Resonance", FilterType, FilterDrive, FilterAlgorithm, FilterActive,
@@ -152,17 +152,17 @@ impl TransmodSource {
 }
 
 param_enum! {
-    /// `Pad::PadParameters`.
+    /// Pad parameters.
     PadParam { Gain, Pan, V2A, Pitch }
 }
 
 param_enum! {
-    /// `Engine::EngineParameters`.
+    /// Engine parameters.
     EngineParam { Gain, Pan, Pitch }
 }
 
 impl LayerParam {
-    /// `GetDefaultLayerParameter` for source 0. Modulation depths default to 0.
+    /// The layer parameter default for source 0. Modulation depths default to 0.
     /// Hold's -1 is clamped to 0 on load like every base value.
     pub fn default_value(self) -> f32 {
         use LayerParam::*;
@@ -237,7 +237,7 @@ impl EngineParam {
 }
 
 param_enum! {
-    /// `Modulator::ModulatorType`, serialized as the `Type` attribute.
+    /// Modulator types, serialized as the `Type` attribute.
     ModulatorType {
         LFO, MorphingLFO, SampleAndHold, ADEnvelope, MiniSequencer, Maths, Constant, BouncingBall,
     }
@@ -250,8 +250,8 @@ const SEQUENCER_PARAMS: [&str; 23] = [
 ];
 
 impl ModulatorType {
-    /// Parameter names in index order (`Modulator::Create*ParamsMap` [re:7abac1]..[re:5c6661];
-    /// counts match `GetNumberOfParametersForSource` [re:5e71ee]). Modulator parameters
+    /// Parameter names in index order (per-type parameter maps [re:7abac1]..[re:5c6661];
+    /// counts match the per-source parameter counts [re:5e71ee]). Modulator parameters
     /// are stored as `<Name>_ActualParameter`, depths as `<Name>_<Source>`.
     pub fn params(self) -> &'static [&'static str] {
         match self {
@@ -313,7 +313,7 @@ pub fn aux_send_name(i: usize) -> String {
     format!("AuxSend{i}")
 }
 
-/// `Effect::EEffectType`, serialized as `EffectType` ([re:8e9a01],
+/// Effect types, serialized as `EffectType` ([re:8e9a01],
 /// jump table at [re:2dad4e]). Index 0 is "No Effect".
 pub const EFFECT_TYPES: [&str; 48] = [
     "No Effect",
@@ -432,7 +432,7 @@ pub fn effect_type_index(name: &str) -> Option<usize> {
 }
 
 /// Front-panel parameter names per effect type ([re:c5d0fd]
-/// [re:737dba]); lengths match `GetNumberOfParametersForEffect` (table [re:73854e]).
+/// [re:737dba]); lengths match the per-effect parameter counts (table [re:73854e]).
 /// Presets store the underlying node values as `Parameter0..N`, plus `IsActive`,
 /// `Mix`, `Level`, `Trim`; factory defaults are each effect's `Default.fxpreset`.
 pub fn effect_param_names(effect: usize) -> &'static [&'static str] {
@@ -511,7 +511,7 @@ pub fn effect_node_param(effect: usize, n: usize) -> usize {
     t.get(n).copied().unwrap_or(n)
 }
 
-/// Step graph lanes (`Step::StepGraphItems`). Serialized names are the display
+/// Step graph lanes. Serialized names are the display
 /// names set in [re:cf74e8] with spaces removed
 /// ([re:9b6bed]); attributes equal to the default are omitted.
 pub const STEP_LANES: [&str; 93] = [
@@ -589,11 +589,11 @@ mod tests {
         assert_eq!(LayerParam::TimestretchMode as u8, 0x29);
         assert_eq!(LayerParam::from_name("FilterCutoff"), Some(LayerParam::FilterCutoff));
         assert_eq!(TransmodSource::ALL.len(), 0x1d);
-        // GetNumberOfParametersForSource packs the counts as bytes of 0x0302041705050605.
+        // The original packs the per-source counts as bytes of 0x0302041705050605.
         let counts: Vec<usize> = ModulatorType::ALL.iter().map(|t| t.params().len()).collect();
         assert_eq!(counts, 0x0302_0417_0505_0605u64.to_le_bytes().map(usize::from));
         assert_eq!(ModulatorType::MiniSequencer.default_value(21), 0.9375);
-        // Effect parameter counts from `GetNumberOfParametersForEffect` ([re:73854e]).
+        // Effect parameter counts from the original's table ([re:73854e]).
         let counts = [1, 2, 6, 4, 4, 2, 3, 5, 6, 6, 6, 5, 4, 3, 6, 6, 3, 6, 6, 6, 6, 9, 6, 3, 2, 4, 6, 4, 6, 4, 4, 4, 4, 4, 4, 4, 3, 6, 6, 5, 5, 3, 5, 6, 8, 2, 4];
         for (i, n) in counts.iter().enumerate() {
             assert_eq!(effect_param_names(i + 1).len(), *n, "{}", EFFECT_TYPES[i + 1]);

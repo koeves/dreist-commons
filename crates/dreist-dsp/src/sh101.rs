@@ -4,7 +4,7 @@
 
 use crate::analog::{analog, lut_pos};
 
-/// [re:892a33] names (`CreateFilterModeMap` [re:c0edaa]).
+/// [re:892a33] names (mode name map [re:c0edaa]).
 pub const SH101_MODES: [&str; 22] =
     ["L2", "L4", "B2", "B4", "H2", "H4", "P2", "NP2", "N2P2T", "N2L2T", "N2H1L1T", "P2N2T", "H2N2T", "H1L1N2T", "N2P2N2T", "N2", "N4", "N2L2", "H2N2", "H1N2L1", "N2N2AT", "N2N2BT"];
 
@@ -69,7 +69,7 @@ impl Sh101 {
         f
     }
 
-    /// `SetSampleRate` [re:9044ed]: 10 Hz high-pass on the input.
+    /// Sample-rate setup [re:9044ed]: 10 Hz high-pass on the input.
     pub fn set_sample_rate(&mut self, sr: f32, oversample: i32) {
         self.inv_sr = 1.0 / sr;
         let e = (self.inv_sr * -62.831856).exp();
@@ -77,7 +77,7 @@ impl Sh101 {
         self.limit = if oversample == 1 { 1.0 } else { 0.25 };
     }
 
-    /// `Initialize` [re:fbaa62]. Changing mode clears the state.
+    /// Setup [re:fbaa62]. Changing mode clears the state.
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.octave = cutoff * 12.0 - 6.0;
         self.res = res * 1.01;

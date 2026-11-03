@@ -1,5 +1,5 @@
-//! [re:61a767] (Frequency Shifter; `Voice::ProcessBuffer` [re:e4377c],
-//! `Reset` [re:8c22fd]): the input is modulated by (−1)ⁿ (a shift of fs/2),
+//! [re:61a767] (Frequency Shifter; processing [re:e4377c],
+//! reset [re:8c22fd]): the input is modulated by (−1)ⁿ (a shift of fs/2),
 //! run at 2× through polyphase half-band allpass pairs
 //! ([re:8ef854]), mixed with a quadrature oscillator at
 //! `fs/2 + (2^pitch − 1)·tune` and decimated back ([re:613387]).
@@ -71,7 +71,7 @@ struct Chan {
     down_sin: HalfBand,
 }
 
-/// `0.5·sin(2π·x/2048)` with linear interpolation (`ms_sin_tab + 1024`).
+/// `0.5·sin(2π·x/2048)` with linear interpolation (the sine table from its midpoint).
 #[inline]
 fn sin_at(t: &[f32], x: f32) -> f32 {
     let i = x.floor() as i32;
