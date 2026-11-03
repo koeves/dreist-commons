@@ -15,6 +15,7 @@ pub mod interp;
 pub mod mix;
 pub mod modulators;
 pub mod ms20;
+pub mod rules;
 pub mod sh101;
 pub mod sp1200;
 pub mod svf;

@@ -503,14 +503,15 @@ impl Sampler {
                         self.stop_recording();
                     }
                 }
-                // Auto-stop after 0.25 s below the stop threshold.
+                // Auto-stop after 0.25 s below the stop threshold (the
+                // app's rules may set another time).
                 if self.state == State::Recording && self.start_mode == StartMode::Threshold && self.stop_threshold > 0.0 {
                     let last = (0..chunk).rev().find(|&k| self.loud(at + k, self.stop_threshold));
                     self.silence = match last {
                         Some(j) => (chunk - 1 - j) as u32,
                         None => self.silence + n as u32,
                     };
-                    if self.silence as f32 > self.sample_rate * 0.25 {
+                    if self.silence as f32 > self.sample_rate * dreist_dsp::rules::get().sampler_auto_stop_seconds {
                         self.stop_recording();
                         self.arm();
                     }

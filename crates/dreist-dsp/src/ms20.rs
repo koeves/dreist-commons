@@ -48,7 +48,7 @@ impl Ms20 {
     /// `Process` [re:10e482] (`inv_n` = 1/len).
     pub fn process(&mut self, inp: &[f32], out: &mut [f32], inv_n: f32) {
         let t = analog();
-        let f = self.octave.exp2() * (self.inv_sr * 440.0);
+        let f = crate::fx::exp2(self.octave) * (self.inv_sr * 440.0);
         let e = (((f.abs() + 1.0) - (f - 1.0).abs()) * -std::f32::consts::PI).exp();
         let s = if self.res == 0.0 { 0.0 } else { self.res.sqrt() };
         let s = s + s;

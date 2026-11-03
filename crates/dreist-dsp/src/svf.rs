@@ -96,7 +96,7 @@ impl Svf {
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.octave = cutoff * 12.0 - 6.0;
         self.res = res * 0.909 + 0.101;
-        self.freq = self.octave.min(12.0).max(-12.0).exp2() * 440.0;
+        self.freq = crate::fx::exp2(self.octave.min(12.0).max(-12.0)) * 440.0;
         let m = (mode * 9.0).round() as i64;
         if m != self.mode_index {
             self.g1 = 0.0;

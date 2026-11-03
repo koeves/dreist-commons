@@ -114,9 +114,9 @@ impl Comb {
         self.buf[w] -= d;
         self.damp -= d;
         let p = inv_n.min(0.03125);
-        let up = (-self.octave).exp2();
+        let up = crate::fx::exp2(-self.octave);
         let (delay_t, fb_t, dry_t, wet_t, damp_k) = if self.positive {
-            let fc = (self.octave - 2.0).exp2() * 440.0 * self.inv_sr;
+            let fc = crate::fx::exp2(self.octave - 2.0) * 440.0 * self.inv_sr;
             (up * 0.0022727272 * self.sr, fb_amount, norm * norm * 0.5, norm * 0.5, Some(fc))
         } else {
             (up * 0.0011363636 * self.sr, -fb_amount, norm * norm * 0.5, norm * -0.5, None)

@@ -140,8 +140,8 @@ pub struct Effect {
     pub params: [f32; 12],
 }
 
-/// The 2^x the effect nodes use for their parameter conversions (cutoffs,
-/// pitch, times, gains): `f32::exp2` unless the app installs another one
+/// The 2^x the effect nodes and the voice filter cores use for their
+/// parameter conversions (cutoffs, pitch, times, gains): `f32::exp2` unless the app installs another one
 /// ([`install_exp2`]; Einst's is the original v1's fast approximation).
 #[inline]
 pub fn exp2(x: f32) -> f32 {
