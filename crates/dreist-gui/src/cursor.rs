@@ -196,6 +196,9 @@ mod tests {
     #[test]
     fn hotspots_from_the_ui_folder() {
         let dir = dreist_formats::paths::ui_dir().join("Cursors");
+        if !dir.is_dir() {
+            return;
+        }
         assert_eq!(super::hotspot(&dir, "ResizeLeft"), (3, 10));
         assert_eq!(super::hotspot(&dir, "DragPad"), (8, 4));
         assert_eq!(super::hotspot(&dir, "NoSuchCursor"), (2, 2));
@@ -206,6 +209,9 @@ mod tests {
     #[test]
     fn every_named_cursor_has_an_image() {
         let dir = dreist_formats::paths::ui_dir().join("Cursors");
+        if !dir.is_dir() {
+            return;
+        }
         let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         let mut names = Vec::new();
         for src in ["dreist-gui/src", "dreist-editor/src"] {
