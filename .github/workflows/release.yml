@@ -1,0 +1,61 @@
+name: Release
+
+# Pushing a tag `vX.Y.Z` runs the CI suite and publishes the GitHub release
+# (a library: release notes only, no bundles). A manual run publishes to
+# `tag` only when `upload` is set.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+        default: "v0.1.0"
+      upload:
+        description: "Publish the release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    # The tag's CHANGELOG.md section is the release notes; without one,
+    # git-cliff generates them from the commits since the previous tag.
+    needs: ci
+    if: github.event_name == 'push' || inputs.upload
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        run: |
+          awk -v v="${TAG#v}" '/^## \[/ { p = index($0, "## [" v "]") == 1; next } p' CHANGELOG.md > notes.md || true
+          if [ -s notes.md ]; then echo "found=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Release notes from the commits
+        if: steps.notes.outputs.found != 'true'
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip all
+        env:
+          OUTPUT: notes.md
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --verify-tag --title "${{ github.event.repository.name }} $TAG" --notes-file notes.md
+          fi
