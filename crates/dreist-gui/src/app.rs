@@ -411,7 +411,16 @@ impl App {
                 self.ctrl(p).is_some_and(|c| {
                     matches!(
                         c.class.as_str(),
-                        "CtrlButton" | "CtrlPopupButton" | "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider" | "CtrlPanSlider" | "CtrlDisclosureButton" | "CtrlScrollBar"
+                        "CtrlButton"
+                            | "CtrlPopupButton"
+                            | "CtrlKnob"
+                            | "CtrlTransmodKnob"
+                            | "CtrlSlider"
+                            | "CtrlTransmodSlider"
+                            | "CtrlPanSlider"
+                            | "CtrlRangeSlider"
+                            | "CtrlDisclosureButton"
+                            | "CtrlScrollBar"
                     ) && c.enabled
                 })
             })
@@ -526,6 +535,7 @@ impl App {
                 .unwrap_or((false, 0.0));
             let Some(c) = self.ctrl_mut(&path) else { return out };
             let dir = if flip { -1.0 } else { 1.0 };
+            let mut range_moved = false;
             let value = match c.class.as_str() {
                 "CtrlKnob" | "CtrlTransmodKnob" => Some((v0 + (y0 - y) / DRAG_RANGE).clamp(0.0, 1.0)),
                 "CtrlSlider" | "CtrlTransmodSlider" if !flip => Some(if c.rect.w < c.rect.h {
@@ -542,6 +552,21 @@ impl App {
                         (v0 + dir * (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0)
                     };
                     Some(if c.class == "CtrlPanSlider" && (v - 0.5).abs() < detent { 0.5 } else { v })
+                }
+                // Range sliders move the handle the press picked
+                // (`dragPart` low / high), kept on its side of the other.
+                "CtrlRangeSlider" => {
+                    let v =
+                        if c.rect.w < c.rect.h { (v0 + (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0) } else { (v0 + (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0) };
+                    let (lo, hi) = crate::render::range_values(c);
+                    let (key, v) = if c.attr("dragPart") == Some("low") { ("valueLow", v.min(hi)) } else { ("valueHigh", v.max(lo)) };
+                    if (v - c.attr_f32(key, 0.0)).abs() > 1e-6 {
+                        c.set_attr(key, v.to_string());
+                        c.value = v;
+                        out.push(UiEvent::ValueChanged { path: path.clone(), name: c.name.clone(), id: c.id, value: v });
+                        range_moved = true;
+                    }
+                    None
                 }
                 // Scroll position 0..1 over the track minus the thumb
                 // (`realPage`, the visible fraction).
@@ -565,6 +590,9 @@ impl App {
                     out.push(UiEvent::ValueChanged { path: path.clone(), name: c.name.clone(), id: c.id, value: v });
                     self.dirty = true;
                 }
+            }
+            if range_moved {
+                self.dirty = true;
             }
             return out;
         }
@@ -1121,11 +1149,24 @@ impl App {
                 self.cursor = cur;
             }
         }
+        let local = {
+            let (ox, oy) = self.origin(&path);
+            (x - ox as f32, y - oy as f32)
+        };
         let Some(c) = self.ctrl_mut(&path) else { return out };
         out.push(UiEvent::Pressed { path: path.clone(), name: c.name.clone() });
         let v0 = if primary {
             c.set_attr("dragPart", "primary".into());
             c.attr_f32("baseValue", c.value)
+        } else if c.class == "CtrlRangeSlider" {
+            // The handle nearer the press (the high one when they meet and
+            // the press is above them).
+            let (lo, hi) = crate::render::range_values(c);
+            let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+            let at = if w < h { 1.0 - (local.1 - w / 2.0) / (h - w).max(1.0) } else { (local.0 - h / 2.0) / (w - h).max(1.0) };
+            let low = (at - lo).abs() < (at - hi).abs() || ((at - lo).abs() == (at - hi).abs() && at < lo);
+            c.set_attr("dragPart", if low { "low" } else { "high" }.into());
+            if low { lo } else { hi }
         } else {
             c.value
         };
@@ -1377,4 +1418,39 @@ fn merge_rects(mut v: Vec<crate::ctrl::Rect>) -> Vec<crate::ctrl::Rect> {
 /// Text of a stepper value: whole numbers for whole steps.
 pub fn stepper_text(v: f32, step: f32) -> String {
     if step.fract() == 0.0 { format!("{}", v.round() as i64) } else { format!("{v:.2}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A press picks the nearer handle of a range slider; the drag moves
+    /// only that one and keeps it on its side of the other.
+    #[test]
+    fn range_sliders_drag_the_nearer_handle() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let mut slider = Ctrl { class: "CtrlRangeSlider".into(), name: "Cut".into(), rect: crate::ctrl::Rect::new(10, 10, 119, 19), visible: true, enabled: true, ..Ctrl::default() };
+        slider.set_attr("valueLow", "0.2".into());
+        slider.set_attr("valueHigh", "0.8".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 100), visible: true, enabled: true, children: vec![slider], ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        let get = |app: &App, k: &str| app.ctrl(&[0]).unwrap().attr_f32(k, -1.0);
+        // Near the low handle (x 10 + 9.5 + 0.2 × 100).
+        app.mouse_move(40.0, 19.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(60.0, 19.0);
+        assert!(ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { name, .. } if name == "Cut")));
+        assert!((get(&app, "valueLow") - 0.4).abs() < 1e-4);
+        assert!((get(&app, "valueHigh") - 0.8).abs() < 1e-4);
+        // Past the high handle: stops there.
+        app.mouse_move(190.0, 19.0);
+        assert!((get(&app, "valueLow") - 0.8).abs() < 1e-4);
+        app.mouse_up(MouseButton::Left);
+        // Near the high handle.
+        app.mouse_move(100.0, 19.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_move(110.0, 19.0);
+        assert!((get(&app, "valueHigh") - 0.9).abs() < 1e-4);
+        app.mouse_up(MouseButton::Left);
+    }
 }

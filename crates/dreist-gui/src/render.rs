@@ -4,7 +4,7 @@
 
 use crate::colour::{self, Colour};
 use crate::ctrl::Ctrl;
-use crate::paint::{Painter, RectF};
+use crate::paint::{Gradient, Painter, RectF, TextFx};
 use crate::style::StyleSheet;
 
 /// The skin control overload class of the header logo (a master level meter).
@@ -52,6 +52,56 @@ pub fn opt_bool(styles: &StyleSheet, style: &str, c: &Ctrl, k: &str, default: bo
 /// [`opt_raw`] as a number.
 pub fn opt_f32(styles: &StyleSheet, style: &str, c: &Ctrl, k: &str, default: f32) -> f32 {
     opt_raw(styles, style, c, k).and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// [`opt_raw`] as a colour (a name or a literal).
+pub fn opt_colour(styles: &StyleSheet, style: &str, c: &Ctrl, k: &str) -> Option<Colour> {
+    opt_raw(styles, style, c, k).map(|v| styles.parse_colour(v))
+}
+
+/// A filled shape of the default fill.
+#[derive(Clone, Copy, Debug)]
+enum Shape {
+    Rect(RectF),
+    Rounded(RectF, f32, [bool; 4]),
+    Ellipse(RectF),
+}
+
+impl Shape {
+    fn path(self) -> Option<tiny_skia::Path> {
+        match self {
+            Shape::Rect(r) => tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h).map(tiny_skia::PathBuilder::from_rect),
+            Shape::Rounded(r, rad, c) => crate::paint::rounded_rect_path(r, rad, c),
+            Shape::Ellipse(r) => tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h).and_then(tiny_skia::PathBuilder::from_oval),
+        }
+    }
+
+    fn inset(self, d: f32) -> Shape {
+        match self {
+            Shape::Rect(r) => Shape::Rect(r.inset(d)),
+            Shape::Rounded(r, rad, c) => Shape::Rounded(r.inset(d), (rad - d).max(0.0), c),
+            Shape::Ellipse(r) => Shape::Ellipse(r.inset(d)),
+        }
+    }
+
+    /// Fill in `c` (a gradient from it with `g`); plain rectangles take
+    /// the painter's rectangle fast path.
+    fn fill(self, p: &mut Painter, c: Colour, g: Option<Gradient>) {
+        match (self, g) {
+            (Shape::Rect(r), None) => p.fill_rect(r, c),
+            (sh, g) => {
+                if let Some(path) = sh.path() {
+                    p.fill_path_opt(&path, c, g);
+                }
+            }
+        }
+    }
+
+    fn stroke(self, p: &mut Painter, c: Colour, w: f32) {
+        if let Some(path) = self.path() {
+            p.stroke_path(&path, c, w);
+        }
+    }
 }
 
 /// Fader cap shape (`enumHandleShape`): the stock round handle, or a
@@ -286,6 +336,7 @@ impl<'s> Renderer<'s> {
             "CtrlProgressBar" => self.progress_bar(p, c),
             "CtrlLevelStrip" => self.level_strip(p, c),
             "CtrlPanSlider" => self.pan_slider(p, c),
+            "CtrlRangeSlider" => self.range_slider(p, c),
             "CtrlPlot" => self.plot(p, c),
             "CtrlMeter" if self.style_class(c) == Some("CtrlMeterStyle") => self.needle_meter(p, c),
             "CtrlTableView" | "CtrlListBox" if self.native_table(c) => self.table(p, c),
@@ -374,15 +425,58 @@ impl<'s> Renderer<'s> {
         self.styles.colour(st, attr, std_col(d))
     }
 
-    /// The default fill [re:1efccd] with colour attributes.
+    /// The default fill [re:1efccd] with colour attributes (and the fill
+    /// attribute's gradient, see [`Renderer::gradient`]).
     pub fn default_fill(&self, p: &mut Painter, c: &Ctrl, fill: &str, border: &str, shadow: bool) {
         let st = self.style(c);
         let f = self.colour_attr(st, fill);
         let b = self.colour_attr(st, border);
-        self.default_fill_colours(p, c, f, b, shadow);
+        let g = self.gradient(c, fill, None);
+        self.default_fill_gradient(p, c, f, g, b, shadow);
     }
 
-    pub fn default_fill_colours(&self, p: &mut Painter, c: &Ctrl, fill: Colour, border: Colour, _shadow: bool) {
+    pub fn default_fill_colours(&self, p: &mut Painter, c: &Ctrl, fill: Colour, border: Colour, shadow: bool) {
+        self.default_fill_gradient(p, c, fill, None, border, shadow);
+    }
+
+    /// The gradient of fill attribute `fill` (e.g. `colFill`): its
+    /// `<fill>GradientTo` colour (`colFillGradientTo`,
+    /// `colAltFillGradientTo`), top to bottom, or left to right with
+    /// `enumGradientDirection="Horizontal"`. `adjust` changes the end colour
+    /// as the fill was changed (hover).
+    pub fn gradient(&self, c: &Ctrl, fill: &str, adjust: Option<&dyn Fn(Colour) -> Colour>) -> Option<Gradient> {
+        let st = self.style(c);
+        let to = opt_colour(self.styles, st, c, &format!("{fill}GradientTo"))?;
+        let horizontal = opt_raw(self.styles, st, c, "enumGradientDirection").is_some_and(|v| v.trim().eq_ignore_ascii_case("horizontal"));
+        Some(Gradient { to: adjust.map(|f| f(to)).unwrap_or(to), horizontal })
+    }
+
+    /// A dash pattern (`len_key` px dashes, `gap_key` px gaps, the gap
+    /// defaulting to the dash) when the dash is at least 1 px.
+    fn dash(&self, c: &Ctrl, len_key: &str, gap_key: &str) -> Option<(f32, f32)> {
+        let st = self.style(c);
+        let d = opt_f32(self.styles, st, c, len_key, 0.0).round();
+        (d >= 1.0).then(|| (d, opt_f32(self.styles, st, c, gap_key, d).round().max(1.0)))
+    }
+
+    /// `enumShape="Arrow"`: the depth of the chevron (`realArrowDepth`,
+    /// default 0.35 × the height) and whether the start is notched
+    /// (`optArrowNotch`, default true; off for the first of a row).
+    fn arrow(&self, c: &Ctrl) -> Option<(f32, bool)> {
+        let st = self.style(c);
+        let s = self.styles;
+        opt_raw(s, st, c, "enumShape").filter(|v| v.trim().eq_ignore_ascii_case("arrow"))?;
+        let d = opt_f32(s, st, c, "realArrowDepth", (c.rect.h as f32 * 0.35).round()).clamp(0.0, c.rect.w as f32 / 2.0);
+        Some((d, opt_bool(s, st, c, "optArrowNotch", true)))
+    }
+
+    /// The default fill with an optional gradient. Opt-in options:
+    /// `enumShape="Arrow"` (a breadcrumb chevron, [`Renderer::arrow`]);
+    /// `optBevel` (a 1 px edge inside the shape, `colBevelLight` at the top
+    /// fading to `colBevelDark` at the bottom); `intDashLength` /
+    /// `intDashGap` (a dashed border; thin panels, 2 px or less across,
+    /// are lines and draw their fill as dashes along their length).
+    pub fn default_fill_gradient(&self, p: &mut Painter, c: &Ctrl, fill: Colour, grad: Option<Gradient>, border: Colour, _shadow: bool) {
         let st = self.style(c);
         let s = self.styles;
         let bw = s.float(st, "realBorderWidth", 1.0);
@@ -391,38 +485,78 @@ impl<'s> Renderer<'s> {
         let radius = s.float(st, "realCornerRounding", 0.0).max(0.0);
         let (w, h) = (c.rect.w as f32, c.rect.h as f32);
         let full = RectF::new(0.0, 0.0, w, h);
+        let dash = self.dash(c, "intDashLength", "intDashGap");
+        if let Some((d, notch)) = self.arrow(c) {
+            let poly = |i: f32| {
+                let (x0, y0, x1, y1) = (i, i, w - i, h - i);
+                let mut pb = tiny_skia::PathBuilder::new();
+                pb.move_to(x0, y0);
+                pb.line_to(x1 - d, y0);
+                pb.line_to(x1, h / 2.0);
+                pb.line_to(x1 - d, y1);
+                pb.line_to(x0, y1);
+                if notch {
+                    pb.line_to(x0 + d, h / 2.0);
+                }
+                pb.close();
+                pb.finish()
+            };
+            if let Some(path) = poly(0.0) {
+                p.fill_path_opt(&path, fill, grad);
+            }
+            if draw_border {
+                if let Some(path) = poly(bw * 0.5) {
+                    p.dash = dash;
+                    p.stroke_path(&path, border, bw);
+                    p.dash = None;
+                }
+            }
+            return;
+        }
+        let none = corners.iter().all(|x| !x);
+        let all = corners.iter().all(|x| *x);
+        if let Some((d, g)) = dash.filter(|_| (radius < 1e-6 || none) && (w <= 2.0 || h <= 2.0)) {
+            let along = w > h;
+            let len = if along { w } else { h };
+            let mut a = 0.0;
+            while a < len {
+                let l = d.min(len - a);
+                p.fill_rect(if along { RectF::new(a, 0.0, l, h) } else { RectF::new(0.0, a, w, l) }, fill);
+                a += d + g;
+            }
+            return;
+        }
         let border_rect = |bw: f32| {
             let r = full.inset(bw * 0.5);
             if (bw as i32) & 1 != 0 { r.pixel_align() } else { r }
         };
-        let none = corners.iter().all(|x| !x);
-        let all = corners.iter().all(|x| *x);
-        if radius < 1e-6 || none {
-            p.fill_rect(full, fill);
-            if draw_border {
-                p.stroke_rect(border_rect(bw), border, bw);
-            }
+        let (body, edge, stroke) = if radius < 1e-6 || none {
+            (Shape::Rect(full), Shape::Rect(border_rect(bw)), draw_border)
         } else if all {
             let (wi, hi) = ((w as i32) as f32, (h as i32) as f32);
             if (wi - hi).abs() > 1e-6 || (radius - wi * 0.5).abs() > 1e-6 {
-                p.fill_rounded(RectF::new(0.0, 0.0, wi, hi), radius, corners, fill);
-                if draw_border {
-                    let r = RectF::new(bw * 0.5, bw * 0.5, wi - bw, hi - bw);
-                    p.stroke_rounded(if (bw as i32) & 1 != 0 { r.pixel_align() } else { r }, radius, corners, border, bw);
-                }
+                let r = RectF::new(bw * 0.5, bw * 0.5, wi - bw, hi - bw);
+                (Shape::Rounded(RectF::new(0.0, 0.0, wi, hi), radius, corners), Shape::Rounded(if (bw as i32) & 1 != 0 { r.pixel_align() } else { r }, radius, corners), draw_border)
             } else {
-                p.fill_ellipse(full, fill);
-                if draw_border {
-                    p.stroke_ellipse(border_rect(bw), border, bw);
-                }
+                (Shape::Ellipse(full), Shape::Ellipse(border_rect(bw)), draw_border)
             }
         } else {
-            p.fill_rounded(full, radius, corners, fill);
             // Quirk: with partial rounding a border wider than 1 is never
             // stroked (the inset path is built and discarded).
-            if draw_border && bw <= 1.0 {
-                p.stroke_rounded(full, radius, corners, border, bw);
+            (Shape::Rounded(full, radius, corners), Shape::Rounded(full, radius, corners), draw_border && bw <= 1.0)
+        };
+        body.fill(p, fill, grad);
+        if opt_bool(s, st, c, "optBevel", false) {
+            let light = opt_colour(s, st, c, "colBevelLight").unwrap_or(Colour::rgba(255, 255, 255, 110));
+            let dark = opt_colour(s, st, c, "colBevelDark").unwrap_or(Colour::rgba(0, 0, 0, 90));
+            if let Some(path) = body.inset(if stroke { bw } else { 0.0 } + 0.5).path() {
+                p.stroke_path_vgradient(&path, &[(0.0, light), (0.3, light.with_alpha(0.0)), (0.7, dark.with_alpha(0.0)), (1.0, dark)], 1.0);
             }
+        }
+        if stroke {
+            p.dash = dash;
+            edge.stroke(p, border, bw);
+            p.dash = None;
         }
     }
 
@@ -452,8 +586,18 @@ impl<'s> Renderer<'s> {
             colour = colour.with_alpha(colour.f_alpha() * a.clamp(0.0, 1.0));
         }
         let tr = self.text_rect(c, r);
-        let s = p.fonts.shorten(&font, text, tr.w, self.styles.shorten(st));
-        p.text(tr, &s, colour, &font, self.styles.h_align(st), self.styles.v_align(st));
+        let fx = self.text_fx(c);
+        let s = p.fonts.shorten(&font, text, tr.w / fx.scale_x.max(0.1), self.styles.shorten(st));
+        p.text_fx(tr, &s, colour, &font, self.styles.h_align(st), self.styles.v_align(st), fx);
+    }
+
+    /// Opt-in text options: `realLetterSpacing` (px between letters),
+    /// `realTextScaleX` (horizontal scale, below 1 condenses) and
+    /// `realTextSlant` (degrees, positive leans right: italic).
+    pub fn text_fx(&self, c: &Ctrl) -> TextFx {
+        let st = self.style(c);
+        let s = self.styles;
+        TextFx { spacing: opt_f32(s, st, c, "realLetterSpacing", 0.0), scale_x: opt_f32(s, st, c, "realTextScaleX", 1.0), slant: opt_f32(s, st, c, "realTextSlant", 0.0) }
     }
 
     /// `optDrawText` (buttons and labels): false hides the text. The
@@ -482,21 +626,43 @@ impl<'s> Renderer<'s> {
         RectF::new(0.0, 0.0, c.rect.w as f32, c.rect.h as f32)
     }
 
-    /// [re:b7a6d1] + text [re:26c463].
+    /// [re:b7a6d1] + text [re:26c463]. Opt-in: the fill's gradient
+    /// (`colFillGradientTo` / `colAltFillGradientTo`), and a strip along the
+    /// bottom `realStripHeight` high, inset `realStripInset` (default the
+    /// border width) from the sides and bottom, in `colStripOn` when on and
+    /// `colStripOff` when off.
     fn button(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
-        let mut fill = self.colour_attr(st, if c.on { "colAltFill" } else { "colFill" });
+        let fill_attr = if c.on { "colAltFill" } else { "colFill" };
+        let mut fill = self.colour_attr(st, fill_attr);
         let mut border = self.colour_attr(st, if c.on { "colAltBorder" } else { "colBorder" });
+        let hover = |f: Colour| {
+            let f2 = f.lighten(0.7);
+            if f2.a < 255 { f2.with_alpha(f2.f_alpha() + f2.f_alpha() * 0.2) } else { f2 }
+        };
         if c.hover {
-            fill = fill.lighten(0.7);
-            if fill.a < 255 {
-                fill = fill.with_alpha(fill.f_alpha() + fill.f_alpha() * 0.2);
-            }
+            fill = hover(fill);
             border = border.darken(0.4);
         }
-        self.default_fill_colours(p, c, fill, border, true);
+        let grad = self.gradient(c, fill_attr, if c.hover { Some(&hover) } else { None });
+        self.default_fill_gradient(p, c, fill, grad, border, true);
+        let s = self.styles;
+        let sh = opt_f32(s, st, c, "realStripHeight", 0.0);
+        if sh > 0.0 {
+            if let Some(col) = opt_colour(s, st, c, if c.on { "colStripOn" } else { "colStripOff" }) {
+                let bw = if s.bool(st, "optDrawBorder", true) { s.float(st, "realBorderWidth", 1.0).max(0.0) } else { 0.0 };
+                let i = opt_f32(s, st, c, "realStripInset", bw).max(0.0);
+                let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+                p.fill_rounded(RectF::new(i, h - i - sh, w - 2.0 * i, sh), 1.0, [true; 4], col);
+            }
+        }
         if self.draws_text(c) {
-            self.draw_text(p, c, Self::bounds(c), &c.text, if c.on { "colAltText" } else { "colText" });
+            let b = match self.arrow(c) {
+                // Text between the notch and the point.
+                Some((d, notch)) => RectF::new(if notch { d * 0.5 } else { 0.0 }, 0.0, c.rect.w as f32 - d * if notch { 1.0 } else { 0.5 }, c.rect.h as f32),
+                None => Self::bounds(c),
+            };
+            self.draw_text(p, c, b, &c.text, if c.on { "colAltText" } else { "colText" });
         }
     }
 
@@ -655,8 +821,35 @@ impl<'s> Renderer<'s> {
         } else {
             p.stroke_arc(ring, ARC_START, v, true, hl, thick);
         }
+        let (cx, cy) = (b.x + b.w * 0.5, b.y + b.h * 0.5);
+        // Opt-in face: a disc inside the ring (`realFaceInset` from its inner
+        // edge, default 1) in `colFace` (gradient `colFaceGradientTo`) framed
+        // in `colFaceBorder`.
+        if let Some(face) = opt_colour(s, st, c, "colFace") {
+            let r = b.inset(thick + opt_f32(s, st, c, "realFaceInset", 1.0));
+            if r.w > 0.0 {
+                if let Some(path) = tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h).and_then(tiny_skia::PathBuilder::from_oval) {
+                    p.fill_path_opt(&path, face, self.gradient(c, "colFace", None));
+                }
+                if let Some(fb) = opt_colour(s, st, c, "colFaceBorder") {
+                    p.stroke_ellipse(r.inset(0.5), fb, 1.0);
+                }
+            }
+        }
+        // Opt-in pointer (`optPointer`, in place of the value dot): a line in
+        // `colPointer` (default colAltBorder), `realPointerWidth` (default 2)
+        // wide, from `realPointerStart` × the radius (default 0, the centre)
+        // to `realPointerInset` (default 1) inside the ring.
+        if opt_bool(s, st, c, "optPointer", false) {
+            let col = opt_colour(s, st, c, "colPointer").unwrap_or(dot_out);
+            let end = (b.w * 0.5 - thick - opt_f32(s, st, c, "realPointerInset", 1.0)).max(0.0);
+            let start = end * opt_f32(s, st, c, "realPointerStart", 0.0).clamp(0.0, 1.0);
+            let a = angle.to_radians();
+            let (dx, dy) = (a.cos(), a.sin());
+            p.line(cx + dx * start, cy + dy * start, cx + dx * end, cy + dy * end, col, opt_f32(s, st, c, "realPointerWidth", 2.0));
+            return;
+        }
         if b.w > 32.0 && b.h > 32.0 {
-            let (cx, cy) = (b.x + b.w * 0.5, b.y + b.h * 0.5);
             let rad = cx - ring.x;
             let a = angle.to_radians();
             let half = thick * 0.5;
@@ -888,6 +1081,47 @@ impl<'s> Renderer<'s> {
         }
     }
 
+    /// A range slider (`CtrlRangeSlider`): the slider's track with two
+    /// handles (round, or `enumHandleShape="Rect"`) at the `valueLow` and
+    /// `valueHigh` attributes (0..1, default 0 and 1), lit between them in
+    /// colFillHighlight. Vertical when taller than wide (up is more).
+    fn range_slider(&self, p: &mut Painter, c: &Ctrl) {
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let vertical = w < h;
+        let inset = c.attr_f32("realTrackInset", 0.3);
+        let back = s.colour(st, "colFill", std_col("StandardControlBackground"));
+        let hl = s.colour(st, "colFillHighlight", back.darken(0.7));
+        let radius = s.float(st, "realCornerRounding", 0.0).round();
+        let (lo, hi) = range_values(c);
+        let (len, thick) = if vertical { (h, w) } else { (w, h) };
+        let handle = self.handle(c, thick);
+        let hs = match handle {
+            Handle::Round => thick,
+            Handle::Rect(l) => l,
+        };
+        let i = (thick * inset).round();
+        let pos = |v: f32| if vertical { (1.0 - v) * (len - hs) } else { v * (len - hs) };
+        let (a, b) = {
+            let (pa, pb) = (pos(lo) + hs / 2.0, pos(hi) + hs / 2.0);
+            if pa < pb { (pa, pb) } else { (pb, pa) }
+        };
+        if vertical {
+            p.fill_rounded(RectF::new(i, 0.0, w - 2.0 * i, h), radius, [true; 4], back);
+            p.fill_rect(RectF::new(i, a, w - 2.0 * i, b - a), hl);
+            for v in [lo, hi] {
+                self.draw_handle(p, c, handle, RectF::new(0.0, pos(v), w, hs), true);
+            }
+        } else {
+            p.fill_rounded(RectF::new(0.0, i, w, h - 2.0 * i), radius, [true; 4], back);
+            p.fill_rect(RectF::new(a, i, b - a, h - 2.0 * i), hl);
+            for v in [lo, hi] {
+                self.draw_handle(p, c, handle, RectF::new(pos(v), 0.0, hs, h), false);
+            }
+        }
+    }
+
     /// A plot (`CtrlPlot`): the default fill, then a polyline in colLine
     /// (default colText), `realLineWidth` (default 1.5) wide, inside the rect
     /// inset by `realPlotInset` (default 0). The curve is the `points`
@@ -977,7 +1211,8 @@ impl<'s> Renderer<'s> {
     /// colRow (`optAltRowColours`: every other one colRowAlt); the selected
     /// row (`intSelectedRow`, or a label child that is on) colSelection.
     /// `optColumnDividers` / `optRowDividers` draw colColumnDivider /
-    /// colRowDivider (default colColumnDivider) lines. Column widths:
+    /// colRowDivider (default colColumnDivider) lines (dashed with
+    /// `intDividerDashLength`). Column widths:
     /// `columnWidths` (comma-separated pixels, the last column takes the
     /// rest), else equal. No scrolling: rows past the bottom are clipped.
     fn table(&self, p: &mut Painter, c: &Ctrl) {
@@ -1015,6 +1250,9 @@ impl<'s> Renderer<'s> {
         let selected = c.attr_i32("intSelectedRow", -1);
         let alt = opt_bool(s, st, c, "optAltRowColours", false);
         let row_div = col("colRowDivider").or(col_div);
+        // Dashed row / column dividers: `intDividerDashLength` /
+        // `intDividerDashGap`, else the border's `intDashLength` / `intDashGap`.
+        let div_dash = self.dash(c, "intDividerDashLength", "intDividerDashGap").or_else(|| self.dash(c, "intDashLength", "intDashGap"));
         for (n, (cells, on)) in rows.iter().enumerate() {
             let y = hh + n as f32 * rh;
             if y >= b.h {
@@ -1034,13 +1272,17 @@ impl<'s> Renderer<'s> {
                 cell(p, i, y, rh, t, text);
             }
             if let Some(d) = row_div.filter(|_| opt_bool(s, st, c, "optRowDividers", false)) {
+                p.dash = div_dash;
                 p.line(0.0, (y + rh).floor() - 0.5, b.w, (y + rh).floor() - 0.5, d, 1.0);
+                p.dash = None;
             }
         }
         if let Some(d) = col_div.filter(|_| opt_bool(s, st, c, "optColumnDividers", false)) {
+            p.dash = div_dash;
             for x in &xs[1..ncols] {
                 p.line(x.floor() + 0.5, hh, x.floor() + 0.5, b.h, d, 1.0);
             }
+            p.dash = None;
         }
         if header {
             if let Some(f) = col("colHeaderFill") {
@@ -1118,6 +1360,13 @@ impl<'s> Renderer<'s> {
             p.text(RectF::new(x, y, lw, lh), &ch.display_name, colour, &font, ha, va);
         }
     }
+}
+
+/// A range slider's (`valueLow`, `valueHigh`), clamped to 0..1 and ordered.
+pub fn range_values(c: &Ctrl) -> (f32, f32) {
+    let lo = c.attr_f32("valueLow", 0.0).clamp(0.0, 1.0);
+    let hi = c.attr_f32("valueHigh", 1.0).clamp(0.0, 1.0);
+    if lo <= hi { (lo, hi) } else { (hi, lo) }
 }
 
 #[cfg(test)]
@@ -1316,5 +1565,186 @@ mod tests {
         // The built-in InvisibleStyle's optDrawText is not honoured.
         assert!(r.draws_text(&ctrl("CtrlLabel", "InvisibleStyle", 10, 10, &[])));
         assert_eq!(s.raw("Dis", "colTextDisabled"), Some("255, 0, 0, 255"));
+    }
+
+    fn px(px: &[u8], w: usize, x: usize, y: usize) -> [u8; 3] {
+        let i = (y * w + x) * 4;
+        [px[i], px[i + 1], px[i + 2]]
+    }
+
+    #[test]
+    fn fills_take_gradients() {
+        let s = sheet(&[
+            ("Flat", "CtrlStyle", &[("colFill", "255, 0, 0, 255"), ("optDrawBorder", "false")]),
+            ("V", "CtrlStyle", &[("colFill", "255, 0, 0, 255"), ("colFillGradientTo", "0, 0, 255, 255"), ("optDrawBorder", "false")]),
+            ("H", "CtrlStyle", &[("colFill", "255, 0, 0, 255"), ("colFillGradientTo", "0, 0, 255, 255"), ("enumGradientDirection", "Horizontal"), ("optDrawBorder", "false")]),
+            ("R", "CtrlStyle", &[("colFill", "255, 0, 0, 255"), ("colFillGradientTo", "0, 0, 255, 255"), ("realCornerRounding", "4")]),
+            ("On", "CtrlStyle", &[("colAltFill", "0, 255, 0, 255"), ("colAltFillGradientTo", "0, 0, 0, 255"), ("optDrawBorder", "false")]),
+        ]);
+        let flat = draw(&s, &ctrl("CtrlPanel", "Flat", 20, 20, &[]));
+        assert_eq!(px(&flat, 20, 10, 0), px(&flat, 20, 10, 19));
+        let v = draw(&s, &ctrl("CtrlPanel", "V", 20, 20, &[]));
+        assert!(px(&v, 20, 10, 0)[0] > 200 && px(&v, 20, 10, 19)[2] > 200, "red at the top, blue at the bottom");
+        assert_eq!(px(&v, 20, 0, 10), px(&v, 20, 19, 10), "vertical: rows are even");
+        let h = draw(&s, &ctrl("CtrlPanel", "H", 20, 20, &[]));
+        assert!(px(&h, 20, 0, 10)[0] > 200 && px(&h, 20, 19, 10)[2] > 200);
+        // Rounded shapes too, and the attribute on the control itself.
+        assert_ne!(draw(&s, &ctrl("CtrlPanel", "R", 20, 20, &[])), draw(&s, &ctrl("CtrlPanel", "R", 20, 20, &[("colFillGradientTo", "255, 0, 0, 255")])));
+        // Buttons: the on fill's own gradient.
+        let mut b = ctrl("CtrlButton", "On", 20, 20, &[]);
+        b.on = true;
+        let on = draw(&s, &b);
+        assert!(px(&on, 20, 10, 0)[1] > 200 && px(&on, 20, 10, 19)[1] < 40);
+    }
+
+    #[test]
+    fn bevels_light_the_top_and_shade_the_bottom() {
+        let fill = [("colFill", "100, 100, 100, 255"), ("optDrawBorder", "false")];
+        let s = sheet(&[("Flat", "CtrlStyle", &fill), ("Bevel", "CtrlStyle", &[&fill[..], &[("optBevel", "true")]].concat())]);
+        let flat = draw(&s, &ctrl("CtrlPanel", "Flat", 30, 20, &[]));
+        let bev = draw(&s, &ctrl("CtrlPanel", "Bevel", 30, 20, &[]));
+        assert_ne!(flat, bev);
+        assert!(px(&bev, 30, 15, 0)[0] > 110, "light top edge");
+        assert!(px(&bev, 30, 15, 19)[0] < 90, "dark bottom edge");
+        assert_eq!(px(&bev, 30, 15, 10), [100, 100, 100], "the middle is the fill");
+    }
+
+    #[test]
+    fn knob_pointers_and_faces() {
+        let pointer = [COLOURS, &[("optPointer", "true"), ("colPointer", "255, 0, 255, 255"), ("realPointerWidth", "2")]].concat();
+        let face = [&pointer[..], &[("colFace", "200, 200, 200, 255"), ("colFaceGradientTo", "90, 90, 90, 255")]].concat();
+        let s = sheet(&[("Knob", "CtrlStyle", COLOURS), ("Pointer", "CtrlStyle", &pointer), ("Face", "CtrlStyle", &face)]);
+        let magenta = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 200 && p[1] < 60 && p[2] > 200).count();
+        let plain = draw(&s, &ctrl("CtrlKnob", "Knob", 40, 40, &[]));
+        let (a, b) = check(&s, ctrl("CtrlKnob", "Pointer", 40, 40, &[]), 0.0, 1.0);
+        assert!(magenta(&a) > 0 && magenta(&b) > 0 && magenta(&plain) == 0);
+        // Value 0.5 points straight up from the centre.
+        let mut up = ctrl("CtrlKnob", "Pointer", 40, 40, &[]);
+        up.value = 0.5;
+        let upx = draw(&s, &up);
+        assert_eq!(px(&upx, 40, 20, 12), [255, 0, 255]);
+        assert_ne!(px(&upx, 40, 20, 28), [255, 0, 255]);
+        // Small knobs get it too (no dot under 33 px).
+        check(&s, ctrl("CtrlKnob", "Pointer", 24, 24, &[]), 0.1, 0.9);
+        // A face: lighter at the top than at the bottom.
+        let f = draw(&s, &up);
+        let faced = draw(&s, &{
+            let mut k = up.clone();
+            k.style = "Face".into();
+            k
+        });
+        assert_ne!(f, faced);
+        assert!(px(&faced, 40, 14, 11)[0] > px(&faced, 40, 14, 29)[0]);
+    }
+
+    #[test]
+    fn dashed_borders_lines_and_dividers() {
+        let border = [("colFill", "0, 0, 0, 255"), ("colBorder", "255, 255, 255, 255")];
+        let s = sheet(&[
+            ("Solid", "CtrlStyle", &border),
+            ("Dashed", "CtrlStyle", &[&border[..], &[("intDashLength", "2"), ("intDashGap", "2")]].concat()),
+            ("Line", "CtrlStyle", &[("colFill", "255, 255, 255, 255"), ("optDrawBorder", "false"), ("intDashLength", "3"), ("intDashGap", "1")]),
+        ]);
+        let white = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 128).count();
+        let solid = draw(&s, &ctrl("CtrlPanel", "Solid", 40, 20, &[]));
+        let dashed = draw(&s, &ctrl("CtrlPanel", "Dashed", 40, 20, &[]));
+        assert!(white(&dashed) > 0 && white(&dashed) < white(&solid) * 3 / 4);
+        // A 1 px panel is a dashed line: 3 on, 1 off.
+        let line = draw(&s, &ctrl("CtrlPanel", "Line", 1, 16, &[]));
+        let on: Vec<bool> = (0..16).map(|y| px(&line, 1, 0, y)[0] > 128).collect();
+        assert_eq!(on, [true, true, true, false].repeat(4));
+        let wide = draw(&s, &ctrl("CtrlPanel", "Line", 16, 1, &[]));
+        assert!(px(&wide, 16, 2, 0)[0] > 128 && px(&wide, 16, 3, 0)[0] < 128);
+        // Table dividers.
+        let t = [COLOURS, &[("colRow", "30, 30, 120, 255"), ("colRowDivider", "255, 255, 255, 255"), ("optRowDividers", "true"), ("intRowHeight", "10"), ("optHeader", "false")]].concat();
+        let td = [&t[..], &[("intDividerDashLength", "2"), ("intDividerDashGap", "3")]].concat();
+        let s = sheet(&[("T", "CtrlTableViewStyle", &t), ("TD", "CtrlTableViewStyle", &td)]);
+        let rows = [("rows", "a\nb")];
+        let plain = draw(&s, &ctrl("CtrlTableView", "T", 50, 30, &rows));
+        let dash = draw(&s, &ctrl("CtrlTableView", "TD", 50, 30, &rows));
+        assert!(px(&plain, 50, 4, 9)[0] > 128 && px(&plain, 50, 6, 9)[0] > 128);
+        assert!(px(&dash, 50, 1, 9)[0] > 128 && px(&dash, 50, 3, 9)[0] < 128, "row divider dashed");
+    }
+
+    #[test]
+    fn arrow_buttons() {
+        let st = [("colFill", "255, 255, 255, 255"), ("optDrawBorder", "false"), ("enumShape", "Arrow"), ("realArrowDepth", "6")];
+        let s = sheet(&[("Rect", "CtrlStyle", &st[..2]), ("Arrow", "CtrlStyle", &st)]);
+        let rect = draw(&s, &ctrl("CtrlButton", "Rect", 40, 18, &[]));
+        let arrow = draw(&s, &ctrl("CtrlButton", "Arrow", 40, 18, &[]));
+        let first = draw(&s, &ctrl("CtrlButton", "Arrow", 40, 18, &[("optArrowNotch", "false")]));
+        assert_eq!(px(&rect, 40, 39, 0), [255, 255, 255]);
+        assert_eq!(px(&arrow, 40, 39, 0), [0, 0, 0], "the point cuts the corners");
+        assert_eq!(px(&arrow, 40, 37, 9), [255, 255, 255], "the tip");
+        assert_eq!(px(&arrow, 40, 1, 9), [0, 0, 0], "the notch");
+        assert_eq!(px(&first, 40, 1, 9), [255, 255, 255], "no notch on the first");
+        assert_eq!(px(&arrow, 40, 5, 1), [255, 255, 255]);
+    }
+
+    #[test]
+    fn button_strips_follow_the_on_state() {
+        let st = [
+            ("colFill", "40, 40, 40, 255"),
+            ("colAltFill", "40, 40, 40, 255"),
+            ("optDrawBorder", "false"),
+            ("realStripHeight", "3"),
+            ("realStripInset", "2"),
+            ("colStripOff", "0, 0, 255, 255"),
+            ("colStripOn", "255, 200, 0, 255"),
+        ];
+        let s = sheet(&[("Key", "CtrlStyle", &st), ("Plain", "CtrlStyle", &st[..3])]);
+        let mut k = ctrl("CtrlButton", "Key", 20, 30, &[]);
+        let off = draw(&s, &k);
+        k.on = true;
+        let on = draw(&s, &k);
+        assert_eq!(px(&off, 20, 10, 26), [0, 0, 255]);
+        assert_eq!(px(&on, 20, 10, 26), [255, 200, 0]);
+        assert_eq!(px(&on, 20, 10, 28), [40, 40, 40], "inset from the bottom");
+        assert_eq!(px(&on, 20, 10, 20), [40, 40, 40]);
+        assert_eq!(px(&draw(&s, &ctrl("CtrlButton", "Plain", 20, 30, &[])), 20, 10, 26), [40, 40, 40]);
+    }
+
+    #[test]
+    fn range_sliders_light_between_their_handles() {
+        let s = sheet(&[("Range", "CtrlStyle", &[COLOURS, &[("enumHandleShape", "Rect"), ("realHandleLength", "8")]].concat())]);
+        let red = |px: &[u8]| px.chunks(4).filter(|p| p[..3] == [255, 0, 0]).count();
+        let narrow = draw(&s, &ctrl("CtrlRangeSlider", "Range", 107, 19, &[("valueLow", "0.4"), ("valueHigh", "0.6")]));
+        let wide = draw(&s, &ctrl("CtrlRangeSlider", "Range", 107, 19, &[("valueLow", "0.1"), ("valueHigh", "0.9")]));
+        assert!(red(&wide) > red(&narrow) && red(&narrow) > 0);
+        assert_eq!(px(&narrow, 107, 53, 9), [255, 0, 0], "lit in the middle");
+        assert_ne!(px(&narrow, 107, 20, 9), [255, 0, 0], "not outside the range");
+        // Swapped values draw the same; vertical ones work too.
+        assert_eq!(narrow, draw(&s, &ctrl("CtrlRangeSlider", "Range", 107, 19, &[("valueLow", "0.6"), ("valueHigh", "0.4")])));
+        let v = draw(&s, &ctrl("CtrlRangeSlider", "Range", 19, 107, &[("valueLow", "0.0"), ("valueHigh", "0.5")]));
+        assert_eq!(px(&v, 19, 9, 80), [255, 0, 0], "lower half lit");
+        assert_ne!(px(&v, 19, 9, 20), [255, 0, 0]);
+    }
+
+    #[test]
+    fn text_spacing_scale_and_slant() {
+        let base = [("colFill", "0, 0, 0, 255"), ("optDrawBorder", "false"), ("colText", "255, 255, 255, 255"), ("enumTextHorizontalAlign", "left")];
+        let s = sheet(&[("T", "CtrlStyle", &base)]);
+        let mut l = ctrl("CtrlLabel", "T", 120, 20, &[]);
+        l.text = "MIXER".into();
+        let plain = draw(&s, &l);
+        if painted(&plain) == 0 {
+            return; // no system font to draw with
+        }
+        let extent = |img: &[u8]| (0..120).filter(|x| (0..20).any(|y| px(img, 120, *x, y)[0] > 64)).max().unwrap_or(0);
+        let with = |k: &str, v: &str| {
+            let mut c = l.clone();
+            c.set_attr(k, v.into());
+            draw(&s, &c)
+        };
+        let spaced = with("realLetterSpacing", "3");
+        let narrow = with("realTextScaleX", "0.7");
+        let slanted = with("realTextSlant", "12");
+        assert!(extent(&spaced) >= extent(&plain) + 10, "4 gaps of 3 px");
+        assert!(extent(&narrow) + 5 < extent(&plain), "condensed");
+        assert_ne!(slanted, plain);
+        assert!(painted(&slanted) > 0 && painted(&narrow) > 0);
+        // The neutral values draw exactly as plain text.
+        assert_eq!(with("realTextScaleX", "1"), plain);
+        assert_eq!(with("realLetterSpacing", "0"), plain);
     }
 }
