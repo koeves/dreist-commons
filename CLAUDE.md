@@ -11,7 +11,9 @@ resources, IDs, menus, readers) in the apps, not here.
 - Goldens (`crates/*/tests/golden`) must stay identical unless a change is meant to alter them;
   explain every golden change in its commit. Porting bugs get their own commit with an evidence
   reference.
-- Tests need a Dreist checkout at `../dreist` (UI graphics and factory data).
+- Tests that need UI graphics or factory data use a Dreist checkout at `../dreist` and skip
+  without one.
+- Git: Conventional Commits, changelog and releases as in `.agents/git.md`.
 
 ## Build
 

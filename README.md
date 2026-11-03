@@ -42,17 +42,20 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
     cargo fmt --all --check
     UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
 
-Apps include this repository as a git submodule at `commons` and depend on its crates by path
-(see each app's README).
+## Contributing
+
+- Commits follow Conventional Commits (`feat(scope): ...`); the changelog and release notes
+  are generated from them ([CONTRIBUTING.md](CONTRIBUTING.md)).
+- Checks: the commands under Development.
+- Dreist and Einst include this repository as a submodule at `commons`.
+- Git conventions for contributors and agents: [`.agents/git.md`](.agents/git.md).
 
 ## Related projects
 
-- [dreist-commons](https://github.com/koeves/dreist-commons) (this repository, public): the
-  shared library (formats, DSP, engine, GUI, editor) that both apps are built on.
-- [Dreist](https://github.com/koeves/dreist) (private): the Geist2 rebuild, an app on dreist-commons.
-- [Einst](https://github.com/koeves/einst) (private): the Geist v1 rebuild, an app on dreist-commons.
-
-The reverse-engineering notes behind all three are kept in a private repository.
+- [dreist-commons](https://github.com/koeves/dreist-commons): the shared library (formats, DSP,
+  engine, GUI, editor) that both apps are built on.
+- [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild, an app on dreist-commons.
+- [Einst](https://github.com/koeves/einst): the Geist v1 rebuild, an app on dreist-commons.
 
 ## Licence
 
