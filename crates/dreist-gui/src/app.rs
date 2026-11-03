@@ -409,8 +409,10 @@ impl App {
             .map(|n| &path[..n])
             .find(|p| {
                 self.ctrl(p).is_some_and(|c| {
-                    matches!(c.class.as_str(), "CtrlButton" | "CtrlPopupButton" | "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider" | "CtrlDisclosureButton" | "CtrlScrollBar")
-                        && c.enabled
+                    matches!(
+                        c.class.as_str(),
+                        "CtrlButton" | "CtrlPopupButton" | "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider" | "CtrlPanSlider" | "CtrlDisclosureButton" | "CtrlScrollBar"
+                    ) && c.enabled
                 })
             })
             .map(<[usize]>::to_vec)
@@ -513,14 +515,34 @@ impl App {
             return out;
         }
         if let Some((path, x0, y0, v0)) = self.pressed.clone() {
+            // Opt-in slider options (control attribute, else style).
+            let (flip, detent) = self
+                .ctrl(&path)
+                .map(|c| {
+                    let st = if self.skin.styles.styles.contains_key(&c.style) { c.style.as_str() } else { "ApplicationStyle" };
+                    let flip = crate::render::opt_bool(&self.skin.styles, st, c, "optFlipDirection", false);
+                    (flip, crate::render::opt_f32(&self.skin.styles, st, c, "realCentreDetent", 0.03))
+                })
+                .unwrap_or((false, 0.0));
             let Some(c) = self.ctrl_mut(&path) else { return out };
+            let dir = if flip { -1.0 } else { 1.0 };
             let value = match c.class.as_str() {
                 "CtrlKnob" | "CtrlTransmodKnob" => Some((v0 + (y0 - y) / DRAG_RANGE).clamp(0.0, 1.0)),
-                "CtrlSlider" | "CtrlTransmodSlider" => Some(if c.rect.w < c.rect.h {
+                "CtrlSlider" | "CtrlTransmodSlider" if !flip => Some(if c.rect.w < c.rect.h {
                     (v0 + (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0)
                 } else {
                     (v0 + (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0)
                 }),
+                // `optFlipDirection` sliders, and pan sliders (snapping to
+                // the centre within `realCentreDetent`, default 0.03).
+                "CtrlSlider" | "CtrlTransmodSlider" | "CtrlPanSlider" => {
+                    let v = if c.rect.w < c.rect.h {
+                        (v0 + dir * (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0)
+                    } else {
+                        (v0 + dir * (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0)
+                    };
+                    Some(if c.class == "CtrlPanSlider" && (v - 0.5).abs() < detent { 0.5 } else { v })
+                }
                 // Scroll position 0..1 over the track minus the thumb
                 // (`realPage`, the visible fraction).
                 "CtrlScrollBar" => {

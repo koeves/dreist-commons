@@ -163,20 +163,25 @@ impl StyleSheet {
 
     /// Raw attribute value through the parent chain.
     pub fn raw(&self, style: &str, attr: &str) -> Option<&str> {
+        self.raw_from(style, attr).map(|(_, v)| v)
+    }
+
+    /// [`raw`](Self::raw) with the name of the style that holds the value.
+    pub fn raw_from(&self, style: &str, attr: &str) -> Option<(&str, &str)> {
         self.raw_depth(style, attr, 0)
     }
 
-    fn raw_depth(&self, style: &str, attr: &str, depth: usize) -> Option<&str> {
+    fn raw_depth(&self, style: &str, attr: &str, depth: usize) -> Option<(&str, &str)> {
         let st = self.styles.get(style)?;
         if let Some(v) = st.attrs.get(attr) {
-            return Some(v);
+            return Some((&st.name, v));
         }
         if depth > 32 {
             return None;
         }
         // ApplicationStyle carries every base attribute at its default.
         if st.name == "ApplicationStyle" {
-            return base_default(attr);
+            return base_default(attr).map(|v| (st.name.as_str(), v));
         }
         st.parents.iter().find_map(|p| self.raw_depth(p, attr, depth + 1))
     }
