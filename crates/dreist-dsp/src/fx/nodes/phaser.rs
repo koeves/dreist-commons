@@ -85,7 +85,7 @@ impl Voice {
         let d_dry = ((1.0 - mix) * 5.0 * sgn * rs * rs - dry0) * inv_n;
         self.mode = mode;
         let d_wet = (mix * 5.0 - wet0) * inv_n;
-        let ft = p[2].exp2() * ctx.tune * isr2;
+        let ft = crate::fx::exp2(p[2]) * ctx.tune * isr2;
         let a = self.alt;
         self.alt = -a;
         self.x1[0] -= a;

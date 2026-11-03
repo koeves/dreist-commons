@@ -54,7 +54,7 @@ impl Sh101Voice {
         let isr = 1.0 / ctx.sample_rate;
         let k10 = 1.0 - (isr * -62.831856).exp();
         let c10 = |v: f32| if v < -10.0 { -10.0 } else { v.min(10.0) };
-        let dlin = c10(p[0]).exp2();
+        let dlin = crate::fx::exp2(c10(p[0]));
         let drive = ((dlin + -0.016367754).abs() + dlin + -0.016367754) * 0.5 * 32.0;
         let mode = (((p[1].abs() + 21.0) - (p[1] + -21.0).abs()) * 0.5).round() as usize;
         let fmd = (p[4].max(0.0) * 8.0 + -8.0).exp2();
@@ -75,7 +75,7 @@ impl Sh101Voice {
         }
         let inv_n = 1.0 / n as f32;
         let wet = ((p[5].abs() + 1.0) - (p[5] + -1.0).abs()) * 0.5;
-        let f = pitch.exp2() * ctx.tune * isr;
+        let f = crate::fx::exp2(pitch) * ctx.tune * isr;
         let ft = if f < 0.0 { 0.0 } else { f.min(1.0) };
         let r = p[3] * 4.03;
         let rt = if r < 0.0 { 0.0 } else { r.min(32.0) };
@@ -85,7 +85,7 @@ impl Sh101Voice {
             self.res += d_res * inv_n;
             self.cut += d_cut * inv_n;
             let c = self.cut + m_in[i] * (fmd + -0.00390625) * 48000.0 * isr;
-            let w = 1.0 - (((c.abs() + 0.25) - (c + -0.25).abs()) * 0.5 * 6.2831855 * -1.442695).exp2();
+            let w = 1.0 - crate::fx::exp2(((c.abs() + 0.25) - (c + -0.25).abs()) * 0.5 * 6.2831855 * -1.442695);
             let g = (((w * 0.393442 + -0.131474) * w + 0.111105) * w + 0.991549) * w;
             let u0 = (x[i] * drive - self.hp) + 0.0;
             self.hp = k10 * u0 + self.hp;
@@ -181,7 +181,7 @@ impl Ms20Voice {
         let kd = 1.0 - (isr * -62.831856).exp();
         let k_dc = ((kd + 1.0) - (kd + -1.0).abs()) * 0.5;
         let mode = (((p[1].abs() + 3.0) - (p[1] + -3.0).abs()) * 0.5).round() as u32;
-        let f = p[2].exp2() * (isr * ctx.tune);
+        let f = crate::fx::exp2(p[2]) * (isr * ctx.tune);
         let e = ((((f.abs() + 1.0) - (f + -1.0).abs()) * 0.5) * -6.2831855).exp();
         let rr = p[3].sqrt() + p[3].sqrt();
         let r = ((rr.abs() + 16.0) - (rr + -16.0).abs()) * 0.5;

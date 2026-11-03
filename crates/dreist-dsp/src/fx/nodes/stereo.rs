@@ -38,7 +38,7 @@ impl Node for StereoMixer {
             return;
         }
         let inv = 1.0 / n as f32;
-        let a = self.ports[0].value.clamp(-10.0, 10.0).exp2() - 0.016367754;
+        let a = crate::fx::exp2(self.ports[0].value.clamp(-10.0, 10.0)) - 0.016367754;
         let dg = (a.abs() + a) * 0.5 - self.gain;
         let w = self.ports[1].value;
         let dw = (w.abs() + w) * 0.5 - self.width;

@@ -58,10 +58,10 @@ impl Node for BitCrusher {
             return;
         }
         let p = |i: usize| self.ports[i].value;
-        let levels = p(2).exp2();
-        let f = (p(1) + 1.0).exp2();
+        let levels = crate::fx::exp2(p(2));
+        let f = crate::fx::exp2(p(1) + 1.0);
         let onepole = |v: f32| {
-            let h = (v + 1.0).exp2();
+            let h = crate::fx::exp2(v + 1.0);
             (-((h + h) * 0.5 * 6.2831855 * isr)).exp()
         };
         let k_lp = 1.0 - onepole(p(3));

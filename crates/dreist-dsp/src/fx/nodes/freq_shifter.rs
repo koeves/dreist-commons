@@ -112,7 +112,7 @@ impl Node for FreqShifter {
         let t = sin_tab();
         let a = self.ports[1].value;
         let a = a * a * a;
-        let ratio = self.ports[0].value.exp2();
+        let ratio = crate::fx::exp2(self.ports[0].value);
         let inc = clip01((ratio - 1.0) * (ctx.tune * (1.0 / ctx.sample_rate)) + 0.5);
         let half = inc * 0.5;
         let wet = clip01(self.ports[2].value);

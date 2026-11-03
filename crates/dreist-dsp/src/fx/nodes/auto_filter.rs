@@ -105,8 +105,8 @@ impl Node for AutoFilter {
         let drive_out = (p(4).abs() + p(4)) * 0.5;
         let mode = (((p(1).abs() + 4.0) - (p(1) - 4.0).abs()) * 0.5).round() as u32;
         let (pitch_t, res, fm, depth) = (p(2), p(3), p(11), p(10));
-        let attack = (p(8) - 1.0).exp2();
-        let release = (p(9) - 1.0).exp2();
+        let attack = crate::fx::exp2(p(8) - 1.0);
+        let release = crate::fx::exp2(p(9) - 1.0);
         let wet_t = p(5);
         let inv_n = 1.0 / n as f32;
         let inv_sr = 1.0 / self.sr;
@@ -193,7 +193,7 @@ impl Node for AutoFilter {
             self.pitch += d_pitch;
             let pc = self.pitch + self.env[i];
             let f = ((pc + 10.0).abs() - (pc - 10.0).abs()) * 0.5;
-            let f = f.exp2();
+            let f = crate::fx::exp2(f);
             // One coefficient for both channels, FM from the left input
             // (one exp2 call and one 0.24 clamp per sample in the original).
             let w = (fm5 * inp[0][i] * f * w0 + f * w0) * 0.5;

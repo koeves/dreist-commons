@@ -74,7 +74,7 @@ impl Node for AudioShaper {
         let p = |i: usize| self.ports[i].value;
         let mode = (((p(0).abs() + 3.0) - (p(0) + -3.0).abs()) * 0.5).round() as u32;
         let onepole = |v: f32| {
-            let h = (v + 1.0).exp2();
+            let h = crate::fx::exp2(v + 1.0);
             (-((h + h) * 0.5 * 6.2831855 * isr)).exp()
         };
         let e_lp = onepole(p(2));

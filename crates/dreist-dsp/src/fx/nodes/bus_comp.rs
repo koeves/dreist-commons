@@ -235,7 +235,7 @@ impl Node for BusComp {
         c.set_release(RELEASE[clamp(p(3), 4.0).min(4)]);
         c.makeup = p(4);
         c.set_ratio(ratio, 0.5 <= p(9));
-        let f = (p(8) + 1.0).exp2();
+        let f = crate::fx::exp2(p(8) + 1.0);
         c.set_sidechain_hp(if f < 20.01 { f32::from_bits(0x4015c28f) } else { f });
         c.mix = ((p(5).abs() + 1.0) - (p(5) - 1.0).abs()) * 0.5;
         if 0.5 <= p(6) {

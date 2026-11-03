@@ -140,6 +140,25 @@ pub struct Effect {
     pub params: [f32; 12],
 }
 
+/// The 2^x the effect nodes use for their parameter conversions (cutoffs,
+/// pitch, times, gains): `f32::exp2` unless the app installs another one
+/// ([`install_exp2`]; Einst's is the original v1's fast approximation).
+#[inline]
+pub fn exp2(x: f32) -> f32 {
+    match EXP2.get() {
+        Some(f) => f(x),
+        None => x.exp2(),
+    }
+}
+
+static EXP2: std::sync::OnceLock<fn(f32) -> f32> = std::sync::OnceLock::new();
+
+/// Install the app's 2^x for [`exp2`] (once, at start-up; later calls are
+/// ignored and return `false`).
+pub fn install_exp2(f: fn(f32) -> f32) -> bool {
+    EXP2.set(f).is_ok()
+}
+
 /// An app's own effect nodes: `create(kind)` returns the node for an
 /// effect type it implements differently (`None`: the built-in node), and
 /// `internal_ports(kind)` the hidden ports to set on it, as `(port, value
