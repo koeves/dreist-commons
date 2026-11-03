@@ -59,6 +59,4 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
 
 ## Licence
 
-MIT OR Apache-2.0 (LICENSE). Not affiliated with or endorsed by FXpansion. Reverse-engineering
-notes live in the private `dreist-re` repository; comments cite them through evidence tags
-(`[re:xxxxxx]`).
+MIT OR Apache-2.0 (LICENSE). Not affiliated with or endorsed by FXpansion.
