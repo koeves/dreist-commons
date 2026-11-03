@@ -18,7 +18,7 @@ pub const SOURCES: usize = 29;
 pub const LAYER_PARAMS: usize = 42;
 
 /// Layer parameter indices used here (`Layer::LayerParameters`).
-mod lp {
+pub mod lp {
     pub const VOICE_GAIN: usize = 2;
     pub const VOICE_PAN: usize = 3;
     pub const OCTAVE: usize = 4;
@@ -47,7 +47,7 @@ mod lp {
 }
 
 /// Step lanes the voice reads (`Step::StepGraphItems`).
-mod lane {
+pub mod lane {
     pub const VELOCITY: usize = 0;
     pub const PAN: usize = 1;
     pub const REVERSE: usize = 4;
@@ -310,6 +310,8 @@ pub struct Voice {
     /// Stretcher input (reused).
     ts_in: [Vec<f32>; 2],
     ts_pitch: f32,
+    /// The installed parameter model's output for the block (reused).
+    model_out: crate::model::ModelOutput,
     ts_factor: f32,
     pub host_bpm: f32,
     /// [re:78f636] `Pitch` (normalized; delegate vfunc 0xa0 in
@@ -353,6 +355,7 @@ impl Voice {
             stretchers: [None, None],
             ts_in: [Vec::with_capacity(1024), Vec::with_capacity(1024)],
             ts_pitch: 1.0,
+            model_out: crate::model::ModelOutput::default(),
             ts_factor: 1.0,
             host_bpm: 120.0,
             master_pitch: 0.5,
@@ -532,6 +535,31 @@ impl Voice {
         // Borrowed field by field (not copied: ~5 KB per block).
         let setup = self.setup.as_ref().expect("voice started");
 
+        // An installed parameter model replaces the pitch and filter
+        // parameters below.
+        let mut model = crate::model::get();
+        if let Some(m) = model {
+            let outer = semitones(row_sum(&self.pad_pitch, &self.modv), true) + semitones(row_sum(&self.engine_pitch, &self.modv), true) + semitones(self.master_pitch, true);
+            let input = crate::model::ModelInput {
+                layer: &setup.layer,
+                lanes: &self.lanes,
+                velocity: self.velocity,
+                amp_env: &self.buf[2][..n],
+                free_env: &self.buf[3][..n],
+                outer_semitones: outer,
+                semitone_offset: setup.semitone_offset,
+                base: self.pb.base,
+            };
+            if !m.update(&input, &mut self.model_out) {
+                model = None;
+                self.model_out.steps.clear();
+            }
+            // The timestretcher pulls the source at its own rate.
+            if self.stretch.is_some() {
+                self.model_out.steps.clear();
+            }
+        }
+
         // UpdatePitchParameters [re:c6d172].
         let l = &setup.layer;
         let depth = |p: usize| l[p][1..].iter().zip(&self.modv[1..]).map(|(a, b)| a * b).sum::<f32>();
@@ -547,7 +575,8 @@ impl Voice {
             + semitones(self.master_pitch, true)
             + semitones(self.lane(lane::COARSE), true)
             + octave(self.lane(lane::OCTAVE), true) * 12.0;
-        self.pb.step = crate::convert::pitch_step(st, self.pb.base);
+        let st = if model.is_some() { self.model_out.semitones } else { st };
+        self.pb.step = if model.is_some() { self.model_out.step } else { crate::convert::pitch_step(st, self.pb.base) };
         if self.stretch.is_some() {
             // UpdateTimestretchParameters [re:e9b827]: DIRAC pulls the source at
             // step 1.0 (+0x7d0), pitch 2^(st/12) (property 100), stretch
@@ -567,6 +596,7 @@ impl Voice {
             (modulate_pos_neg(self.modulated(lp::CUTOFF), self.lane(lane::CUTOFF)), modulate_pos_neg(self.modulated(lp::RESONANCE), self.lane(lane::RESONANCE)), self.modulated(lp::DRIVE))
         };
         let drive = modulate_pos_neg(drive, self.lane(lane::DRIVE));
+        let (cut, res, drive) = if model.is_some() { (self.model_out.cutoff, self.model_out.resonance, self.model_out.drive) } else { (cut, res, drive) };
         self.filter.initialize(cut, res, ftype, drive, algo);
 
         // UpdateEnvelopeParameters [re:ea1070].
@@ -760,6 +790,9 @@ impl Voice {
             out_l[i] = l;
             out_r[i] = if data.right.is_some() { r } else { l };
             written += 1;
+            if let Some(&st) = self.model_out.steps.get(i) {
+                self.pb.step = st;
+            }
             self.pb.advance();
             if let Some(pp) = self.looping() {
                 if !pp && !self.pb.reverse && crate::rules::get().loop_v1 {

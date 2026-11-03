@@ -13,6 +13,7 @@ pub mod filter;
 pub mod fx;
 pub mod interp;
 pub mod mix;
+pub mod model;
 pub mod modulators;
 pub mod ms20;
 pub mod rules;
