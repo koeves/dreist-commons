@@ -45,6 +45,15 @@ Apps depend on a pinned revision of this repository (`git`, `rev`) and override 
 checkout for development through a `[patch]` in `~/Documents/projects/.cargo/config.toml` (see
 each app's README).
 
+## Related projects
+
+- [dreist-commons](https://github.com/koeves/dreist-commons): the shared library (formats, DSP,
+  engine, GUI, editor) that both apps are built on.
+- [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild, an app on dreist-commons.
+- [Einst](https://github.com/koeves/einst): the Geist v1 rebuild, an app on dreist-commons.
+
+The reverse-engineering notes behind all three are kept in a private repository.
+
 ## Licence
 
 MIT OR Apache-2.0 (LICENSE). Not affiliated with or endorsed by FXpansion. Reverse-engineering
