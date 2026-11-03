@@ -8,21 +8,14 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# The tests read Dreist's UI and factory assets from a Dreist checkout next
-# to this one (../dreist), as in local development. koeves/dreist is
-# private: it is checked out with its read-only deploy key.
+# Tests that need an app's UI or factory assets skip without them; Dreist's
+# CI runs this suite against its assets.
 jobs:
   linux:
     # Engine, DSP, editor and GUI tests run headless on Linux.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: koeves/dreist
-          ssh-key: ${{ secrets.DREIST_KEY }}
-          path: dreist
-      - run: mv dreist ../dreist
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -44,12 +37,6 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: koeves/dreist
-          ssh-key: ${{ secrets.DREIST_KEY }}
-          path: dreist
-      - run: mv dreist ../dreist
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy

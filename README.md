@@ -33,7 +33,8 @@ applies.
 ## Development
 
 Tests and goldens here run under `BASE` and draw Dreist's UI from a Dreist checkout next to this
-repository (`../dreist`; `DREIST_UI` / `DREIST_RESOURCES` override). Demo-content tests are
+repository (`../dreist`; `DREIST_UI` / `DREIST_RESOURCES` override); tests that need it are
+skipped without one, and Dreist's CI runs them against its assets. Demo-content tests are
 skipped without the factory content (`DREIST_CONTENT` overrides its location).
 
     cargo test --workspace
@@ -41,16 +42,15 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
     cargo fmt --all --check
     UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
 
-Apps depend on a pinned revision of this repository (`git`, `rev`) and override it with a local
-checkout for development through a `[patch]` in `~/Documents/projects/.cargo/config.toml` (see
-each app's README).
+Apps include this repository as a git submodule at `commons` and depend on its crates by path
+(see each app's README).
 
 ## Related projects
 
-- [dreist-commons](https://github.com/koeves/dreist-commons): the shared library (formats, DSP,
-  engine, GUI, editor) that both apps are built on.
-- [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild, an app on dreist-commons.
-- [Einst](https://github.com/koeves/einst): the Geist v1 rebuild, an app on dreist-commons.
+- [dreist-commons](https://github.com/koeves/dreist-commons) (this repository, public): the
+  shared library (formats, DSP, engine, GUI, editor) that both apps are built on.
+- [Dreist](https://github.com/koeves/dreist) (private): the Geist2 rebuild, an app on dreist-commons.
+- [Einst](https://github.com/koeves/einst) (private): the Geist v1 rebuild, an app on dreist-commons.
 
 The reverse-engineering notes behind all three are kept in a private repository.
 
