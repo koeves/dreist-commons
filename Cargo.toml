@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-editor", "crates/dreist-testkit"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+# The DSP is transcribed from the decompiled original: constants as the
+# binary has them, operations in its order, explicit min/max where
+# `clamp` would treat NaN differently.
+[workspace.lints.clippy]
+approx_constant = "allow"
+excessive_precision = "allow"
+assign_op_pattern = "allow"
+manual_clamp = "allow"
+needless_range_loop = "allow"
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+too_many_arguments = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+type_complexity = "allow"
+manual_range_contains = "allow"
+
+[workspace.dependencies]
+roxmltree = "0.20"
+thiserror = "2"
+
+[profile.release]
+strip = false
+
+# The validation harness renders minutes of audio: optimise tests, keep
+# debug assertions and overflow checks.
+[profile.test]
+opt-level = 2
+
+# baseview with a re-entrancy guard (vendor/baseview/src/macos/window.rs):
+# modal dialogs opened from a mouse event aborted the app.
+[patch."https://github.com/RustAudio/baseview.git"]
+baseview = { path = "vendor/baseview" }
+
+# signalsmith-stretch with a fixed phase-randomisation seed
+# (vendor/signalsmith-stretch/src/wrapper.cpp) for reproducible renders.
+[patch.crates-io]
+signalsmith-stretch = { path = "vendor/signalsmith-stretch" }

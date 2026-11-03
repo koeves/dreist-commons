@@ -1,0 +1,25 @@
+[package]
+name = "dreist-editor"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Editor panels on top of dreist-gui, driving dreist-engine through commands"
+
+[dependencies]
+dreist-testkit = { path = "../dreist-testkit" }
+dreist-formats = { path = "../dreist-formats" }
+dreist-engine = { path = "../dreist-engine" }
+dreist-dsp = { path = "../dreist-dsp" }
+dreist-gui = { path = "../dreist-gui" }
+rfd = { version = "0.16", optional = true }
+
+[features]
+window = ["dreist-gui/window", "dep:rfd"]
+
+[[example]]
+name = "editor"
+required-features = ["window"]
+
+
+[lints]
+workspace = true

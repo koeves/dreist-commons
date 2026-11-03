@@ -1,0 +1,13 @@
+[package]
+name = "dreist-formats"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Readers for legacy project, kit, slice-analysis and effect preset files"
+
+[dependencies]
+roxmltree.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

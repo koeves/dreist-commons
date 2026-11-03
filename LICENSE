@@ -1,0 +1,10 @@
+dreist-commons
+Copyright (c) 2026 Daniel Köves and Dreist contributors
+
+Every crate in this repository is licensed under either of
+  - Apache License, Version 2.0 (LICENSE-APACHE), or
+  - MIT license (LICENSE-MIT)
+at your option.
+
+Vendored code keeps its own licence: vendor/baseview (MIT OR Apache-2.0,
+patched), vendor/signalsmith-stretch (MIT).

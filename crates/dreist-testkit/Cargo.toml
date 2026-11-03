@@ -1,0 +1,12 @@
+[package]
+name = "dreist-testkit"
+description = "Validation harness helpers: golden fingerprints, signal checks, allocation counting"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
