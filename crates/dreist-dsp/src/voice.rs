@@ -245,6 +245,20 @@ impl Playback {
         self.pos = if 0.0 < p { p } else { 0.0 };
     }
 
+    /// v1's forward loop: wrap at `le − 3` to `ls + (pos − le) + 3`, keeping
+    /// the fractional position.
+    fn advance_in_loop_v1(&mut self) {
+        let (ls, le) = (self.loop_start as f64, self.loop_end as f64);
+        if ls <= self.pos && self.pos <= le {
+            self.in_loop = true;
+        }
+        if self.pos >= le - 3.0 {
+            self.pos = ls + (self.pos - le) + 3.0;
+        }
+        let last = (self.frames as i32 - 1) as f64;
+        self.pos = self.pos.min(last).max(0.0);
+    }
+
     /// `InitXFade` [re:2a490d].
     fn init_xfade(&mut self, curve: f32, time: f32) {
         let n = (time * 0.5 * self.loop_len as f32).max(8.0).floor() as i32 as u32;
@@ -637,6 +651,9 @@ impl Voice {
     /// `ProcessXFade` [re:83b67b] for forward wrap-around loops (the common case).
     fn xfade(&self, data: &SampleData, idx: i32, l: &mut f32, r: &mut f32) {
         let Some(ping_pong) = self.looping() else { return };
+        if crate::rules::get().loop_v1 {
+            return;
+        }
         let pb = &self.pb;
         let n = pb.xfade_len as i32;
         if ping_pong || pb.reverse || n == 0 || pb.end == 0 {
@@ -745,7 +762,11 @@ impl Voice {
             written += 1;
             self.pb.advance();
             if let Some(pp) = self.looping() {
-                self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
+                if !pp && !self.pb.reverse && crate::rules::get().loop_v1 {
+                    self.pb.advance_in_loop_v1();
+                } else {
+                    self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
+                }
             } else if self.cut.is_none() {
                 // 32-frame fade before the end of a one-shot.
                 let near = if self.pb.reverse { self.pb.pos.floor() < self.pb.start as f64 + 32.0 } else { self.pb.end as f64 - 32.0 <= self.pb.pos.floor() };
