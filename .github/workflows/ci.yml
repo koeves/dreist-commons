@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# The tests read Dreist's UI and factory assets from a Dreist checkout next
+# to this one (../dreist), as in local development. koeves/dreist is
+# private: it is checked out with its read-only deploy key.
+jobs:
+  linux:
+    # Engine, DSP, editor and GUI tests run headless on Linux.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: koeves/dreist
+          ssh-key: ${{ secrets.DREIST_KEY }}
+          path: dreist
+      - run: mv dreist ../dreist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        # The effect fingerprints hash float output, which differs between
+        # platforms: they are checked on macOS below, here non-fatal.
+        run: cargo test --locked --workspace -- --skip effects_match_fingerprints
+      - name: Effect fingerprints (platform-dependent)
+        continue-on-error: true
+        run: cargo test --locked -p dreist-dsp --test fx_harness effects_match_fingerprints
+
+  macos:
+    # The full suite, effect fingerprints included, and the AppKit window code.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: koeves/dreist
+          ssh-key: ${{ secrets.DREIST_KEY }}
+          path: dreist
+      - run: mv dreist ../dreist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
