@@ -188,7 +188,7 @@ impl Default for Sampler {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SamplerClock {
     pub playing: bool,
-    /// [re:c10d76] just stopped this block.
+    /// Transport just stopped this block.
     pub stopped: bool,
     pub samples_per_beat: f64,
     pub samples_per_bar: f64,

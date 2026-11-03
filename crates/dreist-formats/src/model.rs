@@ -220,7 +220,7 @@ pub fn samples_dir(file: &Path) -> PathBuf {
 
 /// A layer's `AudioFileName` as a path. Relative names resolve in the
 /// file's samples folder (v2's own files); names that are not there
-/// resolve next to the file itself ([re:b00098] Lite kits refer to their
+/// resolve next to the file itself (the original Lite kits refer to their
 /// library as `../../Hits/...` from the kit's folder).
 pub fn resolve_sample(samples: &Path, name: &str) -> PathBuf {
     let rel = normalize_path(name);

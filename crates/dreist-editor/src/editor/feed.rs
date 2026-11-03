@@ -19,7 +19,7 @@ impl Editor {
         }
     }
 
-    /// [re:c10d76] state from the engine. A play / stop changes the header
+    /// Transport state from the engine. A play / stop changes the header
     /// (full redraw); a new step or song position only moves the pattern
     /// grid's and song body's playheads, so only those repaint.
     pub fn set_playback(&mut self, playing: bool, steps: [Option<u32>; 8], song_pos: Option<f64>) {

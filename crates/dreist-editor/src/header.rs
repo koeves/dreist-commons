@@ -8,7 +8,7 @@
 //! chosen one and posts `e_selectEngine` (0x41). Mute/Solo/PatternPower post
 //! 0x8c/0x8d/0xa8 for that engine (`DoSendMessage` [re:c7d50e]).
 //!
-//! [re:c10d76] and master controls ([re:46c9b4] lambdas):
+//! Transport and master controls ([re:46c9b4] lambdas):
 //! - GlobalGain ($_0 [re:3f9657]) posts `e_setMasterChannelGain` 0xa5; a
 //!   double click ($_1 [re:dd3107]) resets it to 0 dB (0.7937) when the
 //!   option `DoubleClickResets` (default on) is set, else opens a text edit

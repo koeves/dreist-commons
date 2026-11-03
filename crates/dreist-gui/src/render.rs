@@ -1,5 +1,5 @@
 //! Drawing of the stock [re:4a79c9] controls, following the decompiled `Draw` /
-//! `DrawLayer` methods. Custom [re:b00098] panels (`overloadClass`) get their
+//! `DrawLayer` methods. Custom the original panels (`overloadClass`) get their
 //! skin children drawn here and their own content from the editor layer.
 
 use crate::colour::{self, Colour};

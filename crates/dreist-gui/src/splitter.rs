@@ -112,7 +112,7 @@ pub struct Anim {
     pub start: std::time::Instant,
 }
 
-/// [re:62afd2] length (`SetSplitterPosition`, Linear).
+/// Animation length (`SetSplitterPosition`, Linear).
 pub const ANIM_MS: f32 = 250.0;
 
 #[cfg(test)]

@@ -114,7 +114,7 @@ fn audio_path_does_not_touch_the_heap() {
                 // Warm up (lazily sized buffers settle, voices cycle).
                 play(&mut g, &mut gui, block, blocks(4.0), true);
                 let mut calls = play(&mut g, &mut gui, block, blocks(4.0), true);
-                // [re:c10d76] stop / start and a panic mid-stream.
+                // Transport stop / start and a panic mid-stream.
                 let ((), n) = CountingAlloc::count(|| {
                     g.stop();
                     g.start();

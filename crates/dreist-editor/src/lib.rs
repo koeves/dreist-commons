@@ -1,5 +1,5 @@
 //! The v2 editor: the installed skin (via `dreist-gui`) assembled as
-//! [re:e6e2c9] does, with the [re:b00098] panels bound to a
+//! [re:e6e2c9] does, with the the original panels bound to a
 //! [`Model`] and emitting [`Command`]s for the engine. See
 //! the dreist-re GUI notes.
 

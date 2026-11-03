@@ -37,13 +37,13 @@ pub struct Scenes {
     menu: Option<usize>,
     /// Activity label per scene: (looping cue, alpha) — [re:8a7ff8]
     ///  [re:eeec50] ("...", repeats) / `StartActivated
-    /// [re:62afd2]` [re:9f501c] ("▶", once); `ATC_Tick` [re:cc15e0] lowers the alpha
+    /// Animation` [re:9f501c] ("▶", once); `ATC_Tick` [re:cc15e0] lowers the alpha
     /// by 0.2 per tick.
     anim: Vec<Option<(bool, f32)>>,
     last_tick: Option<std::time::Instant>,
 }
 
-/// [re:62afd2] tick period: [re:cfb303] registers [re:5fc9f5]
+/// Animation tick period: [re:cfb303] registers [re:5fc9f5]
 /// (every tick of [re:6556de], whose event-loop timer runs at 1/30 s,
 /// [re:6ae388]).
 const ANIM_TICK: f32 = 1.0 / 30.0;

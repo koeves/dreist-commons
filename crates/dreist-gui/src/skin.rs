@@ -117,7 +117,7 @@ impl Skin {
     }
 
     /// Path (relative to the resources folder) of a skin given by bare file
-    /// name, as the editor code refers to them (`"[re:a7493d].skin"`).
+    /// name, as the editor code refers to them (`"HeaderBar.skin"`).
     pub fn find(&self, name: &str) -> Option<String> {
         fn walk(dir: &Path, base: &Path, name: &str) -> Option<String> {
             let rd = std::fs::read_dir(dir).ok()?;

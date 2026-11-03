@@ -7,7 +7,7 @@
 //!
 //! [re:f5417b] never advances its write index (asm [re:8d92b9]), so
 //! its delayed reads are always zero and each of the four diffusers is a
-//! plain gain of `0.5·(1 + g²)`; that is what [re:b00098] runs.
+//! plain gain of `0.5·(1 + g²)`; that is what the original runs.
 
 use super::blocks::{Gain, Interp, Rng};
 use super::math::pow2_at_least;

@@ -105,7 +105,7 @@ pub struct SongPanel {
     /// Copied parts: (track, part with start relative to the earliest).
     clipboard: Vec<(usize, SongPart)>,
     quantize_mode: usize,
-    /// [re:cc11b3] menu actions and the right-click time.
+    /// Context menu actions and the right-click time.
     menu: Option<(Vec<MenuAction>, f64)>,
     /// Insert marker (QN): paste position (`SetInsertMarkerPosition`).
     marker: f64,

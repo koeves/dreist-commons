@@ -241,7 +241,7 @@ struct Slot {
     amp: f32,
 }
 
-/// [re:c8aa5e] reduced to what [re:b00098] executes (see module docs).
+/// [re:c8aa5e] reduced to what the original executes (see module docs).
 #[derive(Debug, Clone, Copy)]
 pub struct Osc {
     /// Live step events (at most 32), oldest first.

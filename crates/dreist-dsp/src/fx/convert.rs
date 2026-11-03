@@ -46,7 +46,7 @@ fn is_minus_inf(s: &str) -> bool {
 }
 
 impl Conv {
-    /// [re:fc9225] value of a port bound given as text (string-form constructors).
+    /// Internal value of a port bound given as text (string-form constructors).
     pub fn from_text(self, s: &str) -> f32 {
         let (num, unit) = split(s);
         let n = num.unwrap_or(0.0);

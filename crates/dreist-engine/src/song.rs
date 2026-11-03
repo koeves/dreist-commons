@@ -50,7 +50,7 @@ impl SongPart {
 #[derive(Debug, Clone, Default)]
 pub struct Song {
     pub active: bool,
-    /// [re:fc9225] song loop (`SongLoopEnabled` +0xed, `SongLoopStart` +0xf0,
+    /// Internal song loop (`SongLoopEnabled` +0xed, `SongLoopStart` +0xf0,
     /// `SongLoopEnd` +0xf8; defaults off, 0, 16; rounded on load).
     pub loop_enabled: bool,
     pub loop_start: f64,
@@ -196,7 +196,7 @@ impl SongCursor {
         let mut cued = *self.cued_to.get_or_insert(a);
         let mut resynced = false;
         if (cued - a).abs() > 0.5 {
-            // [re:c10d76] jump: RecordAllPatternStops, ResyncSong, restart here.
+            // Transport jump: RecordAllPatternStops, ResyncSong, restart here.
             resync(views, out);
             cued = a;
             resynced = true;

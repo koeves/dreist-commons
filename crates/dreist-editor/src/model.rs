@@ -55,7 +55,7 @@ pub struct Model {
     /// actions apply to all layers / all pads.
     pub all_layers: bool,
     pub all_pads: bool,
-    /// Engine multi-selection (`e_setEngineSelections` 0x43, [re:b00098]
+    /// Engine multi-selection (`e_setEngineSelections` 0x43, the original
     /// +[re:1b20b6]; not saved — loading selects only `CurrentEngine`).
     pub engine_sel: u8,
     /// Pattern editor scroll / zoom per engine.

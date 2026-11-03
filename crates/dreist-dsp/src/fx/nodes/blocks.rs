@@ -892,7 +892,7 @@ impl PolySect {
     }
 }
 
-/// [re:61b50d] tan/cos approximation shared by the LP and HP designs
+/// Polynomial tan/cos approximation shared by the LP and HP designs
 /// (Q 0.707): returns (w, c).
 pub fn design_poly(f: f32) -> (f32, f32) {
     let p = 0.5 - (((f + -0.001).abs() + 0.45099998) - (f + -0.45).abs()) * 0.5;

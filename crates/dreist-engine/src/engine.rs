@@ -401,7 +401,7 @@ pub struct Dreist {
     cursor: SongCursor,
     scenes: SceneManager,
     time_sig: (u32, u32),
-    /// [re:c10d76] running ([re:a7ef14]).
+    /// Transport running ([re:a7ef14]).
     playing: bool,
     /// Host playing flag of the previous block (`ProcessTransport`
     /// compares against it: only host starts / stops move the transport).
@@ -1003,7 +1003,7 @@ impl Dreist {
         (self.song.active && self.song.length_qn() > 0.0).then(|| (self.song.length_qn() * 60.0 / self.bpm * self.sr as f64).ceil() as u64)
     }
 
-    /// [re:c10d76] start (`HandlePlaybackChange` [re:755e2b]): the song's last
+    /// Transport start (`HandlePlaybackChange` [re:755e2b]): the song's last
     /// stop time (`GetLastStopTimeQN`) with the song active, else 0.
     pub fn start(&mut self) {
         let at = if self.song.active { self.locate } else { 0.0 };
@@ -1068,7 +1068,7 @@ impl Dreist {
         self.playing = true;
         self.ppq = ppq;
         self.cursor = SongCursor::new();
-        // [re:27886a]: modulators, then the [re:c10d76] source.
+        // [re:27886a]: modulators, then the Transport source.
         let (bpm, host) = (self.bpm as f32, self.host.clone());
         for m in self.mods.iter_mut().flatten() {
             m.transport_started(0.0, bpm, &host);
@@ -1094,7 +1094,7 @@ impl Dreist {
     }
 
     /// `ProcessTransportStopped` [re:0fd382]: every engine's gate off and
-    /// steps reset, pending scene changes dropped, [re:c10d76] source 0.
+    /// steps reset, pending scene changes dropped, Transport source 0.
     pub fn stop(&mut self) {
         // A count-in never reached ProcessTransportStarted.
         let started = !self.in_preroll && !self.waiting_midi;
@@ -2739,7 +2739,7 @@ mod tests {
     #[test]
     fn host_transport_edges_only() {
         let mut g = Dreist::empty(48000.0, RenderOptions::default());
-        // A stopped host leaves [re:b00098]'s own Play alone.
+        // A stopped host leaves the original's own Play alone.
         g.set_transport(false, 120.0, Some(0.0));
         g.start();
         g.set_transport(false, 120.0, Some(0.0));

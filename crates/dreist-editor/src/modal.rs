@@ -22,7 +22,7 @@
 //!
 //! The documents path is written at once, not on Confirm (ev_7e0eff81…,
 //! ev_b8fdc944…): Browse ($_22 [re:448611]) asks for a folder ("Please choose
-//! a new [re:b00098] documents folder", starting at the current one); Reset
+//! a new the original documents folder", starting at the current one); Reset
 //! ($_21 [re:9ab38e]) asks "Are you sure you want to reset the Documents path
 //! to %s?"; the text box ($_23 [re:c24122]) reverts to the stored path unless
 //! the typed folder exists. Each write alerts "Changes will be applied the

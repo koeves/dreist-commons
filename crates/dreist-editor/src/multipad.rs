@@ -36,7 +36,7 @@ pub fn selection(model: &Model, e: usize) -> (usize, u64) {
     (anchor, mask | 1u64 << (anchor.min(63)))
 }
 
-/// [re:0d8a70] the selection in the document (`EngineState` attributes) and make
+/// Store the selection in the document (`EngineState` attributes) and make
 /// the anchor the current pad.
 pub fn set_selection(model: &mut Model, e: usize, anchor: usize, mask: u64) {
     model.pad[e] = anchor;
