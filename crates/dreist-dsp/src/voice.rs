@@ -806,6 +806,8 @@ impl Voice {
         let end_fade_v1 = crate::rules::get().end_fade_v1;
         for i in 0..n {
             let fl = self.pb.pos.floor();
+            // The frame read here, before the advance below.
+            let read = fl;
             let end = self.pb.end as i32;
             let start = self.pb.start as i32;
             let past = if self.pb.reverse { (fl as i32) < start } else { end < fl as i32 };
@@ -867,14 +869,16 @@ impl Voice {
             } else if self.cut.is_none() {
                 // 32-frame fade before the end of a one-shot, from this
                 // sample on ([re:233c99] passes the sample to the cut
-                // phase, [re:3c3b3d] fades from it); v1 [re:fece0b] starts
-                // it at end ≤ position + 34.
-                let near = if self.pb.reverse {
-                    self.pb.pos.floor() < self.pb.start as f64 + 32.0
-                } else if end_fade_v1 {
-                    self.pb.end as f64 <= self.pb.pos + 2.0 + 32.0
+                // phase, [re:3c3b3d] fades from it). After the advance,
+                // the frame just read is checked against the end − 32
+                // (start + 32 in reverse) [re:233c99]; v1 [re:fece0b]
+                // checks the advanced position: end ≤ position + 34.
+                let near = if end_fade_v1 {
+                    if self.pb.reverse { self.pb.pos.floor() < self.pb.start as f64 + 32.0 } else { self.pb.end as f64 <= self.pb.pos + 2.0 + 32.0 }
+                } else if self.pb.reverse {
+                    read <= self.pb.start as f64 + 32.0
                 } else {
-                    self.pb.end as f64 - 32.0 <= self.pb.pos.floor()
+                    self.pb.end as f64 - 32.0 <= read
                 };
                 if near {
                     self.cut(32.0);
