@@ -1,7 +1,10 @@
 # nih-plug at de421011f41a6d10fc8c7a6084e4f4dee0143683 (upstream
 # https://github.com/robbert-vdh/nih-plug), vendored for fixes in its
 # wrappers. Only the `nih_plug` and `nih_plug_derive` crates are kept; the
-# apps use them through a `[patch]` entry.
+# apps use them through a `[patch]` entry. Changes:
+# - CLAP state load reads the length-prefixed state in chunks instead of
+#   allocating the length the stream claims up front (random or foreign
+#   data aborted the host on the failed allocation).
 
 [package]
 name = "nih_plug"

@@ -89,7 +89,7 @@ use crate::prelude::{
 };
 use crate::util::permit_alloc;
 use crate::wrapper::clap::context::RemoteControlPages;
-use crate::wrapper::clap::util::{read_stream, write_stream};
+use crate::wrapper::clap::util::{read_stream, read_stream_exact, write_stream};
 use crate::wrapper::state::{self, PluginState};
 use crate::wrapper::util::buffer_management::{BufferManager, ChannelPointers};
 use crate::wrapper::util::{
@@ -3153,14 +3153,14 @@ impl<P: ClapPlugin> Wrapper<P> {
         }
         let length = u64::from_le_bytes(length_bytes);
 
-        let mut read_buffer: Vec<u8> = Vec::with_capacity(length as usize);
-        if !read_stream(&*stream, read_buffer.spare_capacity_mut()) {
+        // The length comes from the stream, so random or foreign data can claim any size (the
+        // buffer used to be allocated at the claimed size up front, aborting the host)
+        let Some(read_buffer) = read_stream_exact(&*stream, length) else {
             nih_debug_assert_failure!(
                 "Error or end of stream while reading the state buffer from the stream."
             );
             return false;
-        }
-        read_buffer.set_len(length as usize);
+        };
 
         match state::deserialize_json(&read_buffer) {
             Some(mut state) => {

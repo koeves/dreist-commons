@@ -143,6 +143,25 @@ pub fn read_stream(stream: &clap_istream, mut slice: impl ByteReadBuffer) -> boo
     true
 }
 
+/// Read exactly `length` bytes from a stream, or `None` if the stream ends or fails first. The
+/// buffer grows by the chunks actually read, so a bogus `length` read from the stream itself (random
+/// or foreign data) fails at the end of the stream instead of allocating the claimed size.
+pub fn read_stream_exact(stream: &clap_istream, length: u64) -> Option<Vec<u8>> {
+    const CHUNK: usize = 64 * 1024;
+    let length = usize::try_from(length).ok()?;
+    let mut buffer = Vec::with_capacity(length.min(CHUNK));
+    let mut chunk = vec![0u8; CHUNK.min(length)];
+    while buffer.len() < length {
+        let n = (length - buffer.len()).min(CHUNK);
+        if !read_stream(stream, &mut chunk[..n]) {
+            return None;
+        }
+        buffer.extend_from_slice(&chunk[..n]);
+    }
+
+    Some(buffer)
+}
+
 /// Write the data from a slice to a stream until either all data has been written, or the stream
 /// returns an error. This correctly handles streams that only allow smaller, buffered writes. This
 /// returns `false` if the stream returns an error or doesn't allow any writes anymore.
