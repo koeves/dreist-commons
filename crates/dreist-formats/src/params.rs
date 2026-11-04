@@ -478,6 +478,11 @@ pub fn effect_param_names(effect: usize) -> &'static [&'static str] {
         44 => &["Room Size", "Decay", "Predelay", "Density", "Damping Freq", "Damping Gain"],
         45 => &["Model", "Delay Time", "Feedback", "Model Tone", "Sync", "Freeze", "Ping Pong", "Direction"],
         46 => &["Frequency", "AntiAlias"],
+        // As the original lists them ([re:737dba]): its option table
+        // ([re:d1711c]) makes panel parameter 0 the four-wave popup and its
+        // map ([re:72c1b1], [1, 0, 2, 3]) sends it to node port 1 (Mode),
+        // so the "Drive" label sits on the wave selector and "Mode" drives
+        // port 0 (Drive) ([re:a863c4]). Kept as shipped.
         47 => &["Drive", "Mode", "Pitch", "Tone"],
         _ => &[],
     }
