@@ -76,6 +76,18 @@ impl Dreist {
         self.msg_pad_on(e, pad, velocity, delta as f64, None, true);
     }
 
+    /// One layer of a pad from the editor's layer trigger: a live note on
+    /// that layer only (no note repeat, linked pads or recording); the pad
+    /// release ends it.
+    pub fn layer_hit(&mut self, e: usize, pad: usize, layer: usize, velocity: u32, delta: u32) {
+        if e >= self.engines.len() || pad >= TRACKS || layer >= 8 {
+            return;
+        }
+        let pattern = self.engines[e].state.current_pattern;
+        let req = NoteRequest { pad, step: -1, pattern, velocity: velocity.min(127), start: delta as f64, duration: -1.0, live: true, semitone: 0.0, record: None, layer: Some(layer) };
+        self.note_on(e, &req);
+    }
+
     /// A pad release from the editor (message 0x3d).
     pub fn pad_release(&mut self, e: usize, pad: usize, delta: u32) {
         self.msg_pad_off(e, pad, delta as f64, None);
@@ -516,7 +528,7 @@ impl Dreist {
             if i == 0 {
                 start += delay.max(0.0);
             }
-            let req = |p| NoteRequest { pad: p, step: rec_step.unwrap_or(-1), pattern: current_pattern, velocity: vel, start, duration: -1.0, live: true, semitone, record };
+            let req = |p| NoteRequest { pad: p, step: rec_step.unwrap_or(-1), pattern: current_pattern, velocity: vel, start, duration: -1.0, live: true, semitone, record, layer: None };
             self.note_on(e, &req(pad));
             for j in (0..TRACKS).filter(|&j| links & 1 << j != 0) {
                 self.note_on(e, &req(j));

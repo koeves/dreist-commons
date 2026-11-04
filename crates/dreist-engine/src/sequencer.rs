@@ -185,6 +185,8 @@ pub struct NoteRequest {
     pub semitone: f64,
     /// Live-recording timing offset (delayed voice start), when recording applies.
     pub record: Option<f64>,
+    /// Play only this layer of the pad (the editor's layer trigger).
+    pub layer: Option<usize>,
 }
 
 /// Is the track audible given mute/solo ([re:60b812]).
@@ -433,7 +435,7 @@ fn start_voice(state: &EngineState, pattern: &PatternData, pad: usize, step_inde
             let extra = last - step_index;
             duration = if extra == 0 { step.lanes[lane::DURATION] as f64 } else { track.step(last as u32).lanes[lane::DURATION] as f64 + extra as f64 } * samples_per_step;
         }
-        let req = |pad| NoteRequest { pad, step: step_index, pattern: state.current_pattern, velocity, start, duration, live: false, semitone: 0.0, record: None };
+        let req = |pad| NoteRequest { pad, step: step_index, pattern: state.current_pattern, velocity, start, duration, live: false, semitone: 0.0, record: None, layer: None };
         out.push(req(pad));
         for (j, linked) in pads.links[pad].iter().enumerate() {
             if *linked && j != pad {

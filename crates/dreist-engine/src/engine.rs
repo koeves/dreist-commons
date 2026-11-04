@@ -2000,7 +2000,10 @@ impl Dreist {
         crate::pattern::snap_lanes(&mut lanes);
         let Some(pad) = eng.pads.get_mut(r.pad) else { return };
         let slots: [LayerSlot; 8] = std::array::from_fn(|i| pad.layers[i].slot);
-        let picked = pad.picker.pick(pad.mode, &slots, r.velocity, force, self.forced_fallthrough, &mut rand);
+        let picked = match r.layer {
+            Some(li) => pad.picker.pick(LayerMode::AllLayers, &slots, r.velocity, li as i32, false, &mut rand),
+            None => pad.picker.pick(pad.mode, &slots, r.velocity, force, self.forced_fallthrough, &mut rand),
+        };
         let v2a = pad.v2a;
         // At most one start per layer (a fixed array: audio thread).
         let mut starts: [Option<(usize, Arc<SampleData>, NoteSetup, f64, CutMode, i64)>; 8] = Default::default();

@@ -1422,6 +1422,25 @@ mod tests {
         assert!(g.aux[2].pre_fade);
     }
 
+    /// The editor's layer trigger plays that layer only, as a live note
+    /// the pad release ends.
+    #[test]
+    fn layer_hit_plays_one_layer() {
+        let Some(mut g) = hollow() else { return };
+        g.stop();
+        let valid = |g: &Dreist, p: usize| (0..8).filter(|&l| g.engines[0].pads[p].layers[l].slot.valid).collect::<Vec<_>>();
+        let Some(pad) = (0..16).find(|&p| valid(&g, p).len() > 1) else { return };
+        let layer = valid(&g, pad)[1];
+        g.layer_hit(0, pad, layer, 100, 0);
+        let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
+        g.process(&mut l, &mut r);
+        let playing: Vec<_> = g.voices.iter().filter(|v| v.state == VoiceState::Playing).map(|v| (v.slot.pad as usize, v.slot.layer as usize, v.live)).collect();
+        assert_eq!(playing, vec![(pad, layer, true)]);
+        g.pad_hit(0, pad, 100, 0);
+        g.process(&mut l, &mut r);
+        assert!(g.voices.iter().filter(|v| v.state == VoiceState::Playing).count() > 1);
+    }
+
     #[test]
     fn x0x_pad_hits_cycle_the_current_track_steps() {
         let Some(mut g) = hollow() else { return };
