@@ -533,8 +533,10 @@ impl Voice {
             let over = self.pb.pos + 2.0 + len - self.pb.end as f64;
             if 0.0 <= over { len - over } else { len }
         } else {
-            let remain = self.pb.frames as f64 - self.pb.pos;
-            if len + self.pb.pos < self.pb.frames as f64 { len } else { remain }
+            // Clamped to the region length (end − start) against the
+            // absolute position [re:490648] [re:2499d6].
+            let region = (self.pb.end + 1).saturating_sub(self.pb.start) as f64;
+            if len + self.pb.pos < region { len } else { region - self.pb.pos }
         };
         let n = if 0.0 < len { len as i32 - 1 } else { 0 };
         self.cut = Some((1.0, 1.0 / n as f32));
