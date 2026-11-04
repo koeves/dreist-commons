@@ -31,8 +31,8 @@ pub struct Rules {
     /// layer's live `IsReversed` (xor the step's Reverse lane) every block.
     pub reverse_v1: bool,
     /// The original v1's end fade: it starts 2 frames earlier (end ≤
-    /// position + 34), at the sample that reaches it, and lasts to the end
-    /// marker; cut fades clamp to the end marker too.
+    /// position + 34) and lasts to the end marker; cut fades clamp to the
+    /// end marker too.
     pub end_fade_v1: bool,
     /// The original v1's aux send summing: a send ramps from its last level
     /// and is skipped while that level is 0 (the target only takes effect

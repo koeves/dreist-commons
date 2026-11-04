@@ -312,7 +312,8 @@ pub struct Voice {
     releasing: bool,
     active: bool,
     cut: Option<(f32, f32)>,
-    /// The block sample a cut fade starts at ([`crate::rules::Rules::end_fade_v1`]).
+    /// The block sample a cut fade starts at: the sample that reached the
+    /// end fade ([re:233c99], [re:3c3b3d]), else 0.
     cut_from: usize,
     buf: [Vec<f32>; 4],
     /// Timestretch (Signalsmith substitute for DIRAC), its transpose and
@@ -864,9 +865,10 @@ impl Voice {
                     self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
                 }
             } else if self.cut.is_none() {
-                // 32-frame fade before the end of a one-shot; v1
-                // [re:fece0b] starts it at end ≤ position + 34, from this
-                // sample on.
+                // 32-frame fade before the end of a one-shot, from this
+                // sample on ([re:233c99] passes the sample to the cut
+                // phase, [re:3c3b3d] fades from it); v1 [re:fece0b] starts
+                // it at end ≤ position + 34.
                 let near = if self.pb.reverse {
                     self.pb.pos.floor() < self.pb.start as f64 + 32.0
                 } else if end_fade_v1 {
@@ -876,7 +878,9 @@ impl Voice {
                 };
                 if near {
                     self.cut(32.0);
-                    if end_fade_v1 && self.stretch.is_none() {
+                    // A stretch voice's source frames do not line up with
+                    // the block: it fades from the block start.
+                    if self.stretch.is_none() {
                         self.cut_from = i;
                     }
                 }
