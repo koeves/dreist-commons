@@ -170,6 +170,10 @@ pub struct NoteSetup {
     /// Sample tempo for TracksBPM timestretch (`.gsa` metadata BPM, else
     /// the BPM guessed from the audio; 0 when no guess fits).
     pub file_bpm: f32,
+    /// The layer's stored `SourceBPM` and `DestinationBPM` (documents of
+    /// the original v1); [`crate::rules::Rules::timestretch_v1`] tracks the
+    /// host tempo from the source BPM.
+    pub stretch_bpm: Option<(f32, f32)>,
 }
 
 /// [`crate::rules::Rules::reverse_v1`] reads a one-shot or gated note
@@ -619,8 +623,22 @@ impl Voice {
             // step 1.0, pitch 2^(st/12) (property 100), stretch
             // factor (property 101) from the amount or file/host tempo.
             self.pb.step = 1.0;
-            self.ts_pitch = (st / 12.0).exp2() as f32;
-            self.ts_factor = if l[lp::TS_TRACKS_BPM][0] >= 0.5 { setup.file_bpm / self.host_bpm.max(1.0) } else { crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) };
+            let tracks = l[lp::TS_TRACKS_BPM][0] >= 0.5;
+            if crate::rules::get().timestretch_v1 {
+                // v1 [re:d8985e]: tracking, the layer's source BPM over the
+                // host's; otherwise source over destination (the amount);
+                // at most 4. The pitch ratio is at least 0.5.
+                let ratio = match setup.stretch_bpm {
+                    Some((src, _)) if tracks => src as f64 / self.host_bpm as f64,
+                    _ if tracks => (setup.file_bpm / self.host_bpm.max(1.0)) as f64,
+                    _ => crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) as f64,
+                };
+                self.ts_factor = ratio.min(4.0) as f32;
+                self.ts_pitch = 2f64.powf(st / 12.0).max(0.5) as f32;
+            } else {
+                self.ts_pitch = (st / 12.0).exp2() as f32;
+                self.ts_factor = if tracks { setup.file_bpm / self.host_bpm.max(1.0) } else { crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) };
+            }
         }
 
         // UpdateFilterParameters [re:9f92ff].
@@ -958,6 +976,7 @@ mod tests {
             env_tracks: false,
             reversed: false,
             file_bpm: 0.0,
+            stretch_bpm: None,
         }
     }
 

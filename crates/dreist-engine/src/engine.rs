@@ -2724,6 +2724,7 @@ fn load_layer(l: &dreist_formats::Layer, samples: &Path, _sr: f32, audible: bool
             reversed: n.bool("IsReversed").unwrap_or(false),
             env_tracks: n.bool("EnvTracksPitch").unwrap_or(false),
             file_bpm: sidecar_bpm.unwrap_or_else(|| guess_key_data(s.left.len() as u32, s.sample_rate, path.as_deref()).0),
+            stretch_bpm: n.f32("SourceBPM").map(|src| (src, n.f32("DestinationBPM").unwrap_or(120.0))),
         }
     });
     LayerRt {

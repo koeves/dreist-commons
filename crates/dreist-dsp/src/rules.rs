@@ -38,11 +38,15 @@ pub struct Rules {
     /// and is skipped while that level is 0 (the target only takes effect
     /// in the next block).
     pub sends_v1: bool,
+    /// The original v1's timestretch ratio: the layer's source BPM over the
+    /// host BPM (tracking) or its destination BPM, at most 4, and the pitch
+    /// ratio at least 0.5.
+    pub timestretch_v1: bool,
 }
 
 /// The reference behaviour.
 pub const REFERENCE: Rules =
-    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, reverse_v1: false, end_fade_v1: false, sends_v1: false };
+    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, reverse_v1: false, end_fade_v1: false, sends_v1: false, timestretch_v1: false };
 
 static RULES: OnceLock<Rules> = OnceLock::new();
 
