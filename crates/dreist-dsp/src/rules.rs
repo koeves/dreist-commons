@@ -42,11 +42,27 @@ pub struct Rules {
     /// host BPM (tracking) or its destination BPM, at most 4, and the pitch
     /// ratio at least 0.5.
     pub timestretch_v1: bool,
+    /// The original v1's pattern MIDI export: the pattern's own step count
+    /// (steps past a shorter track are off), no probability draw, tied
+    /// steps always merged, notes not shortened by later ones, step graphs
+    /// 0.1 QN before the note (a note at 0 moves 0.007 QN later) and only
+    /// v1's graph lanes.
+    pub midi_export_v1: bool,
 }
 
 /// The reference behaviour.
-pub const REFERENCE: Rules =
-    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, reverse_v1: false, end_fade_v1: false, sends_v1: false, timestretch_v1: false };
+pub const REFERENCE: Rules = Rules {
+    sampler_auto_stop_seconds: 0.25,
+    envelope_v1_ends: false,
+    loop_v1: false,
+    lanes_v1: false,
+    pan_v1: false,
+    reverse_v1: false,
+    end_fade_v1: false,
+    sends_v1: false,
+    timestretch_v1: false,
+    midi_export_v1: false,
+};
 
 static RULES: OnceLock<Rules> = OnceLock::new();
 
