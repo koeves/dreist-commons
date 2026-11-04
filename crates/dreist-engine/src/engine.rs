@@ -1992,12 +1992,23 @@ impl Dreist {
         let default_step = crate::pattern::StepData::off();
         let step = if r.step < 0 || r.live { &default_step } else { track.step(r.step as u32) };
         let mut rand = || self.rng.next_f32();
-        let force = (randomised(step.lanes[lane::FORCE_LAYER], track.rand[lane::FORCE_LAYER], &mut rand) * 8.0).floor() as i32 - 1;
+        let v1 = dreist_dsp::rules::get().lanes_v1;
+        let force = if v1 {
+            // v1 reads ForceLayer as stored [re:166a87].
+            (step.lanes[lane::FORCE_LAYER] * 8.0).floor() as i32 - 1
+        } else {
+            (randomised(step.lanes[lane::FORCE_LAYER], track.rand[lane::FORCE_LAYER], &mut rand) * 8.0).floor() as i32 - 1
+        };
         // Note-on parameters: each lane randomised, then stored through
         // [re:28d242] (on/off lanes snap at 0.5, so a randomised
         // Reverse is a coin flip, not almost never on) [decomp] ev_59538a6c….
-        let mut lanes: dreist_dsp::voice::Lanes = std::array::from_fn(|l| randomised(step.lanes[l], track.rand[l], &mut rand));
-        crate::pattern::snap_lanes(&mut lanes);
+        let lanes: dreist_dsp::voice::Lanes = if v1 {
+            std::array::from_fn(|l| crate::pattern::lane_at_note_v1(step, track, l, &mut rand))
+        } else {
+            let mut lanes = std::array::from_fn(|l| randomised(step.lanes[l], track.rand[l], &mut rand));
+            crate::pattern::snap_lanes(&mut lanes);
+            lanes
+        };
         let Some(pad) = eng.pads.get_mut(r.pad) else { return };
         let slots: [LayerSlot; 8] = std::array::from_fn(|i| pad.layers[i].slot);
         let picked = match r.layer {
@@ -2015,6 +2026,9 @@ impl Dreist {
             if r.live {
                 setup.step = eng.dummy.get(r.pad).copied().flatten();
                 setup.midi_velocity = Some(r.velocity);
+            } else if v1 && nstarts > 0 {
+                // v1 draws each voice's lane variants itself [re:bef782].
+                setup.step = Some(std::array::from_fn(|l| crate::pattern::lane_at_note_v1(step, track, l, &mut rand)));
             } else {
                 setup.step = Some(lanes);
             }

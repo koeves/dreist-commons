@@ -16,10 +16,17 @@ pub struct Rules {
     /// The original v1's forward loop: no crossfade, wrap at the loop end
     /// minus 3 frames keeping the fractional position.
     pub loop_v1: bool,
+    /// The original v1's step lanes at note start: only the lanes the
+    /// voice and sequencer pass through v1's lane variant (track scale,
+    /// compression, unrounded randomisation) vary; every other lane, the
+    /// sequencer's layer-selection velocity and ForceLayer included, is
+    /// used as stored, and the voice's lanes are not snapped.
+    pub lanes_v1: bool,
 }
 
 /// The reference behaviour.
-pub const REFERENCE: Rules = Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false };
+pub const REFERENCE: Rules =
+    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false };
 
 static RULES: OnceLock<Rules> = OnceLock::new();
 

@@ -514,7 +514,12 @@ impl Dreist {
                     Some(k) if (k as usize) < track.steps.len() => track.steps[k as usize].clone(),
                     _ => StepData::off(),
                 };
-                (randomised(step.lanes[lane::REPEATS], track.rand[lane::REPEATS], &mut rand) * 7.0 + 1.0).floor() as u32
+                let r = if dreist_dsp::rules::get().lanes_v1 {
+                    crate::pattern::lane_at_note_v1(&step, track, lane::REPEATS, &mut rand)
+                } else {
+                    randomised(step.lanes[lane::REPEATS], track.rand[lane::REPEATS], &mut rand)
+                };
+                (r * 7.0 + 1.0).floor() as u32
             }
             None => 1,
         };

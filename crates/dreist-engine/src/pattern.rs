@@ -123,13 +123,18 @@ pub struct TrackData {
     pub length: u32,
     /// `<Lane>Rand` per-lane randomisation, default 0.5 = none.
     pub rand: [f32; LANES],
+    /// `<Lane>Scal` and `<Lane>Comp` per-lane scale (offset) and
+    /// compression amounts, default 0.5 = none; only read with
+    /// [`dreist_dsp::rules::Rules::lanes_v1`] ([`lane_variant_v1`]).
+    pub scale: [f32; LANES],
+    pub comp: [f32; LANES],
     pub mute: bool,
     pub solo: bool,
 }
 
 impl TrackData {
     pub fn empty(steps: u32) -> TrackData {
-        TrackData { steps: vec![StepData::off(); steps as usize], length: steps, rand: [0.5; LANES], mute: false, solo: false }
+        TrackData { steps: vec![StepData::off(); steps as usize], length: steps, rand: [0.5; LANES], scale: [0.5; LANES], comp: [0.5; LANES], mute: false, solo: false }
     }
 
     /// Step `i`; steps past the stored ones are off (the original's
@@ -182,6 +187,8 @@ impl PatternData {
             track.mute = t.bool("Mute").unwrap_or(false);
             track.solo = t.bool("Solo").unwrap_or(false);
             for_lanes(t, |name| name.strip_suffix("Rand").and_then(step_lane_index), |l, v| track.rand[l] = v);
+            for_lanes(t, |name| name.strip_suffix("Scal").and_then(step_lane_index), |l, v| track.scale[l] = v);
+            for_lanes(t, |name| name.strip_suffix("Comp").and_then(step_lane_index), |l, v| track.comp[l] = v);
             for s in t.children_of("Step") {
                 let Some(k) = s.index().filter(|k| *k < steps) else { continue };
                 let step = &mut track.steps[k as usize];
@@ -273,6 +280,64 @@ pub fn randomised(value: f32, amount: f32, rand: &mut impl FnMut() -> f32) -> f3
     let r = rand() * s.abs();
     let v = if s <= 0.0 { value - r } else { r + value };
     v.clamp(0.0, 1.0)
+}
+
+/// The lanes the original v1 passes through its lane variant at note start
+/// ([re:bef782], [re:ab179d], [re:3f302e], [re:3b0509]): Velocity, Pan,
+/// Repeats, Reverse, the two pitch lanes, StartPoint and the four filter
+/// lanes. Every other lane is used as stored (no randomisation).
+pub const V1_VARIANT_LANES: [usize; 11] = [0, 1, 2, 4, 6, 7, 8, 11, 12, 13, 14];
+
+/// The original v1's compression target of a lane ([re:0d76e5]):
+/// 0.5 for the bipolar lanes (Pan, Shift, the pitch lanes, StartPoint,
+/// cutoff, resonance, drive and the sends), 1 for the rest.
+pub fn compression_target_v1(lane: usize) -> f32 {
+    if matches!(lane, 1 | 3 | 6 | 7 | 8 | 11 | 12 | 14 | 19..=22) { 0.5 } else { 1.0 }
+}
+
+/// The original v1's lane value at note start ([re:51afe0]): the track's
+/// scale moves the value by `2·scale − 1`, its compression pulls it
+/// toward the lane's target (above 0.5) or pushes it away (below 0.5),
+/// then its randomisation adds or subtracts `|2·rand − 1|·r` (unrounded,
+/// unlike [`randomised`]); each stage clamps to 0..1 and is skipped within
+/// 1e-6 of 0.5. `rand` returns 0..1.
+pub fn lane_variant_v1(value: f32, scale: f32, comp: f32, rand_amount: f32, target: f32, rand: &mut impl FnMut() -> f32) -> f32 {
+    let clamp = |x: f32| {
+        if x <= 0.0 {
+            0.0
+        } else if x < 1.0 {
+            x
+        } else {
+            1.0
+        }
+    };
+    let mut v = clamp((scale + scale - 1.0) + value);
+    if (comp - 0.5).abs() >= 1e-6 {
+        if comp > 0.5 {
+            v = clamp((target - v) * (comp + comp - 1.0) + v);
+        } else {
+            let k = comp * -2.0 + 1.0;
+            if k.abs() >= 1e-6 {
+                v = if (target - 0.5).abs() >= 1e-6 { clamp(v - (v - (1.0 - target)) * k) } else { clamp(v - k * (target - v)) };
+            }
+        }
+    }
+    if (rand_amount - 0.5).abs() >= 1e-6 {
+        let s = rand_amount + rand_amount - 1.0;
+        if s.abs() >= 1e-6 {
+            let r = s.abs() * rand();
+            v = clamp(if 0.0 < s { v + r } else { v - r });
+        }
+    }
+    v
+}
+
+/// A track's lane value at note start under
+/// [`dreist_dsp::rules::Rules::lanes_v1`]: [`lane_variant_v1`] for
+/// [`V1_VARIANT_LANES`], the stored value for the others.
+pub fn lane_at_note_v1(step: &StepData, track: &TrackData, lane: usize, rand: &mut impl FnMut() -> f32) -> f32 {
+    let v = step.lanes[lane];
+    if V1_VARIANT_LANES.contains(&lane) { lane_variant_v1(v, track.scale[lane], track.comp[lane], track.rand[lane], compression_target_v1(lane), rand) } else { v }
 }
 
 /// [re:60d051] table [re:08ca81] (lane → style; 0 for
@@ -381,6 +446,8 @@ impl PatternData {
             .map(|t| {
                 let mut nt = TrackData::empty(steps);
                 nt.rand = t.rand;
+                nt.scale = t.scale;
+                nt.comp = t.comp;
                 nt.mute = t.mute;
                 nt.solo = t.solo;
                 let mut i = 0;
@@ -493,6 +560,56 @@ mod tests {
         assert!(SyncMode::from_name("Slave restart").restarts());
         assert!(SyncMode::from_name("Gate").gated());
         assert!(!SyncMode::Slave.restarts() && !SyncMode::Slave.gated());
+    }
+
+    /// v1's lane variant: scale offsets, compression toward the target
+    /// (or away from it), unrounded randomisation.
+    #[test]
+    fn v1_lane_variant_stages() {
+        let mut r = || 0.5f32;
+        let none = |v| lane_variant_v1(v, 0.5, 0.5, 0.5, 0.5, &mut || 0.5);
+        assert_eq!(none(0.3), 0.3);
+        // Scale 0.75 adds 0.5, clamped.
+        assert!((lane_variant_v1(0.3, 0.75, 0.5, 0.5, 0.5, &mut r) - 0.8).abs() < 1e-6);
+        assert_eq!(lane_variant_v1(0.7, 1.0, 0.5, 0.5, 0.5, &mut r), 1.0);
+        // Compression 0.75 halves the distance to the target.
+        assert!((lane_variant_v1(0.1, 0.5, 0.75, 0.5, 0.5, &mut r) - 0.3).abs() < 1e-6);
+        assert!((lane_variant_v1(0.2, 0.5, 0.75, 0.5, 1.0, &mut r) - 0.6).abs() < 1e-6);
+        // Below 0.5 it expands: away from 0.5, or toward 0 for target 1.
+        assert!((lane_variant_v1(0.4, 0.5, 0.25, 0.5, 0.5, &mut r) - 0.35).abs() < 1e-6);
+        assert!((lane_variant_v1(0.8, 0.5, 0.25, 0.5, 1.0, &mut r) - 0.4).abs() < 1e-6);
+        // Randomisation 0.7: ±0.4·r, not rounded to 1 %.
+        assert!((lane_variant_v1(0.3, 0.5, 0.5, 0.703, 0.5, &mut r) - (0.3 + 0.406 * 0.5)).abs() < 1e-5);
+        assert!((lane_variant_v1(0.3, 0.5, 0.5, 0.25, 0.5, &mut r) - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn v1_lane_set_and_targets() {
+        let mut t = TrackData::empty(4);
+        t.scale[lane::SHIFT] = 1.0;
+        t.scale[1] = 1.0;
+        let s = StepData::off();
+        let mut r = || 0.0f32;
+        // Shift is used as stored, Pan through the variant.
+        assert_eq!(lane_at_note_v1(&s, &t, lane::SHIFT, &mut r), 0.5);
+        assert_eq!(lane_at_note_v1(&s, &t, 1, &mut r), 1.0);
+        assert_eq!(compression_target_v1(0), 1.0);
+        assert_eq!(compression_target_v1(11), 0.5);
+        assert_eq!(compression_target_v1(lane::FORCE_LAYER), 1.0);
+    }
+
+    /// `<Lane>Scal` / `<Lane>Comp` parse like `<Lane>Rand`.
+    #[test]
+    fn scale_and_compression_parse() {
+        let mut p = Node::new("StepPattern", None);
+        let mut t = Node::new("Track", Some("Track2"));
+        t.set("PanScal", "0.75");
+        t.set("FilterCutoffComp", "0.2");
+        p.children.push(t);
+        let d = PatternData::from_node(&p);
+        assert_eq!(d.tracks[2].scale[1], 0.75);
+        assert_eq!(d.tracks[2].comp[11], 0.2);
+        assert_eq!(d.tracks[2].scale[0], 0.5);
     }
 
     #[test]

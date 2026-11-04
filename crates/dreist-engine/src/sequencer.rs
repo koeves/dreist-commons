@@ -408,8 +408,15 @@ fn start_voice(state: &EngineState, pattern: &PatternData, pad: usize, step_inde
     let track = &pattern.tracks[pad];
     let step = track.step(step_index as u32);
     let mut rand = || rng.next_f32();
-    let velocity = (randomised(step.lanes[lane::VELOCITY], track.rand[lane::VELOCITY], &mut rand) * 127.0) as u32;
-    let repeats = (randomised(step.lanes[lane::REPEATS], track.rand[lane::REPEATS], &mut rand) * 7.0 + 1.0).floor() as u32;
+    let (velocity, repeats) = if dreist_dsp::rules::get().lanes_v1 {
+        // v1 [re:3b0509]: the velocity as stored, the repeats through the
+        // lane variant.
+        let r = crate::pattern::lane_at_note_v1(step, track, lane::REPEATS, &mut rand);
+        ((step.lanes[lane::VELOCITY] * 127.0) as u32, (r * 7.0 + 1.0).floor() as u32)
+    } else {
+        let velocity = (randomised(step.lanes[lane::VELOCITY], track.rand[lane::VELOCITY], &mut rand) * 127.0) as u32;
+        (velocity, (randomised(step.lanes[lane::REPEATS], track.rand[lane::REPEATS], &mut rand) * 7.0 + 1.0).floor() as u32)
+    };
     if repeats == 0 {
         return;
     }
