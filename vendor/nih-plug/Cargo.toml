@@ -5,6 +5,7 @@
 # - CLAP state load reads the length-prefixed state in chunks instead of
 #   allocating the length the stream claims up front (random or foreign
 #   data aborted the host on the failed allocation).
+# - CLAP state load asks the host to rescan the parameter values.
 
 [package]
 name = "nih_plug"
