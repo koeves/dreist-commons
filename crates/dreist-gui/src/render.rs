@@ -4,7 +4,7 @@
 
 use crate::colour::{self, Colour};
 use crate::ctrl::Ctrl;
-use crate::paint::{Gradient, Painter, RectF, TextFx};
+use crate::paint::{Gradient, Painter, Radial, RectF, TextFx};
 use crate::style::StyleSheet;
 
 /// The skin control overload class of the header logo (a master level meter).
@@ -442,11 +442,16 @@ impl<'s> Renderer<'s> {
     /// The gradient of fill attribute `fill` (e.g. `colFill`): its
     /// `<fill>GradientTo` colour (`colFillGradientTo`,
     /// `colAltFillGradientTo`), top to bottom, or left to right with
-    /// `enumGradientDirection="Horizontal"`. `adjust` changes the end colour
-    /// as the fill was changed (hover). Without an end colour,
-    /// `realGradientShade` shades `base` (the drawn fill) towards its end:
-    /// darkened by the factor when positive, lightened when negative (so
-    /// one inherited value suits every fill colour).
+    /// `enumGradientDirection="Horizontal"`, or outwards with
+    /// `enumGradientDirection="Radial"` from `realGradientCentreX` /
+    /// `realGradientCentreY` (fractions of the bounds, default 0.5) to
+    /// `realGradientRadius` (a fraction of the bounds' size, default 0.5;
+    /// the fill colour holds up to `realGradientInnerRadius`, default 0).
+    /// `adjust` changes the end colour as the fill was changed (hover).
+    /// Without an end colour, `realGradientShade` shades `base` (the drawn
+    /// fill) towards its end: darkened by the factor when positive,
+    /// lightened when negative (so one inherited value suits every fill
+    /// colour).
     pub fn gradient(&self, c: &Ctrl, fill: &str, base: Colour, adjust: Option<&dyn Fn(Colour) -> Colour>) -> Option<Gradient> {
         let st = self.style(c);
         let to = match opt_colour(self.styles, st, c, &format!("{fill}GradientTo")) {
@@ -459,8 +464,15 @@ impl<'s> Renderer<'s> {
                 if k > 0.0 { base.darken(k) } else { base.lighten(-k) }
             }
         };
-        let horizontal = opt_raw(self.styles, st, c, "enumGradientDirection").is_some_and(|v| v.trim().eq_ignore_ascii_case("horizontal"));
-        Some(Gradient { to, horizontal })
+        let dir = opt_raw(self.styles, st, c, "enumGradientDirection").map(str::trim);
+        let horizontal = dir.is_some_and(|v| v.eq_ignore_ascii_case("horizontal"));
+        let radial = dir.filter(|v| v.eq_ignore_ascii_case("radial")).map(|_| Radial {
+            cx: opt_f32(self.styles, st, c, "realGradientCentreX", 0.5),
+            cy: opt_f32(self.styles, st, c, "realGradientCentreY", 0.5),
+            r: opt_f32(self.styles, st, c, "realGradientRadius", 0.5).max(0.0),
+            r0: opt_f32(self.styles, st, c, "realGradientInnerRadius", 0.0).max(0.0),
+        });
+        Some(Gradient { to, horizontal, radial })
     }
 
     /// A dash pattern (`len_key` px dashes, `gap_key` px gaps, the gap
@@ -487,7 +499,10 @@ impl<'s> Renderer<'s> {
     /// `optBevel` (a 1 px edge inside the shape, `colBevelLight` at the top
     /// fading to `colBevelDark` at the bottom); `intDashLength` /
     /// `intDashGap` (a dashed border; thin panels, 2 px or less across,
-    /// are lines and draw their fill as dashes along their length).
+    /// are lines and draw their fill as dashes along their length);
+    /// `realNoiseAmount` (a brushed texture over the fill, see
+    /// [`Painter::fill_path_noise`]: streaks `realNoiseStreak` px long,
+    /// default 24, pattern `intNoiseSeed`, default 1).
     pub fn default_fill_gradient(&self, p: &mut Painter, c: &Ctrl, fill: Colour, grad: Option<Gradient>, border: Colour, _shadow: bool) {
         let st = self.style(c);
         let s = self.styles;
@@ -558,6 +573,13 @@ impl<'s> Renderer<'s> {
             (Shape::Rounded(full, radius, corners), Shape::Rounded(full, radius, corners), draw_border && bw <= 1.0)
         };
         body.fill(p, fill, grad);
+        let noise = opt_f32(s, st, c, "realNoiseAmount", 0.0);
+        if noise > 0.0 {
+            if let Some(path) = body.path() {
+                let seed = opt_f32(s, st, c, "intNoiseSeed", 1.0).round() as i64 as u32;
+                p.fill_path_noise(&path, noise, opt_f32(s, st, c, "realNoiseStreak", 24.0), seed);
+            }
+        }
         if opt_bool(s, st, c, "optBevel", false) {
             let light = opt_colour(s, st, c, "colBevelLight").unwrap_or(Colour::rgba(255, 255, 255, 110));
             let dark = opt_colour(s, st, c, "colBevelDark").unwrap_or(Colour::rgba(0, 0, 0, 90));
@@ -573,8 +595,12 @@ impl<'s> Renderer<'s> {
     }
 
     /// [re:485453].
+    /// Opt-in `realTextOffsetY` moves the text down by that many px (up
+    /// when negative).
     fn text_rect(&self, c: &Ctrl, r: RectF) -> RectF {
         let st = self.style(c);
+        let dy = opt_f32(self.styles, st, c, "realTextOffsetY", 0.0);
+        let r = RectF::new(r.x, r.y + dy, r.w, r.h);
         let Some(off) = self.styles.raw(st, "realTextOffset").and_then(|v| v.trim().parse::<f32>().ok()) else { return r };
         match self.styles.h_align(st) {
             crate::style::HAlign::Right => RectF::new(r.x - off, r.y, (r.w - off).max(0.0), r.h),
@@ -600,7 +626,21 @@ impl<'s> Renderer<'s> {
         let tr = self.text_rect(c, r);
         let fx = self.text_fx(c);
         let s = p.fonts.shorten(&font, text, tr.w / fx.scale_x.max(0.1), self.styles.shorten(st));
-        p.text_fx(tr, &s, colour, &font, self.styles.h_align(st), self.styles.v_align(st), fx);
+        let (h, v) = (self.styles.h_align(st), self.styles.v_align(st));
+        // Opt-in glow: `<colour attr>Glow` (`colTextGlow`, `colAltTextGlow`)
+        // blurred `realTextGlowRadius` px (default 2) behind the text,
+        // `realTextGlowStrength` (default 1) times as strong.
+        if let Some(glow) = opt_colour(self.styles, st, c, &format!("{colour_attr}Glow")) {
+            let radius = opt_f32(self.styles, st, c, "realTextGlowRadius", 2.0);
+            p.text_glow(tr, &s, glow, &font, h, v, fx, radius, opt_f32(self.styles, st, c, "realTextGlowStrength", 1.0));
+        }
+        p.text_fx(tr, &s, colour, &font, h, v, fx);
+        // Opt-in `realTextEmbolden`: the text drawn again that many px to
+        // the right (heavier strokes than the font's bold).
+        let bold = opt_f32(self.styles, st, c, "realTextEmbolden", 0.0);
+        if bold > 0.0 {
+            p.text_fx(RectF::new(tr.x + bold, tr.y, tr.w, tr.h), &s, colour, &font, h, v, fx);
+        }
     }
 
     /// Opt-in text options: `realLetterSpacing` (px between letters),
@@ -1014,7 +1054,8 @@ impl<'s> Renderer<'s> {
     /// `r`'s square): round, a colAltBorder ring around colAltFill; a
     /// cap, colAltFill (gradient `colAltFillGradientTo`) framed in
     /// colAltBorder with `intGripLines` (default 1) grip lines 2 px apart
-    /// across its middle in `colGrip` (default colAltBorder);
+    /// across its middle in `colGrip` (default colAltBorder;
+    /// `enumGripShape`: `Squares` or `Along`, see below);
     /// `realHandleRounding` (default 1) rounds its corners.
     fn draw_handle(&self, p: &mut Painter, c: &Ctrl, handle: Handle, r: RectF, vertical: bool) {
         let st = self.style(c);
@@ -1045,6 +1086,35 @@ impl<'s> Renderer<'s> {
                 p.stroke_rounded(r.inset(0.5), rounding, [true; 4], handle_ring, 1.0);
                 let grip = opt_colour(s, st, c, "colGrip").unwrap_or(handle_ring);
                 let n = opt_f32(s, st, c, "intGripLines", 1.0).round().max(0.0) as i32;
+                match opt_raw(s, st, c, "enumGripShape").map(str::trim) {
+                    // `Squares`: n squares `realGripSize` (default 2) px
+                    // centred across the cap, spread evenly along it.
+                    Some(v) if v.eq_ignore_ascii_case("squares") => {
+                        let g = opt_f32(s, st, c, "realGripSize", 2.0).max(0.0);
+                        for k in 0..n {
+                            let f = (k as f32 + 0.5) / n as f32;
+                            let (x, y) = if vertical { (r.x + (r.w - g) / 2.0, r.y + r.h * f - g / 2.0) } else { (r.x + r.w * f - g / 2.0, r.y + (r.h - g) / 2.0) };
+                            p.fill_rect(RectF::new(x.round(), y.round(), g, g), grip);
+                        }
+                        return;
+                    }
+                    // `Along`: the lines run along the travel instead of
+                    // across it.
+                    Some(v) if v.eq_ignore_ascii_case("along") => {
+                        for k in 0..n {
+                            let off = (k as f32 - (n - 1) as f32 / 2.0) * 2.0;
+                            if vertical {
+                                let x = (r.x + r.w / 2.0 + off).floor() + 0.5;
+                                p.line(x, r.y + 2.0, x, r.y + r.h - 2.0, grip, 1.0);
+                            } else {
+                                let y = (r.y + r.h / 2.0 + off).floor() + 0.5;
+                                p.line(r.x + 2.0, y, r.x + r.w - 2.0, y, grip, 1.0);
+                            }
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
                 for k in 0..n {
                     let off = (k as f32 - (n - 1) as f32 / 2.0) * 2.0;
                     if vertical {
@@ -1672,6 +1742,110 @@ mod tests {
         assert!(px(&bev, 30, 15, 0)[0] > 110, "light top edge");
         assert!(px(&bev, 30, 15, 19)[0] < 90, "dark bottom edge");
         assert_eq!(px(&bev, 30, 15, 10), [100, 100, 100], "the middle is the fill");
+    }
+
+    #[test]
+    fn radial_gradients_shade_outwards() {
+        let base = [("colFill", "255, 255, 255, 255"), ("colFillGradientTo", "0, 0, 0, 255"), ("optDrawBorder", "false")];
+        let radial = [&base[..], &[("enumGradientDirection", "Radial")]].concat();
+        let offset = [&radial[..], &[("realGradientCentreX", "0"), ("realGradientCentreY", "0"), ("realGradientRadius", "1")]].concat();
+        let inner = [&radial[..], &[("realGradientInnerRadius", "0.25")]].concat();
+        let s = sheet(&[("V", "CtrlStyle", &base), ("R", "CtrlStyle", &radial), ("O", "CtrlStyle", &offset), ("I", "CtrlStyle", &inner)]);
+        let r = draw(&s, &ctrl("CtrlPanel", "R", 40, 40, &[]));
+        assert_ne!(r, draw(&s, &ctrl("CtrlPanel", "V", 40, 40, &[])));
+        // Brightest in the middle, the same distance out alike either way,
+        // the end colour at the radius and beyond.
+        let mid = px(&r, 40, 20, 20)[0];
+        assert!(mid > 240, "centre {mid}");
+        assert!(px(&r, 40, 20, 10)[0].abs_diff(px(&r, 40, 10, 20)[0]) <= 2);
+        assert!(px(&r, 40, 20, 10)[0] < mid && px(&r, 40, 20, 10)[0] > 60);
+        assert!(px(&r, 40, 0, 0)[0] < 5, "corner");
+        // A centre at the top left, a radius of the whole rect.
+        let o = draw(&s, &ctrl("CtrlPanel", "O", 40, 40, &[]));
+        assert!(px(&o, 40, 1, 1)[0] > 240 && px(&o, 40, 38, 1)[0] < 20 && px(&o, 40, 20, 1)[0] > 100);
+        // The fill colour holds up to the inner radius.
+        let i = draw(&s, &ctrl("CtrlPanel", "I", 40, 40, &[]));
+        assert!(px(&i, 40, 20, 15)[0] > 245 && px(&r, 40, 20, 15)[0] < 235);
+        // Read from the control first.
+        assert_eq!(draw(&s, &ctrl("CtrlPanel", "V", 40, 40, &[("enumGradientDirection", "Radial")])), r);
+    }
+
+    #[test]
+    fn noise_textures_are_opt_in_subtle_and_reproducible() {
+        let base = [("colFill", "128, 128, 128, 255"), ("optDrawBorder", "false")];
+        let s = sheet(&[("Flat", "CtrlStyle", &base), ("Noise", "CtrlStyle", &[&base[..], &[("realNoiseAmount", "0.1")]].concat())]);
+        let flat = draw(&s, &ctrl("CtrlPanel", "Flat", 60, 20, &[]));
+        assert!(flat.chunks(4).all(|p| p[..3] == [128, 128, 128]));
+        let n = draw(&s, &ctrl("CtrlPanel", "Noise", 60, 20, &[]));
+        assert_eq!(n, draw(&s, &ctrl("CtrlPanel", "Noise", 60, 20, &[])), "deterministic");
+        assert!(n.chunks(4).any(|p| p[0] > 128) && n.chunks(4).any(|p| p[0] < 128), "light and dark streaks");
+        assert!(n.chunks(4).all(|p| p[0].abs_diff(128) <= 26), "at most the amount");
+        // Streaks run along x: neighbours in a row differ less than in a column.
+        let d = |dx: usize, dy: usize| -> u32 {
+            let mut t = 0;
+            for y in 0..19 {
+                for x in 0..59 {
+                    t += px(&n, 60, x, y)[0].abs_diff(px(&n, 60, x + dx, y + dy)[0]) as u32;
+                }
+            }
+            t
+        };
+        assert!(d(1, 0) * 2 < d(0, 1), "row {} column {}", d(1, 0), d(0, 1));
+        let other = draw(&s, &ctrl("CtrlPanel", "Noise", 60, 20, &[("intNoiseSeed", "2")]));
+        assert_ne!(n, other, "the seed picks the pattern");
+    }
+
+    #[test]
+    fn slider_grip_shapes() {
+        let cap = [COLOURS, &[("enumHandleShape", "Rect"), ("realHandleLength", "16"), ("colGrip", "255, 0, 255, 255"), ("intGripLines", "2")]].concat();
+        let squares = [&cap[..], &[("enumGripShape", "Squares"), ("realGripSize", "2")]].concat();
+        let along = [&cap[..], &[("enumGripShape", "Along")]].concat();
+        let s = sheet(&[("Lines", "CtrlStyle", &cap), ("Squares", "CtrlStyle", &squares), ("Along", "CtrlStyle", &along)]);
+        let magenta = |px: &[u8], w: usize| -> Vec<(usize, usize)> { px.chunks(4).enumerate().filter(|(_, p)| p[0] > 200 && p[1] < 60 && p[2] > 200).map(|(i, _)| (i % w, i / w)).collect() };
+        let mut f = ctrl("CtrlSlider", "Squares", 15, 76, &[]);
+        f.value = 0.5;
+        let sq = magenta(&draw(&s, &f), 15);
+        // Two 2 x 2 squares, a quarter and three quarters along the 16 px cap.
+        assert_eq!(sq.len(), 8, "{sq:?}");
+        let ys: std::collections::BTreeSet<usize> = sq.iter().map(|p| p.1).collect();
+        assert_eq!(ys.len(), 4);
+        let (y0, y1) = (*ys.first().unwrap(), *ys.last().unwrap());
+        assert!((7..=9).contains(&(y1 - y0)), "{y0}..{y1}");
+        // Lines across a vertical cap are wider than tall; along it, taller.
+        f.style = "Lines".into();
+        let l = magenta(&draw(&s, &f), 15);
+        f.style = "Along".into();
+        let a = magenta(&draw(&s, &f), 15);
+        let span = |v: &[(usize, usize)]| (v.iter().map(|p| p.0).max().unwrap() - v.iter().map(|p| p.0).min().unwrap(), v.iter().map(|p| p.1).max().unwrap() - v.iter().map(|p| p.1).min().unwrap());
+        assert!(span(&l).0 > span(&l).1 && span(&a).1 > span(&a).0, "{:?} {:?}", span(&l), span(&a));
+    }
+
+    #[test]
+    fn text_glow_embolden_and_vertical_offset() {
+        let base = [("colText", "255, 255, 255, 255"), ("colFill", "0, 0, 0, 255"), ("optDrawBorder", "false")];
+        let s = sheet(&[
+            ("Plain", "CtrlStyle", &base),
+            ("Glow", "CtrlStyle", &[&base[..], &[("colTextGlow", "0, 0, 255, 255"), ("realTextGlowRadius", "3")]].concat()),
+            ("Bold", "CtrlStyle", &[&base[..], &[("realTextEmbolden", "1")]].concat()),
+            ("Low", "CtrlStyle", &[&base[..], &[("realTextOffsetY", "6")]].concat()),
+        ]);
+        let label = |st: &str| {
+            let mut c = ctrl("CtrlLabel", st, 80, 30, &[]);
+            c.text = "IIII".into();
+            draw(&s, &c)
+        };
+        let plain = label("Plain");
+        if painted(&plain) == 0 {
+            return; // (no font on this machine)
+        }
+        let blue = |px: &[u8]| px.chunks(4).filter(|p| p[2] > p[0].saturating_add(40)).count();
+        let glow = label("Glow");
+        assert_eq!(blue(&plain), 0);
+        assert!(blue(&glow) > 20, "a blue halo round the letters");
+        assert!(painted(&label("Bold")) > painted(&plain), "{} {}", painted(&label("Bold")), painted(&plain));
+        // Lower by 6 px: the first lit row moves down.
+        let top = |px: &[u8]| px.chunks(4).position(|p| p[0] > 128).map(|i| i / 80).unwrap();
+        assert_eq!(top(&label("Low")), top(&plain) + 6);
     }
 
     #[test]
