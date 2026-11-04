@@ -175,6 +175,10 @@ struct SendGain {
 impl SendGain {
     /// [re:31cd26] + [re:90f68f].
     fn process(&mut self, target: f32, src: [&[f32]; 2], dst: [&mut [f32]; 2]) {
+        if dreist_dsp::rules::get().sends_v1 {
+            self.process_v1(target, src, dst);
+            return;
+        }
         if target <= 0.0 {
             return;
         }
@@ -192,6 +196,31 @@ impl SendGain {
             self.last += inc;
             dl[i] += src[0][i] * self.last;
             dr[i] += src[1][i] * self.last;
+        }
+    }
+}
+
+impl SendGain {
+    /// The original v1's send ([re:99f309], [re:be9258], [re:f918f1]): from
+    /// the last level toward `target` over the block, the first sample at
+    /// the last level; nothing while the last level is 0. The last level
+    /// becomes `target` either way.
+    fn process_v1(&mut self, target: f32, src: [&[f32]; 2], dst: [&mut [f32]; 2]) {
+        let n = src[0].len();
+        let last = std::mem::replace(&mut self.last, target);
+        if n == 0 || last <= 0.0 {
+            return;
+        }
+        let inc = (target - last) / n as f32;
+        let [dl, dr] = dst;
+        let mut g = last;
+        let flat = inc.abs() < 1e-6;
+        for i in 0..n {
+            dl[i] += g * src[0][i];
+            dr[i] += g * src[1][i];
+            if !flat {
+                g += inc;
+            }
         }
     }
 }
@@ -2323,7 +2352,9 @@ impl Dreist {
         let Buffers { layer: [l, r], pad: [pl, pr], aux, sub, .. } = &mut self.buf;
         // An inaudible layer still ramps its gain, then is silenced.
         let silence = (!layer.audible).then_some(Silence::AfterGain);
-        let strip = Strip { fx: &mut layer.fx, sends: &mut layer.sends, aux_rows: &layer.aux, gain: &layer.gain, pan: &layer.pan, mix: &mut layer.mix, route: layer.route, silence };
+        // v1 pans once, at the layer, by the closing voice's Pan lane [re:f87c3f].
+        let pan_lane = dreist_dsp::rules::get().pan_v1.then(|| self.voices[vi].voice.lanes()[dreist_dsp::voice::lane::PAN]);
+        let strip = Strip { fx: &mut layer.fx, sends: &mut layer.sends, aux_rows: &layer.aux, gain: &layer.gain, pan: &layer.pan, mix: &mut layer.mix, route: layer.route, silence, pan_lane };
         let acc = &mut self.meters.layer[(s.engine as usize * TRACKS + s.pad as usize) * LAYERS + s.layer as usize];
         mix_strip(strip, &ctx, m, None, pre, [l, r], Some([pl, pr]), aux, sub, [out_l, out_r], acc);
         self.end_stage(vi, 0);
@@ -2336,7 +2367,7 @@ impl Dreist {
         let pad = &mut self.engines[s.engine as usize].pads[s.pad as usize];
         let Buffers { pad: [l, r], engine: [el, er], aux, sub, .. } = &mut self.buf;
         let silence = pad.muted.then_some(Silence::InsteadOfGain);
-        let strip = Strip { fx: &mut pad.fx, sends: &mut pad.sends, aux_rows: &pad.aux, gain: &pad.gain, pan: &pad.pan, mix: &mut pad.mix, route: pad.route, silence };
+        let strip = Strip { fx: &mut pad.fx, sends: &mut pad.sends, aux_rows: &pad.aux, gain: &pad.gain, pan: &pad.pan, mix: &mut pad.mix, route: pad.route, silence, pan_lane: None };
         let acc = &mut self.meters.pad[s.engine as usize * TRACKS + s.pad as usize];
         mix_strip(strip, &ctx, m, lanes.as_ref().map(|l| &l[..]), pre, [l, r], Some([el, er]), aux, sub, [out_l, out_r], acc);
         self.end_stage(vi, 1);
@@ -2348,7 +2379,7 @@ impl Dreist {
         let eng = &mut self.engines[s.engine as usize];
         let Buffers { engine: [l, r], aux, sub, .. } = &mut self.buf;
         let silence = eng.muted.then_some(Silence::InsteadOfGain);
-        let strip = Strip { fx: &mut eng.fx, sends: &mut eng.sends, aux_rows: &eng.aux, gain: &eng.gain, pan: &eng.pan, mix: &mut eng.mix, route: eng.route, silence };
+        let strip = Strip { fx: &mut eng.fx, sends: &mut eng.sends, aux_rows: &eng.aux, gain: &eng.gain, pan: &eng.pan, mix: &mut eng.mix, route: eng.route, silence, pan_lane: None };
         mix_strip(strip, &ctx, m, None, pre, [l, r], None, aux, sub, [out_l, out_r], &mut self.meters.engine[s.engine as usize]);
         self.end_stage(vi, 2);
     }
@@ -2382,6 +2413,8 @@ struct Strip<'a> {
     mix: &'a mut Mixable,
     route: Route,
     silence: Option<Silence>,
+    /// The step's Pan lane pushing the pan ([`dreist_dsp::rules::Rules::pan_v1`], layers).
+    pan_lane: Option<f32>,
 }
 
 /// A strip's processing: effects (with the voice's step lanes for pads),
@@ -2406,7 +2439,9 @@ fn mix_strip(
         st.fx.process(ctx, l, r);
     }
     send(st.sends, st.aux_rows, m, [l, r], aux, |k| pre[k]);
-    st.mix.set(param_sum(st.gain, m), param_sum(st.pan, m));
+    let pan = param_sum(st.pan, m);
+    let pan = st.pan_lane.map_or(pan, |l| dreist_dsp::convert::modulate_pos_neg(pan, l));
+    st.mix.set(param_sum(st.gain, m), pan);
     match st.silence {
         None => st.mix.process(l, r),
         Some(Silence::AfterGain) => {
@@ -2714,6 +2749,22 @@ fn load_layer(l: &dreist_formats::Layer, samples: &Path, _sr: f32, audible: bool
 #[cfg(test)]
 mod tests {
     use super::{Dreist, RenderOptions, Route};
+
+    /// v1's send summing: skipped while the last level is 0, then a ramp
+    /// from the last level with the first sample at it.
+    #[test]
+    fn v1_send_ramps_from_the_last_level() {
+        let mut s = super::SendGain { last: 0.0 };
+        let src = [1.0f32; 4];
+        let (mut l, mut r) = ([0.0f32; 4], [0.0f32; 4]);
+        s.process_v1(0.8, [&src, &src], [&mut l, &mut r]);
+        assert_eq!(l, [0.0; 4]);
+        assert_eq!(s.last, 0.8);
+        s.process_v1(0.4, [&src, &src], [&mut l, &mut r]);
+        let want = [0.8, 0.7, 0.6, 0.5];
+        assert!(l.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6), "{l:?}");
+        assert_eq!(r, l);
+    }
 
     /// A looping preview region shorter than the playback step (an 88.2 kHz
     /// file at 44.1 kHz, two frames at the file's end) wraps in place.

@@ -22,11 +22,19 @@ pub struct Rules {
     /// sequencer's layer-selection velocity and ForceLayer included, is
     /// used as stored, and the voice's lanes are not snapped.
     pub lanes_v1: bool,
+    /// The original v1's one-stage pan: the voice does not pan by the
+    /// step's Pan lane; the layer stage pans by the layer pan pushed by the
+    /// Pan lane of the voice that closes the layer group.
+    pub pan_v1: bool,
+    /// The original v1's aux send summing: a send ramps from its last level
+    /// and is skipped while that level is 0 (the target only takes effect
+    /// in the next block).
+    pub sends_v1: bool,
 }
 
 /// The reference behaviour.
 pub const REFERENCE: Rules =
-    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false };
+    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, sends_v1: false };
 
 static RULES: OnceLock<Rules> = OnceLock::new();
 

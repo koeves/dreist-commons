@@ -621,7 +621,8 @@ impl Voice {
 
         // UpdateMixParameters [re:2847ff].
         let g = self.modulated(lp::VOICE_GAIN);
-        let p = modulate_pos_neg(self.modulated(lp::VOICE_PAN), self.lane(lane::PAN));
+        // v1 pans by the Pan lane at the layer instead (`Rules::pan_v1`).
+        let p = if crate::rules::get().pan_v1 { self.modulated(lp::VOICE_PAN) } else { modulate_pos_neg(self.modulated(lp::VOICE_PAN), self.lane(lane::PAN)) };
         self.mix.set(g, p);
     }
 
