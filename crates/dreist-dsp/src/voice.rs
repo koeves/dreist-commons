@@ -172,6 +172,12 @@ pub struct NoteSetup {
     pub file_bpm: f32,
 }
 
+/// [`crate::rules::Rules::reverse_v1`] reads a one-shot or gated note
+/// (not a loop) as the mirror of its forward position.
+fn mirrors(setup: &NoteSetup) -> bool {
+    crate::rules::get().reverse_v1 && setup.playback != PlaybackMode::Looping
+}
+
 /// Neutral graph values used when a note has no step
 /// ([re:265aa1], table [re:672bdd]).
 fn neutral_lane(i: usize) -> f32 {
@@ -198,6 +204,9 @@ struct Playback {
     xfade_exp: f32,
     in_loop: bool,
     reverse: bool,
+    /// [`crate::rules::Rules::reverse_v1`]: the position runs forward and
+    /// the read point mirrors it (`start + end − pos`).
+    mirror: bool,
     pos: f64,
     step: f64,
     base: f64,
@@ -299,6 +308,8 @@ pub struct Voice {
     releasing: bool,
     active: bool,
     cut: Option<(f32, f32)>,
+    /// The block sample a cut fade starts at ([`crate::rules::Rules::end_fade_v1`]).
+    cut_from: usize,
     buf: [Vec<f32>; 4],
     /// Timestretch (Signalsmith substitute for DIRAC), its transpose and
     /// stretch factors, and the host tempo for TracksBPM.
@@ -350,6 +361,7 @@ impl Voice {
             releasing: false,
             active: false,
             cut: None,
+            cut_from: 0,
             buf: std::array::from_fn(|_| Vec::with_capacity(256)),
             stretch: None,
             stretchers: [None, None],
@@ -443,6 +455,10 @@ impl Voice {
         };
         // Parameter update: reverse = layer IsReversed xor step Reverse lane.
         self.pb.reverse = ((self.lane(lane::REVERSE) - 1.0).abs() <= 1e-6) ^ setup.reversed;
+        if mirrors(&setup) {
+            self.pb.mirror = self.pb.reverse;
+            self.pb.reverse = false;
+        }
         self.pb.pos = if self.pb.reverse { self.pb.end.saturating_sub(1) as f64 } else { self.pb.start as f64 };
         self.data = Some(data);
         // InitializeTimeStretch [re:440f34]: Default/Fast instance by TimestretchMode.
@@ -464,6 +480,7 @@ impl Voice {
         self.first_block = true;
         self.releasing = false;
         self.cut = None;
+        self.cut_from = 0;
         self.active = true;
         self.update_parameters(0);
     }
@@ -476,6 +493,14 @@ impl Voice {
             if param < LAYER_PARAMS && source < SOURCES {
                 s.layer[param][source] = value;
             }
+        }
+    }
+
+    /// The layer's live `IsReversed` (read every block under
+    /// [`crate::rules::Rules::reverse_v1`]).
+    pub fn set_reversed(&mut self, on: bool) {
+        if let Some(s) = self.setup.as_mut() {
+            s.reversed = on;
         }
     }
 
@@ -498,8 +523,14 @@ impl Voice {
             return;
         }
         let len = if 0.0 < len { len } else { 1.0 };
-        let remain = self.pb.frames as f64 - self.pb.pos;
-        let len = if len + self.pb.pos < self.pb.frames as f64 { len } else { remain };
+        let len = if crate::rules::get().end_fade_v1 && !self.pb.reverse {
+            // v1 [re:093661]: up to the end marker, from the position + 2.
+            let over = self.pb.pos + 2.0 + len - self.pb.end as f64;
+            if 0.0 <= over { len - over } else { len }
+        } else {
+            let remain = self.pb.frames as f64 - self.pb.pos;
+            if len + self.pb.pos < self.pb.frames as f64 { len } else { remain }
+        };
         let n = if 0.0 < len { len as i32 - 1 } else { 0 };
         self.cut = Some((1.0, 1.0 / n as f32));
     }
@@ -531,6 +562,12 @@ impl Voice {
             self.update_sample_points();
         }
         self.update_loop_points();
+
+        // v1 [re:18d53d]: the direction follows the live layer every block.
+        if self.setup.as_ref().is_some_and(mirrors) {
+            let rev = self.setup.as_ref().is_some_and(|s| s.reversed);
+            self.pb.mirror = ((self.lane(lane::REVERSE) - 1.0).abs() <= 1e-6) ^ rev;
+        }
 
         // Borrowed field by field (not copied: ~5 KB per block).
         let setup = self.setup.as_ref().expect("voice started");
@@ -747,13 +784,20 @@ impl Voice {
         let data = self.data.take().unwrap();
         let vintage = self.setup.as_ref().unwrap().vintage;
         let mut written = 0;
+        let end_fade_v1 = crate::rules::get().end_fade_v1;
         for i in 0..n {
             let fl = self.pb.pos.floor();
-            let idx = fl as i32;
-            let frac = (self.pb.pos - fl) as f32;
             let end = self.pb.end as i32;
             let start = self.pb.start as i32;
-            let past = if self.pb.reverse { idx < start } else { end < idx };
+            let past = if self.pb.reverse { (fl as i32) < start } else { end < fl as i32 };
+            // The read point: the position, or its mirror in the window.
+            let (fl, frac, rev) = if self.pb.mirror {
+                let m = ((start + end) as f64 - self.pb.pos).max(start as f64);
+                (m.floor(), (m - m.floor()) as f32, true)
+            } else {
+                (fl, (self.pb.pos - fl) as f32, self.pb.reverse)
+            };
+            let idx = fl as i32;
             if past {
                 // ProcessEndFrameCheckWithLoop [re:5ca7d0].
                 if let Some(pp) = self.looping() {
@@ -768,14 +812,14 @@ impl Voice {
             let at = |ch: &[f32], k: i32| ch[k as usize];
             let (mut l, mut r);
             if vintage {
-                let k1 = if self.pb.reverse { (idx - 1).max(start) } else { (idx + 1) % end };
-                let k0 = if self.pb.reverse { idx } else { idx % end };
+                let k1 = if rev { (idx - 1).max(start) } else { (idx + 1) % end };
+                let k0 = if rev { idx } else { idx % end };
                 let a = vintage_tap(at(&data.left, k0), at(&data.left, k1), frac);
                 let b = data.right.as_ref().map(|rd| vintage_tap(at(rd, k0), at(rd, k1), frac));
                 (l, r) = self.sp1200.process(a, b);
             } else {
                 let taps = |ch: &[f32]| -> [f32; 3] {
-                    if self.pb.reverse { [at(ch, idx), at(ch, (idx - 1).max(start)), at(ch, (idx - 2).max(start))] } else { [at(ch, idx % end), at(ch, (idx + 1) % end), at(ch, (idx + 2) % end)] }
+                    if rev { [at(ch, idx), at(ch, (idx - 1).max(start)), at(ch, (idx - 2).max(start))] } else { [at(ch, idx % end), at(ch, (idx + 1) % end), at(ch, (idx + 2) % end)] }
                 };
                 let [a0, a1, a2] = taps(&data.left);
                 l = catmull_rom(self.prev[0], a0, a1, a2, frac);
@@ -802,10 +846,21 @@ impl Voice {
                     self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
                 }
             } else if self.cut.is_none() {
-                // 32-frame fade before the end of a one-shot.
-                let near = if self.pb.reverse { self.pb.pos.floor() < self.pb.start as f64 + 32.0 } else { self.pb.end as f64 - 32.0 <= self.pb.pos.floor() };
+                // 32-frame fade before the end of a one-shot; v1
+                // [re:fece0b] starts it at end ≤ position + 34, from this
+                // sample on.
+                let near = if self.pb.reverse {
+                    self.pb.pos.floor() < self.pb.start as f64 + 32.0
+                } else if end_fade_v1 {
+                    self.pb.end as f64 <= self.pb.pos + 2.0 + 32.0
+                } else {
+                    self.pb.end as f64 - 32.0 <= self.pb.pos.floor()
+                };
                 if near {
                     self.cut(32.0);
+                    if end_fade_v1 && self.stretch.is_none() {
+                        self.cut_from = i;
+                    }
                 }
             }
         }
@@ -841,7 +896,7 @@ impl Voice {
             self.filter.process(&mut a[0][..n], &mut rest[0][..n], 1.0 / n as f32);
         }
         if let Some((mut g, dg)) = self.cut {
-            for i in 0..n {
+            for i in std::mem::take(&mut self.cut_from).min(n)..n {
                 self.buf[2][i] *= g;
                 g -= dg;
                 if g < 0.0 {

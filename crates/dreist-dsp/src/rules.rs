@@ -26,6 +26,14 @@ pub struct Rules {
     /// step's Pan lane; the layer stage pans by the layer pan pushed by the
     /// Pan lane of the voice that closes the layer group.
     pub pan_v1: bool,
+    /// The original v1's reverse: the read position mirrors the forward
+    /// position inside the start/end window, and the direction follows the
+    /// layer's live `IsReversed` (xor the step's Reverse lane) every block.
+    pub reverse_v1: bool,
+    /// The original v1's end fade: it starts 2 frames earlier (end ≤
+    /// position + 34), at the sample that reaches it, and lasts to the end
+    /// marker; cut fades clamp to the end marker too.
+    pub end_fade_v1: bool,
     /// The original v1's aux send summing: a send ramps from its last level
     /// and is skipped while that level is 0 (the target only takes effect
     /// in the next block).
@@ -34,7 +42,7 @@ pub struct Rules {
 
 /// The reference behaviour.
 pub const REFERENCE: Rules =
-    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, sends_v1: false };
+    Rules { sampler_auto_stop_seconds: 0.25, envelope_v1_ends: false, loop_v1: false, lanes_v1: false, pan_v1: false, reverse_v1: false, end_fade_v1: false, sends_v1: false };
 
 static RULES: OnceLock<Rules> = OnceLock::new();
 

@@ -536,6 +536,17 @@ impl Dreist {
                         }
                     }
                 }
+                // v1 reads the layer's reverse status every block [re:18d53d].
+                if m.kind == id::SET_LAYER_REVERSE_STATUS && dreist_dsp::rules::get().reverse_v1 {
+                    for vo in &mut self.voices {
+                        if matches!(vo.state, VoiceState::Pending | VoiceState::Playing) && vo.slot.engine as i32 == e && vo.slot.pad as i32 == p && (l < 0 || vo.slot.layer as i32 == l) {
+                            vo.voice.set_reversed(on);
+                            if let Some((_, s)) = vo.pending.as_mut() {
+                                s.reversed = on;
+                            }
+                        }
+                    }
+                }
             }
             // [re:9ba40d]: index 3 = pattern, 4 =
             // track (pad), 5 = step.
