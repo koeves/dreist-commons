@@ -678,6 +678,21 @@ fn meter(acc: &mut [f32; 2], l: &[f32], r: &[f32]) {
 }
 
 impl Dreist {
+    /// Bytes of decoded sample audio the engine holds, each buffer counted
+    /// once (the master display's memory readout).
+    pub fn sample_bytes(&self) -> u64 {
+        let mut seen = std::collections::HashSet::new();
+        let mut n = 0u64;
+        for l in self.engines.iter().flat_map(|e| &e.pads).flat_map(|p| &p.layers) {
+            if let Some(s) = &l.sample {
+                if seen.insert(Arc::as_ptr(s)) {
+                    n += s.bytes();
+                }
+            }
+        }
+        n
+    }
+
     /// [re:2f3340]: play a sample once at
     /// the preview volume (port: plain resampled playback after the master).
     pub fn start_preview(&mut self, data: Option<Arc<SampleData>>) {

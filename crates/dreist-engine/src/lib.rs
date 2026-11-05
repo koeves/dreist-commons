@@ -11,6 +11,7 @@ pub mod gsa;
 pub mod harness;
 pub mod hold;
 pub mod live;
+pub mod memory;
 pub mod rex;
 // Generated table: kept as written.
 #[rustfmt::skip]

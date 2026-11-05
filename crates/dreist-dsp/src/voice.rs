@@ -129,6 +129,11 @@ pub struct SampleData {
 }
 
 impl SampleData {
+    /// The decoded audio's size in bytes.
+    pub fn bytes(&self) -> u64 {
+        ((self.left.len() + self.right.as_ref().map_or(0, Vec::len)) * std::mem::size_of::<f32>()) as u64
+    }
+
     fn frames(&self) -> u32 {
         self.left.len() as u32
     }
