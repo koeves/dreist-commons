@@ -53,7 +53,10 @@ GitHub Actions minutes are limited, so:
 
 ## Shared code (dreist-commons)
 
-Einst and Dreist share dreist-commons, and each project's agents may be changing it:
+Einst and Dreist share dreist-commons, and each project's agents may be changing it. Read
+`.agents/coordination.md` before touching commons and append an entry to it after every commons
+push (what changed, for which app, whether the other app is affected, the commit, any action
+needed on its side).
 
 - Before changing commons: `git fetch`, rebase on the latest commons `dev`, and check for commits
   or branches you did not make. Never force-push commons.
