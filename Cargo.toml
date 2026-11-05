@@ -42,5 +42,9 @@ baseview = { path = "vendor/baseview" }
 
 # signalsmith-stretch with a fixed phase-randomisation seed
 # (vendor/signalsmith-stretch/src/wrapper.cpp) for reproducible renders.
+# softbuffer whose macOS observer class has a name unique to each copy of
+# the library (vendor/softbuffer/src/backends/cg.rs): two plugins in one
+# host aborted it when the second opened its editor.
 [patch.crates-io]
 signalsmith-stretch = { path = "vendor/signalsmith-stretch" }
+softbuffer = { path = "vendor/softbuffer" }

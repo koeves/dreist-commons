@@ -21,8 +21,17 @@ objc = { version = "0.2", optional = true }
 [features]
 window = ["dep:baseview", "dep:softbuffer", "dep:raw-window-handle", "dep:raw-window-handle-05", "dep:keyboard-types", "dep:objc"]
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc = "0.2"
+raw-window-handle-05 = { package = "raw-window-handle", version = "0.5" }
+
 [[example]]
 name = "skinview"
+required-features = ["window"]
+
+[[test]]
+name = "parented_classes"
+harness = false
 required-features = ["window"]
 
 [lints]
