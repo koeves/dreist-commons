@@ -479,14 +479,14 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                     return;
                 }
                 if m.kind == id::SET_GRAPH_RANDOMISATION {
-                    if let Some(name) = dreist_formats::STEP_LANES.get(vi(1).max(0) as usize) {
+                    if let Some(name) = dreist_formats::params::step_lane_name(vi(1).max(0) as usize) {
                         pat.child_mut_or_insert("Track", &format!("Track{t}")).set(&format!("{name}Rand"), fmt(v(0).clamp(0.0, 1.0)));
                     }
                     return;
                 }
                 if m.kind == id::SET_STEP_GRAPH_STATE {
                     let lane = vi(0).max(0) as usize;
-                    let Some(name) = dreist_formats::STEP_LANES.get(lane) else { return };
+                    let Some(name) = dreist_formats::params::step_lane_name(lane) else { return };
                     if i(5) < 0 {
                         return;
                     }
@@ -497,7 +497,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         x = if x < 0.5 { 0.0 } else { 1.0 };
                     }
                     st.set(name, fmt(x));
-                    if *name == "Repeats" && x != 0.0 {
+                    if name == "Repeats" && x != 0.0 {
                         st.attrs.retain(|(k, _)| k != "LinkToPrevious");
                     }
                     return;
@@ -511,7 +511,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         continue;
                     }
                     if matches!(m.kind, id::CLEAR_TRACK_AUTOMATION | id::CLEAR_ALL_TRACK_AUTOMATION | id::CLEAR_ALL_PATTERN_AUTOMATION) {
-                        let only = (m.kind == id::CLEAR_TRACK_AUTOMATION).then(|| dreist_formats::STEP_LANES.get(vi(0).max(0) as usize).copied()).flatten();
+                        let only = (m.kind == id::CLEAR_TRACK_AUTOMATION).then(|| dreist_formats::params::step_lane_name(vi(0).max(0) as usize)).flatten();
                         for st in tr.children.iter_mut().filter(|c| c.class == "Step") {
                             st.attrs.retain(|(k, _)| k == "State" || only.is_some_and(|o| o != k.as_str()));
                         }
@@ -660,7 +660,7 @@ pub fn write_step(doc: &mut Node, e: usize, pattern: usize, track: usize, step: 
     let tr = pat.child_mut_or_insert("Track", &format!("Track{track}"));
     let node = tr.child_mut_or_insert("Step", &format!("S{step}"));
     node.attrs.clear();
-    for (k, name) in dreist_formats::STEP_LANES.iter().enumerate() {
+    for (k, name) in (0..crate::pattern::LANES).filter_map(|k| dreist_formats::params::step_lane_name(k).map(|n| (k, n))) {
         if (s.lanes[k] - defaults.lanes[k]).abs() > 1e-9 {
             node.set(name, fmt(s.lanes[k]));
         }

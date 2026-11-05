@@ -63,6 +63,8 @@ pub mod lane {
     pub const LOOP_END: usize = 18;
     pub const AMP_ENV: usize = 23;
     pub const FREE_ENV: usize = 31;
+    /// The original v1's routing-depth lanes, one per routing slot.
+    pub const ROUTING_DEPTH: usize = 93;
 }
 
 /// A parameter row at its centre (0.5) with no modulation.
@@ -139,8 +141,9 @@ impl SampleData {
     }
 }
 
-/// A step's 93 graph lane values.
-pub type Lanes = [f32; 93];
+/// A step's graph lane values: the 93 lanes both versions share, then the
+/// original v1's four routing depths ([`lane::ROUTING_DEPTH`]).
+pub type Lanes = [f32; 97];
 
 /// Everything a note needs at start.
 #[derive(Debug, Clone)]
@@ -155,7 +158,7 @@ pub struct NoteSetup {
     pub loop_start: u32,
     pub loop_end: u32,
     pub loop_len: u32,
-    /// Graph lane values of the triggering step (93), or `None` for a live note.
+    /// Graph lane values of the triggering step, or `None` for a live note.
     pub step: Option<Lanes>,
     /// Live-note velocity 0..=127 (`None` = sequenced; then the step's Velocity lane is used).
     pub midi_velocity: Option<u32>,
@@ -179,6 +182,14 @@ pub struct NoteSetup {
     /// the original v1); [`crate::rules::Rules::timestretch_v1`] tracks the
     /// host tempo from the source BPM.
     pub stretch_bpm: Option<(f32, f32)>,
+    /// The original v1's four envelope routings (slot → destination 0
+    /// pitch, 1 cutoff, 2 resonance, 3 drive, and depth 0..1), when the
+    /// layer has them; the voice model reads them with the routing-depth
+    /// lanes.
+    pub routings: Option<[Option<(u8, f32)>; 4]>,
+    /// The triggering step's routing-depth lanes as stored (the filter
+    /// reads these; the pitch reads the step's variants in [`Self::step`]).
+    pub routing_raw: [f32; 4],
 }
 
 /// [`crate::rules::Rules::reverse_v1`] reads a one-shot or gated note
@@ -598,6 +609,8 @@ impl Voice {
                 outer_semitones: outer,
                 semitone_offset: setup.semitone_offset,
                 base: self.pb.base,
+                routings: setup.routings.as_ref(),
+                routing_raw: &setup.routing_raw,
             };
             if !m.update(&input, &mut self.model_out) {
                 model = None;
@@ -992,6 +1005,8 @@ mod tests {
             reversed: false,
             file_bpm: 0.0,
             stretch_bpm: None,
+            routings: None,
+            routing_raw: [0.5; 4],
         }
     }
 

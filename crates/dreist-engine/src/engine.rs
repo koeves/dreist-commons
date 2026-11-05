@@ -2076,6 +2076,9 @@ impl Dreist {
             } else {
                 setup.step = Some(lanes);
             }
+            if !r.live {
+                setup.routing_raw = std::array::from_fn(|k| step.lanes[lane::ROUTING_DEPTH + k]);
+            }
             setup.semitone_offset += r.semitone;
             setup.pad_v2a = v2a;
             // [re:b5f726]: PreDelay in ms, int(1000·v³)
@@ -2740,6 +2743,8 @@ fn load_layer(l: &dreist_formats::Layer, samples: &Path, _sr: f32, audible: bool
             env_tracks: n.bool("EnvTracksPitch").unwrap_or(false),
             file_bpm: sidecar_bpm.unwrap_or_else(|| guess_key_data(s.left.len() as u32, s.sample_rate, path.as_deref()).0),
             stretch_bpm: n.f32("SourceBPM").map(|src| (src, n.f32("DestinationBPM").unwrap_or(120.0))),
+            routings: dreist_formats::legacy::routing_slots(n),
+            routing_raw: [0.5; 4],
         }
     });
     LayerRt {

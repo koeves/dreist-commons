@@ -535,6 +535,8 @@ pub fn step_lane_default(lane: usize) -> f32 {
         0 | 9 | 16 => 1.0,
         2 | 4 | 10 | 13 | 15 => 0.0,
         1 | 3 | 5..=8 | 11 | 12 | 14 | 17..=38 => 0.5,
+        // v1's routing depths: neutral.
+        V1_ROUTING_LANE..LANE_COUNT => 0.5,
         // Per FX slot: Active 0, everything else 1.
         39..=92 => {
             if (lane - 39).is_multiple_of(9) {
@@ -547,9 +549,21 @@ pub fn step_lane_default(lane: usize) -> f32 {
     }
 }
 
+/// The first of the original v1's four routing-depth lanes, after the 93
+/// lanes both versions share (see [`crate::legacy::ROUTING_DEPTH_LANES`]).
+pub const V1_ROUTING_LANE: usize = STEP_LANES.len();
+
+/// Every step lane: the shared ones and v1's routing depths.
+pub const LANE_COUNT: usize = V1_ROUTING_LANE + 4;
+
+/// A step lane's attribute name (shared lanes, then v1's routing depths).
+pub fn step_lane_name(lane: usize) -> Option<&'static str> {
+    STEP_LANES.get(lane).or_else(|| crate::legacy::ROUTING_DEPTH_LANES.get(lane.wrapping_sub(V1_ROUTING_LANE))).copied()
+}
+
 pub fn step_lane_index(name: &str) -> Option<usize> {
     static INDEX: std::sync::OnceLock<std::collections::HashMap<&'static str, usize>> = std::sync::OnceLock::new();
-    INDEX.get_or_init(|| STEP_LANES.iter().enumerate().map(|(i, l)| (*l, i)).collect()).get(name).copied()
+    INDEX.get_or_init(|| (0..LANE_COUNT).filter_map(|i| step_lane_name(i).map(|n| (n, i))).collect()).get(name).copied()
 }
 
 /// [re:9c4e55] (table [re:af5cce]): number of discrete values a

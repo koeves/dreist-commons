@@ -2,10 +2,12 @@
 //! [re:9f001e]). See the dreist-re sequencer notes.
 
 use dreist_formats::Node;
-use dreist_formats::params::{STEP_LANES, step_lane_default, step_lane_index};
+use dreist_formats::params::{step_lane_default, step_lane_index};
 
 /// Number of step graph lanes.
-pub const LANES: usize = 93;
+/// Every step lane: the 93 both versions share and the original v1's
+/// four routing depths ([`dreist_formats::params::LANE_COUNT`]).
+pub const LANES: usize = dreist_formats::params::LANE_COUNT;
 /// Tracks per pattern (= pads per engine).
 pub const TRACKS: usize = 64;
 /// Patterns per engine.
@@ -20,6 +22,8 @@ pub mod lane {
     pub const LINK: usize = 10;
     pub const FORCE_LAYER: usize = 15;
     pub const PROBABILITY: usize = 16;
+    /// The original v1's routing-depth lanes (one per routing slot).
+    pub const ROUTING_DEPTH: usize = dreist_formats::params::V1_ROUTING_LANE;
 }
 
 /// Pattern `Resolution`: names registered at startup ([re:58734c]),
@@ -159,7 +163,7 @@ pub struct PatternData {
 /// that parses as a number (the first attribute of each lane only, as
 /// `Node::f32` reads it).
 fn for_lanes(n: &Node, lane: impl Fn(&str) -> Option<usize>, mut set: impl FnMut(usize, f32)) {
-    let mut seen = [false; STEP_LANES.len()];
+    let mut seen = [false; LANES];
     for (k, v) in &n.attrs {
         if let Some(l) = lane(k).filter(|l| !std::mem::replace(&mut seen[*l], true)) {
             if let Ok(v) = v.parse() {
@@ -284,15 +288,17 @@ pub fn randomised(value: f32, amount: f32, rand: &mut impl FnMut() -> f32) -> f3
 
 /// The lanes the original v1 passes through its lane variant at note start
 /// ([re:bef782], [re:ab179d], [re:3f302e], [re:3b0509]): Velocity, Pan,
-/// Repeats, Reverse, the two pitch lanes, StartPoint and the four filter
-/// lanes. Every other lane is used as stored (no randomisation).
-pub const V1_VARIANT_LANES: [usize; 11] = [0, 1, 2, 4, 6, 7, 8, 11, 12, 13, 14];
+/// Repeats, Reverse, the two pitch lanes, StartPoint, the four filter
+/// lanes and the four routing depths (`SetupNoteOnParameters` reads v1's
+/// lanes 19–22 through it). Every other lane is used as stored (no
+/// randomisation).
+pub const V1_VARIANT_LANES: [usize; 15] = [0, 1, 2, 4, 6, 7, 8, 11, 12, 13, 14, 93, 94, 95, 96];
 
 /// The original v1's compression target of a lane ([re:0d76e5]):
 /// 0.5 for the bipolar lanes (Pan, Shift, the pitch lanes, StartPoint,
 /// cutoff, resonance, drive and the sends), 1 for the rest.
 pub fn compression_target_v1(lane: usize) -> f32 {
-    if matches!(lane, 1 | 3 | 6 | 7 | 8 | 11 | 12 | 14 | 19..=22) { 0.5 } else { 1.0 }
+    if matches!(lane, 1 | 3 | 6 | 7 | 8 | 11 | 12 | 14 | 19..=22 | 93..=96) { 0.5 } else { 1.0 }
 }
 
 /// The original v1's lane value at note start ([re:51afe0]): the track's
@@ -612,6 +618,20 @@ mod tests {
         assert_eq!(d.tracks[2].scale[0], 0.5);
     }
 
+    /// The original v1's routing-depth lanes load after the shared ones
+    /// and stay neutral unless a step sets them.
+    #[test]
+    fn routing_depth_lanes_load() {
+        const _: () = assert!(LANES == std::mem::size_of::<dreist_dsp::voice::Lanes>() / 4);
+        let p = Node::parse(r#"<StepPattern name="StepPattern0" PatternSteps="4"><Track name="Track0" Ampenvdepth2Rand="0.75"><Step name="S1" State="true" Ampenvdepth2="0.8" Freeenvdepth1="0.2" /></Track></StepPattern>"#).unwrap();
+        let d = PatternData::from_node(&p);
+        let t = &d.tracks[0];
+        assert_eq!(t.step(1).lanes[lane::ROUTING_DEPTH..lane::ROUTING_DEPTH + 4], [0.5, 0.8, 0.2, 0.5]);
+        assert_eq!(t.step(0).lanes[lane::ROUTING_DEPTH + 1], 0.5);
+        assert_eq!(t.rand[lane::ROUTING_DEPTH + 1], 0.75);
+        assert!(V1_VARIANT_LANES.contains(&(lane::ROUTING_DEPTH + 3)));
+    }
+
     #[test]
     fn randomisation_is_identity_at_half() {
         let mut r = || 0.7;
@@ -623,7 +643,7 @@ mod tests {
 
     #[test]
     fn snapped_lanes_follow_set_graph_status() {
-        let mut l = [0.0f32; 93];
+        let mut l = [0.0f32; LANES];
         l[4] = 0.62;
         l[lane::LINK] = 1.0;
         l[lane::REPEATS] = 0.3;
@@ -632,7 +652,7 @@ mod tests {
         assert_eq!(l[4], 1.0);
         assert_eq!(l[lane::LINK], 0.0);
         assert_eq!(l[lane::VELOCITY], 1.0);
-        let mut l = [0.0f32; 93];
+        let mut l = [0.0f32; LANES];
         l[4] = 0.49;
         snap_lanes(&mut l);
         assert_eq!(l[4], 0.0);

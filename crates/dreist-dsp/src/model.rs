@@ -24,6 +24,10 @@ pub struct ModelInput<'a> {
     pub semitone_offset: f64,
     /// The step at 0 semitones (file rate / output rate).
     pub base: f64,
+    /// The original v1's routing slots and the step's stored routing-depth
+    /// lanes (see [`crate::voice::NoteSetup::routings`]).
+    pub routings: Option<&'a [Option<(u8, f32)>; 4]>,
+    pub routing_raw: &'a [f32; 4],
 }
 
 #[derive(Default)]
