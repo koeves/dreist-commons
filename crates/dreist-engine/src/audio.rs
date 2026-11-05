@@ -140,6 +140,14 @@ impl SampleCache {
         bpm
     }
 
+    /// Forget `paths`: the next lookup reads them from disk again (a
+    /// file changed outside the app).
+    pub fn forget(&mut self, paths: &[PathBuf]) {
+        for p in paths {
+            self.files.remove(p);
+        }
+    }
+
     /// Forget samples nothing else holds any more and failed lookups (a
     /// file may have appeared since; its error is reported again).
     pub fn prune(&mut self) {
@@ -151,6 +159,14 @@ impl SampleCache {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn forgotten_samples_load_again() {
+        let mut c = SampleCache::default();
+        c.files.insert("a".into(), Some(Arc::new(SampleData { left: vec![0.0; 4], right: None, sample_rate: 44100.0 })));
+        c.forget(&["a".into()]);
+        assert!(!c.files.contains_key(Path::new("a")));
+    }
 
     #[test]
     fn prune_keeps_samples_in_use() {
