@@ -27,3 +27,12 @@
 Dreist and Einst include this repository as a submodule at `commons`. A change here reaches
 them when they bump the submodule (`build: dreist-commons ...`); behaviour changes for one app
 belong behind a hook, with the defaults unchanged.
+
+## Worktrees and cleanup
+
+- Worktrees go next to the repository or in a scratch folder, never inside a checkout: the
+  bundler builds the outermost workspace it finds, so a nested worktree bundles the outer
+  checkout's code.
+- Remove a worktree and its local branch once the branch is merged.
+- When a task ends, delete what it built and no longer needs: `target/` directories
+  (`cargo clean`), scratch builds, test copies and downloads. Keep only what is still in use.
