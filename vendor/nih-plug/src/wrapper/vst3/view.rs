@@ -14,6 +14,7 @@ use super::inner::{Task, WrapperInner};
 use super::util::{ObjectPtr, VstPtr};
 use crate::plugin::vst3::Vst3Plugin;
 use crate::prelude::{Editor, ParentWindowHandle};
+use crate::wrapper::util::catch_gui_panic;
 
 // Alias needed for the VST3 attribute macro
 use vst3_sys as vst3_com;
@@ -282,52 +283,60 @@ impl<P: Vst3Plugin> IPlugView for WrapperView<P> {
     }
 
     unsafe fn attached(&self, parent: *mut c_void, type_: vst3_sys::base::FIDString) -> tresult {
-        let mut editor_handle = self.editor_handle.write();
-        if editor_handle.is_none() {
-            let type_ = CStr::from_ptr(type_);
-            let parent_handle = match type_.to_str() {
-                Ok(type_) if type_ == VST3_PLATFORM_X11_WINDOW => {
-                    ParentWindowHandle::X11Window(parent as usize as u32)
-                }
-                Ok(type_) if type_ == VST3_PLATFORM_NSVIEW => {
-                    ParentWindowHandle::AppKitNsView(parent)
-                }
-                Ok(type_) if type_ == VST3_PLATFORM_HWND => ParentWindowHandle::Win32Hwnd(parent),
-                _ => {
-                    nih_debug_assert_failure!("Unknown window handle type: {:?}", type_);
-                    return kInvalidArgument;
-                }
-            };
+        catch_gui_panic("IPlugView::attached", kResultFalse, || {
+            let mut editor_handle = self.editor_handle.write();
+            if editor_handle.is_none() {
+                let type_ = CStr::from_ptr(type_);
+                let parent_handle = match type_.to_str() {
+                    Ok(type_) if type_ == VST3_PLATFORM_X11_WINDOW => {
+                        ParentWindowHandle::X11Window(parent as usize as u32)
+                    }
+                    Ok(type_) if type_ == VST3_PLATFORM_NSVIEW => {
+                        ParentWindowHandle::AppKitNsView(parent)
+                    }
+                    Ok(type_) if type_ == VST3_PLATFORM_HWND => {
+                        ParentWindowHandle::Win32Hwnd(parent)
+                    }
+                    _ => {
+                        nih_debug_assert_failure!("Unknown window handle type: {:?}", type_);
+                        return kInvalidArgument;
+                    }
+                };
 
-            *editor_handle = Some(
-                self.editor
-                    .lock()
-                    .spawn(parent_handle, self.inner.clone().make_gui_context()),
-            );
-            *self.inner.plug_view.write() = Some(ObjectPtr::from(self));
+                *editor_handle = Some(
+                    self.editor
+                        .lock()
+                        .spawn(parent_handle, self.inner.clone().make_gui_context()),
+                );
+                *self.inner.plug_view.write() = Some(ObjectPtr::from(self));
 
-            kResultOk
-        } else {
-            nih_debug_assert_failure!(
-                "Host tried to attach editor while the editor is already attached"
-            );
+                kResultOk
+            } else {
+                nih_debug_assert_failure!(
+                    "Host tried to attach editor while the editor is already attached"
+                );
 
-            kResultFalse
-        }
+                kResultFalse
+            }
+        })
     }
 
     unsafe fn removed(&self) -> tresult {
-        let mut editor_handle = self.editor_handle.write();
-        if editor_handle.is_some() {
-            *self.inner.plug_view.write() = None;
-            *editor_handle = None;
+        catch_gui_panic("IPlugView::removed", kResultFalse, || {
+            let mut editor_handle = self.editor_handle.write();
+            if editor_handle.is_some() {
+                *self.inner.plug_view.write() = None;
+                *editor_handle = None;
 
-            kResultOk
-        } else {
-            nih_debug_assert_failure!("Host tried to remove the editor without an active editor");
+                kResultOk
+            } else {
+                nih_debug_assert_failure!(
+                    "Host tried to remove the editor without an active editor"
+                );
 
-            kResultFalse
-        }
+                kResultFalse
+            }
+        })
     }
 
     unsafe fn on_wheel(&self, _distance: f32) -> tresult {

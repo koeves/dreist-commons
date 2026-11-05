@@ -93,7 +93,8 @@ use crate::wrapper::clap::util::{read_stream, read_stream_exact, write_stream};
 use crate::wrapper::state::{self, PluginState};
 use crate::wrapper::util::buffer_management::{BufferManager, ChannelPointers};
 use crate::wrapper::util::{
-    clamp_input_event_timing, clamp_output_event_timing, hash_param_id, process_wrapper, strlcpy,
+    catch_gui_panic, clamp_input_event_timing, clamp_output_event_timing, hash_param_id,
+    process_wrapper, strlcpy,
 };
 
 /// How many output parameter changes we can store in our output parameter change queue. Storing
@@ -2664,12 +2665,16 @@ impl<P: ClapPlugin> Wrapper<P> {
         check_null_ptr!((), plugin, (*plugin).plugin_data);
         let wrapper = &*((*plugin).plugin_data as *const Self);
 
-        let mut editor_handle = wrapper.editor_handle.lock();
-        if editor_handle.is_some() {
-            *editor_handle = None;
-        } else {
-            nih_debug_assert_failure!("Tried destroying editor while the editor was not active");
-        }
+        catch_gui_panic("clap_plugin_gui::destroy", (), || {
+            let mut editor_handle = wrapper.editor_handle.lock();
+            if editor_handle.is_some() {
+                *editor_handle = None;
+            } else {
+                nih_debug_assert_failure!(
+                    "Tried destroying editor while the editor was not active"
+                );
+            }
+        })
     }
 
     unsafe extern "C" fn ext_gui_set_scale(plugin: *const clap_plugin, scale: f64) -> bool {
@@ -2772,7 +2777,9 @@ impl<P: ClapPlugin> Wrapper<P> {
 
         let window = &*window;
 
-        let result = {
+        // A panic must not drop `wrapper` (the host's reference) on the way out, so it is caught
+        // here and the Arc is leaked again below either way.
+        let result = catch_gui_panic("clap_plugin_gui::set_parent", false, || {
             let mut editor_handle = wrapper.editor_handle.lock();
             if editor_handle.is_none() {
                 let api = CStr::from_ptr(window.api);
@@ -2806,7 +2813,7 @@ impl<P: ClapPlugin> Wrapper<P> {
 
                 false
             }
-        };
+        });
 
         // Leak the Arc again since we only needed a clone to pass to the GuiContext
         let _ = Arc::into_raw(wrapper);

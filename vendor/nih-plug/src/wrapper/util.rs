@@ -36,6 +36,25 @@ compile_error!("The 'assert_process_allocs' feature does not work correctly in c
 #[global_allocator]
 static A: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
+/// Run the body of a host->plugin GUI call (opening or closing the editor), returning `fallback`
+/// if it panics. These calls come in through `extern "C"` functions, where an unwinding panic
+/// aborts the whole host; a failed editor is the lesser evil. The panic itself has already been
+/// logged by the panic hook.
+pub fn catch_gui_panic<T>(call: &str, fallback: T, f: impl FnOnce() -> T) -> T {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(value) => value,
+        Err(payload) => {
+            let msg = payload
+                .downcast_ref::<&'static str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("Box<Any>");
+            nih_error!("{call} failed, the editor panicked: {msg}");
+            fallback
+        }
+    }
+}
+
 /// A Rabin fingerprint based string hash for parameter ID strings.
 pub fn hash_param_id(id: &str) -> u32 {
     let mut hash: u32 = 0;
