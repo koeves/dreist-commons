@@ -11,6 +11,8 @@ pub mod dragout;
 pub mod menu;
 pub mod menubar;
 pub mod meter;
+#[cfg(all(feature = "window", target_os = "macos"))]
+mod objc_class;
 pub mod paint;
 pub mod render;
 pub mod skin;
