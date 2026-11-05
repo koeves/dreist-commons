@@ -42,5 +42,7 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   and goldens are unchanged. **Dreist action:** lane menus must list `STEP_LANES.len()` (93), not
   `pattern::LANES` (done in Dreist 7ccd003).
 - 217d77e: docs (shared-code coordination rule). No code.
+- a09a64c: `SampleCache::forget` (Einst reloads samples changed on disk). Additive; Dreist
+  unaffected, nothing to do.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
