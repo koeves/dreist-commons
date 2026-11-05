@@ -19,6 +19,7 @@ pub mod metronome;
 pub mod midifile;
 pub mod modulation;
 pub mod pattern;
+pub mod preview;
 pub mod sampler;
 pub mod scene;
 pub mod sequencer;

@@ -26,6 +26,12 @@ impl std::error::Error for LoadError {}
 
 /// Decode a whole file to de-interleaved f32 (integer PCM scaled by 2^-(bits-1)).
 pub fn load(path: &Path) -> Result<SampleData, LoadError> {
+    load_unless(path, &|| false)
+}
+
+/// [`load`], giving up (with an error) between packets once `cancelled`
+/// returns true.
+pub fn load_unless(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<SampleData, LoadError> {
     let err = |e: &dyn std::fmt::Display| LoadError(format!("{}: {e}", path.display()));
     // REX loops through the helper ([re:e1396a]).
     if crate::rex::is_rex(path) {
@@ -47,6 +53,9 @@ pub fn load(path: &Path) -> Result<SampleData, LoadError> {
     let mut channels = 0usize;
     let mut interleaved: Vec<f32> = Vec::new();
     loop {
+        if cancelled() {
+            return Err(err(&"cancelled"));
+        }
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
