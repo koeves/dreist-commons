@@ -1,33 +1,33 @@
 //! [re:6b287b] iconic (folded) state.
 //!
-//! - `Serialize` [re:a2a347]: `intIconicDim` (default 20), `intNonIconicDim`
-//!   (default −1), `iconicTarget` (`StringToAxisResizeEdge`, map built
+//! - Loading [re:a2a347]: `intIconicDim` (default 20), `intNonIconicDim`
+//!   (default −1), `iconicTarget` (edge names, map built
 //!   from "Top, Left, Bottom, Right": ARTop 0, ARLeft 1, ARBottom 2,
 //!   ARRight 3; default 1).
-//! - `SetRect` [re:09048a]: the header strip is (0, 0, width, iconic dim);
+//! - Setting the rect [re:09048a]: the header strip is (0, 0, width, iconic dim);
 //!   for a left / right target in the iconic state it is (0, 0, iconic dim,
 //!   height).
-//! - `OnMouseLButtonDblClick` [re:b38b90]: a double click on the panel itself
+//! - Double click [re:b38b90]: a double click on the panel itself
 //!   (no child under the pointer) inside the header toggles the state with
-//!   `SetIconicStateAnimated(!iconic, 375 ms, Logarithmic)`.
-//! - `SetIconicStateAnimated` [re:50c370]: folding first stores the current
+//!   an animated change to !iconic (375 ms, Logarithmic).
+//! - Animated change [re:50c370]: folding first stores the current
 //!   height (top / bottom) or width (left / right) as the non-iconic dim;
 //!   then the start notification (collapse start, or expand start when
-//!   iconic) and `SetRectAnimated` to the rect with that axis = iconic dim
-//!   (folding) or the non-iconic dim. The end lambda sets the state and
-//!   sends collapse end / expand end (as `SetIconicState` [re:16d952], which
+//!   iconic) and an animated rect change to the rect with that axis = iconic dim
+//!   (folding) or the non-iconic dim. At the end it sets the state and
+//!   sends collapse end / expand end (as the plain state change [re:16d952], which
 //!   does the same without animating).
 //! - [re:54085c]: linear t += dt / duration
 //!   (clamped), v = curve(t), rect = start + floor((target − start)·v);
 //!   [re:24335c] is powf(t, 10).
 //! - The containers that stack these panels ([re:efb170] LayerParams,
-//!   [re:6929fb], [re:8b43ec] $_0) re-stack on the
-//!   panel's rect-changed event [re:91eddf] (vfunc 0x370
-//!   `UpdateChildRects`): see [`restack`].
+//!   [re:6929fb], [re:8b43ec]) re-stack on the
+//!   panel's rect-changed event [re:91eddf] (updating
+//!   their child rects): see [`restack`].
 
 use crate::ctrl::{Ctrl, Rect};
 
-/// `SetIconicStateAnimated` duration (0x43bb8000).
+/// Animated fold duration (0x43bb8000).
 pub const ANIM_MS: f32 = 375.0;
 
 /// `iconicTarget`: 0 top, 1 left, 2 bottom, 3 right, 4 unknown.
@@ -50,7 +50,7 @@ pub fn is_iconic(c: &Ctrl) -> bool {
     c.attr("iconic") == Some("1")
 }
 
-/// The header strip (`SetRect`).
+/// The header strip.
 pub fn header(c: &Ctrl) -> Rect {
     let d = iconic_dim(c);
     match edge(c) {
@@ -70,7 +70,7 @@ pub fn vertical_text(c: &Ctrl) -> bool {
 pub fn target_rect(c: &Ctrl, iconic: bool) -> Rect {
     let mut r = c.rect;
     let full = c.attr_i32("nonIconicDim", c.attr_i32("intNonIconicDim", -1));
-    // Folded at load (`SetIconicState(true)` stores nothing): expand to the
+    // Folded at load (folding without animation stores nothing): expand to the
     // skin's size rather than the original's −1.
     let full = if full < 0 { c.attr_i32("skinDim", full) } else { full };
     let dim = if iconic { iconic_dim(c) } else { full };
@@ -97,7 +97,7 @@ pub fn store_full(c: &mut Ctrl) {
     }
 }
 
-/// `SetIconicState`: jump to `iconic` without animating.
+/// Jump to `iconic` without animating.
 pub fn set_iconic(c: &mut Ctrl, iconic: bool) {
     if c.attr("skinDim").is_none() {
         let d = if matches!(edge(c), 0 | 2) { c.rect.h } else { c.rect.w };
@@ -108,7 +108,7 @@ pub fn set_iconic(c: &mut Ctrl, iconic: bool) {
     c.set_rect(r);
 }
 
-/// `Logarithmic` curve.
+/// Logarithmic curve.
 pub fn curve(t: f32) -> f32 {
     t.clamp(0.0, 1.0).powf(10.0)
 }
@@ -193,7 +193,7 @@ pub enum AnimEnd {
     Tag(u32),
 }
 
-/// A running `Ctrl::SetRectAnimated`.
+/// A running animated rect change.
 #[derive(Clone, Debug)]
 pub struct Anim {
     pub path: Vec<usize>,

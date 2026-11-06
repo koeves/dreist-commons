@@ -1,4 +1,4 @@
-// Generated from the v2 engine binary ([re:8a3887] ratio curves,
+// Generated from the original ([re:8a3887] ratio curves,
 // [re:3cb1f5]..[re:d83262]): gain-computer transfer tables indexed by
 // `600 − 100·|x|`, as f32 bit patterns. Order: ideal 2/4/10, clip 2/4/10.
 #[rustfmt::skip]

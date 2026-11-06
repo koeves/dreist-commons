@@ -1,4 +1,4 @@
-//! [re:6846b4] gain/pan (`ProcessLinearGain` [re:c4a00e] / [re:2e5cc9]).
+//! [re:6846b4] gain/pan (linear-gain processing [re:c4a00e] / [re:2e5cc9]).
 
 use crate::convert::gain_to_amp;
 
@@ -38,14 +38,14 @@ impl Mixable {
         self.last_pan = old.last_pan;
     }
 
-    /// [re:61f794] / `SetPan` clamp to `0..=1`.
+    /// [re:61f794] / the pan setter clamp to `0..=1`.
     pub fn set(&mut self, gain: f32, pan: f32) {
         self.gain = gain.clamp(0.0, 1.0);
         self.pan = pan.clamp(0.0, 1.0);
     }
 
     /// Stereo in place: ramps `last → target` across the block, then
-    /// `ResetLastGain`/`ResetLastPan` (the voice calls both after processing).
+    /// resets the last gain and pan to them (the voice does both after processing).
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         let n = left.len();
         let (mut g, mut p) = (self.last_gain, self.last_pan);

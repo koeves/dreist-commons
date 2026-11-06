@@ -1,8 +1,8 @@
 //! One playing layer: [re:7914d6] ([re:b7314b] .. [re:da5301]) without the
 //! voice-manager, step-sequencer and effect plumbing. The caller supplies the
 //! layer's parameter matrix, the step's lane values and the transmod source
-//! values; this module does everything from `SetupVoiceForPlayback` to
-//! `ProcessOutputs`.
+//! values; this module does everything from the voice setup for playback to
+//! the output stage.
 
 use crate::convert::{cutoff_with_velocity, filter_type_from_step, fine_semitones, modulate_pos_neg, octave, semitones};
 use crate::envelope::{AhrEnvelope, Envelope, EnvelopeParams};
@@ -17,8 +17,8 @@ pub const SOURCES: usize = 29;
 /// Number of Layer parameters.
 pub const LAYER_PARAMS: usize = 42;
 
-/// Layer parameter indices used here (`Layer::LayerParameters`).
-mod lp {
+/// Layer parameter indices used here (layer parameter enum order).
+pub mod lp {
     pub const VOICE_GAIN: usize = 2;
     pub const VOICE_PAN: usize = 3;
     pub const OCTAVE: usize = 4;
@@ -46,8 +46,8 @@ mod lp {
     pub const TS_MODE: usize = 41;
 }
 
-/// Step lanes the voice reads (`Step::StepGraphItems`).
-mod lane {
+/// Step lanes the voice reads (step graph lanes).
+pub mod lane {
     pub const VELOCITY: usize = 0;
     pub const PAN: usize = 1;
     pub const REVERSE: usize = 4;
@@ -63,6 +63,8 @@ mod lane {
     pub const LOOP_END: usize = 18;
     pub const AMP_ENV: usize = 23;
     pub const FREE_ENV: usize = 31;
+    /// The original v1's routing-depth lanes, one per routing slot.
+    pub const ROUTING_DEPTH: usize = 93;
 }
 
 /// A parameter row at its centre (0.5) with no modulation.
@@ -72,7 +74,7 @@ pub fn centre_row() -> [f32; SOURCES] {
     r
 }
 
-/// `VectorParameterSum`: Σ row·M clamped to 0..1 (the base value alone when
+/// Parameter vector sum: Σ row·M clamped to 0..1 (the base value alone when
 /// nothing modulates it).
 fn row_sum(row: &[f32; SOURCES], m: &[f32; SOURCES]) -> f32 {
     if row[1..].iter().all(|d| *d == 0.0) {
@@ -81,7 +83,7 @@ fn row_sum(row: &[f32; SOURCES], m: &[f32; SOURCES]) -> f32 {
     row.iter().zip(m).map(|(a, b)| a * b).sum::<f32>().clamp(0.0, 1.0)
 }
 
-/// `LayerPlaybackMode`.
+/// Layer playback mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackMode {
     OneShot,
@@ -90,9 +92,9 @@ pub enum PlaybackMode {
     Looping,
 }
 
-/// `Layer` playback mode enum names (`CreateLayerPlaybackModeMap`), by index.
+/// `Layer` playback mode enum names, by index.
 pub const PLAYBACK_MODE_NAMES: [&str; 4] = ["OneShot", "OneShotLengthBound", "Gated", "Looping"];
-/// Display names (`ReplaceLayerPlaybackMode` in [re:c38326]).
+/// Display names (replaced in [re:c38326]).
 /// The replacement rewrites the map [re:87acba] uses, so these are
 /// also the names stored in files.
 pub const PLAYBACK_MODE_LABELS: [&str; 4] = ["One shot", "Length bound", "Gated", "Looping"];
@@ -129,13 +131,19 @@ pub struct SampleData {
 }
 
 impl SampleData {
+    /// The decoded audio's size in bytes.
+    pub fn bytes(&self) -> u64 {
+        ((self.left.len() + self.right.as_ref().map_or(0, Vec::len)) * std::mem::size_of::<f32>()) as u64
+    }
+
     fn frames(&self) -> u32 {
         self.left.len() as u32
     }
 }
 
-/// A step's 93 graph lane values.
-pub type Lanes = [f32; 93];
+/// A step's graph lane values: the 93 lanes both versions share, then the
+/// original v1's four routing depths ([`lane::ROUTING_DEPTH`]).
+pub type Lanes = [f32; 97];
 
 /// Everything a note needs at start.
 #[derive(Debug, Clone)]
@@ -150,7 +158,7 @@ pub struct NoteSetup {
     pub loop_start: u32,
     pub loop_end: u32,
     pub loop_len: u32,
-    /// Graph lane values of the triggering step (93), or `None` for a live note.
+    /// Graph lane values of the triggering step, or `None` for a live note.
     pub step: Option<Lanes>,
     /// Live-note velocity 0..=127 (`None` = sequenced; then the step's Velocity lane is used).
     pub midi_velocity: Option<u32>,
@@ -158,18 +166,36 @@ pub struct NoteSetup {
     pub pad_v2a: f32,
     /// Extra semitones from the caller (global tuning / note offset).
     pub semitone_offset: f64,
-    /// Layer per-voice output scalar (`layer + 0x368`, 1.0 unless set).
+    /// Layer per-voice output scalar (1.0 unless set).
     pub output_scale: f32,
     /// Layer `IsReversed`; XORed with the step's Reverse lane.
     pub reversed: bool,
-    /// Layer `EnvTracksPitch` (`+0x4ea`, Env Mode "Track Pitch"): the
+    /// Layer `EnvTracksPitch` (Env Mode "Track Pitch"): the
     /// (non-AHR) envelopes run at the playback rate ([re:97a3c3]
     /// [re:c43a03]: rate = 1 / (1 / step), or the timestretch factor's
     /// inverse).
     pub env_tracks: bool,
     /// Sample tempo for TracksBPM timestretch (`.gsa` metadata BPM, else
-    /// `GuessBPMFromAudioBuffer`; 0 when no guess fits).
+    /// the BPM guessed from the audio; 0 when no guess fits).
     pub file_bpm: f32,
+    /// The layer's stored `SourceBPM` and `DestinationBPM` (documents of
+    /// the original v1); [`crate::rules::Rules::timestretch_v1`] tracks the
+    /// host tempo from the source BPM.
+    pub stretch_bpm: Option<(f32, f32)>,
+    /// The original v1's four envelope routings (slot → destination 0
+    /// pitch, 1 cutoff, 2 resonance, 3 drive, and depth 0..1), when the
+    /// layer has them; the voice model reads them with the routing-depth
+    /// lanes.
+    pub routings: Option<[Option<(u8, f32)>; 4]>,
+    /// The triggering step's routing-depth lanes as stored (the filter
+    /// reads these; the pitch reads the step's variants in [`Self::step`]).
+    pub routing_raw: [f32; 4],
+}
+
+/// [`crate::rules::Rules::reverse_v1`] reads a one-shot or gated note
+/// (not a loop) as the mirror of its forward position.
+fn mirrors(setup: &NoteSetup) -> bool {
+    crate::rules::get().reverse_v1 && setup.playback != PlaybackMode::Looping
 }
 
 /// Neutral graph values used when a note has no step
@@ -198,13 +224,16 @@ struct Playback {
     xfade_exp: f32,
     in_loop: bool,
     reverse: bool,
+    /// [`crate::rules::Rules::reverse_v1`]: the position runs forward and
+    /// the read point mirrors it (`start + end − pos`).
+    mirror: bool,
     pos: f64,
     step: f64,
     base: f64,
 }
 
 impl Playback {
-    /// `AdvancePlaybackPosition` [re:471307].
+    /// Playback position advance [re:471307].
     fn advance(&mut self) {
         if self.reverse {
             self.pos = (self.pos - self.step).max(0.0);
@@ -213,7 +242,7 @@ impl Playback {
         }
     }
 
-    /// `AdvancePlaybackInLoop` [re:86fa41] (`ping_pong` = AltLoopMode).
+    /// Playback advance in a loop [re:86fa41] (`ping_pong` = AltLoopMode).
     fn advance_in_loop(&mut self, idx: i32, ping_pong: bool) {
         let (ls, le) = (self.loop_start as i32, self.loop_end as i32);
         if ls <= idx && idx <= le {
@@ -245,7 +274,21 @@ impl Playback {
         self.pos = if 0.0 < p { p } else { 0.0 };
     }
 
-    /// `InitXFade` [re:2a490d].
+    /// v1's forward loop: wrap at `le − 3` to `ls + (pos − le) + 3`, keeping
+    /// the fractional position.
+    fn advance_in_loop_v1(&mut self) {
+        let (ls, le) = (self.loop_start as f64, self.loop_end as f64);
+        if ls <= self.pos && self.pos <= le {
+            self.in_loop = true;
+        }
+        if self.pos >= le - 3.0 {
+            self.pos = ls + (self.pos - le) + 3.0;
+        }
+        let last = (self.frames as i32 - 1) as f64;
+        self.pos = self.pos.min(last).max(0.0);
+    }
+
+    /// Crossfade setup [re:2a490d].
     fn init_xfade(&mut self, curve: f32, time: f32) {
         let n = (time * 0.5 * self.loop_len as f32).max(8.0).floor() as i32 as u32;
         let room = self.loop_start.wrapping_sub(self.start);
@@ -273,7 +316,7 @@ pub struct Voice {
     filter: VoiceFilter,
     mix: Mixable,
     sp1200: Sp1200,
-    /// Transmod raw values, scales and offsets (`UpdateTransmod` [re:eb94fb]).
+    /// Transmod raw values, scales and offsets (transmod update [re:eb94fb]).
     pub transmod_values: [f32; SOURCES],
     pub transmod_scale: [f32; SOURCES],
     pub transmod_offset: [f32; SOURCES],
@@ -285,6 +328,9 @@ pub struct Voice {
     releasing: bool,
     active: bool,
     cut: Option<(f32, f32)>,
+    /// The block sample a cut fade starts at: the sample that reached the
+    /// end fade ([re:233c99], [re:3c3b3d]), else 0.
+    cut_from: usize,
     buf: [Vec<f32>; 4],
     /// Timestretch (Signalsmith substitute for DIRAC), its transpose and
     /// stretch factors, and the host tempo for TracksBPM.
@@ -296,14 +342,16 @@ pub struct Voice {
     /// Stretcher input (reused).
     ts_in: [Vec<f32>; 2],
     ts_pitch: f32,
+    /// The installed parameter model's output for the block (reused).
+    model_out: crate::model::ModelOutput,
     ts_factor: f32,
     pub host_bpm: f32,
-    /// [re:78f636] `Pitch` (normalized; delegate vfunc 0xa0 in
-    /// `UpdatePitchParameters` [re:ecbc78]).
+    /// [re:78f636] `Pitch` (normalized; read through the delegate in the
+    /// pitch parameter update [re:ecbc78]).
     pub master_pitch: f32,
     /// Engine and pad Pitch with their modulation depths, set by the host
-    /// every block: `UpdatePitchParameters` sums them against the voice's
-    /// modulation vector (`VectorParameterSum`) [decomp] ev_04ca7b2c….
+    /// every block: the pitch parameter update sums them against the voice's
+    /// modulation vector (parameter vector sum) ev_04ca7b2c….
     pub engine_pitch: [f32; SOURCES],
     pub pad_pitch: [f32; SOURCES],
 }
@@ -334,11 +382,13 @@ impl Voice {
             releasing: false,
             active: false,
             cut: None,
+            cut_from: 0,
             buf: std::array::from_fn(|_| Vec::with_capacity(256)),
             stretch: None,
             stretchers: [None, None],
             ts_in: [Vec::with_capacity(1024), Vec::with_capacity(1024)],
             ts_pitch: 1.0,
+            model_out: crate::model::ModelOutput::default(),
             ts_factor: 1.0,
             host_bpm: 120.0,
             master_pitch: 0.5,
@@ -365,7 +415,7 @@ impl Voice {
         &self.setup.as_ref().expect("voice started").layer
     }
 
-    /// [re:b35cce] via `VectorParameterSum`.
+    /// [re:b35cce] via the parameter vector sum.
     fn modulated(&self, p: usize) -> f32 {
         let row = &self.layer()[p];
         if row[1..].iter().all(|d| *d == 0.0) {
@@ -390,7 +440,7 @@ impl Voice {
         }
     }
 
-    /// `SetupVoiceForPlayback` [re:2c96ac] for a sequenced or live layer note.
+    /// Voice setup for playback [re:2c96ac] for a sequenced or live layer note.
     pub fn start(&mut self, data: Arc<SampleData>, setup: NoteSetup) {
         self.lanes = match &setup.step {
             Some(s) => *s,
@@ -424,8 +474,12 @@ impl Voice {
             base: data.sample_rate as f64 / self.sr as f64,
             ..Default::default()
         };
-        // UpdateParameters: reverse = layer IsReversed xor step Reverse lane.
+        // Parameter update: reverse = layer IsReversed xor step Reverse lane.
         self.pb.reverse = ((self.lane(lane::REVERSE) - 1.0).abs() <= 1e-6) ^ setup.reversed;
+        if mirrors(&setup) {
+            self.pb.mirror = self.pb.reverse;
+            self.pb.reverse = false;
+        }
         self.pb.pos = if self.pb.reverse { self.pb.end.saturating_sub(1) as f64 } else { self.pb.start as f64 };
         self.data = Some(data);
         // InitializeTimeStretch [re:440f34]: Default/Fast instance by TimestretchMode.
@@ -447,11 +501,12 @@ impl Voice {
         self.first_block = true;
         self.releasing = false;
         self.cut = None;
+        self.cut_from = 0;
         self.active = true;
         self.update_parameters(0);
     }
 
-    /// `DoStartReleasePhase` [re:9c044b].
+    /// Release phase start [re:9c044b].
     /// Live layer-parameter change ([re:34ea12]): the voice
     /// reads its layer every block, so active voices follow.
     pub fn set_layer_param(&mut self, param: usize, source: usize, value: f32) {
@@ -459,6 +514,14 @@ impl Voice {
             if param < LAYER_PARAMS && source < SOURCES {
                 s.layer[param][source] = value;
             }
+        }
+    }
+
+    /// The layer's live `IsReversed` (read every block under
+    /// [`crate::rules::Rules::reverse_v1`]).
+    pub fn set_reversed(&mut self, on: bool) {
+        if let Some(s) = self.setup.as_mut() {
+            s.reversed = on;
         }
     }
 
@@ -475,14 +538,22 @@ impl Voice {
         }
     }
 
-    /// `DoStartCutPhase` [re:490648]: linear fade over `len` frames (cut groups use 32).
+    /// Cut phase start [re:490648]: linear fade over `len` frames (cut groups use 32).
     pub fn cut(&mut self, len: f64) {
         if self.cut.is_some() {
             return;
         }
         let len = if 0.0 < len { len } else { 1.0 };
-        let remain = self.pb.frames as f64 - self.pb.pos;
-        let len = if len + self.pb.pos < self.pb.frames as f64 { len } else { remain };
+        let len = if crate::rules::get().end_fade_v1 && !self.pb.reverse {
+            // v1 [re:093661]: up to the end marker, from the position + 2.
+            let over = self.pb.pos + 2.0 + len - self.pb.end as f64;
+            if 0.0 <= over { len - over } else { len }
+        } else {
+            // Clamped to the region length (end − start) against the
+            // absolute position [re:490648] [re:2499d6].
+            let region = (self.pb.end + 1).saturating_sub(self.pb.start) as f64;
+            if len + self.pb.pos < region { len } else { region - self.pb.pos }
+        };
         let n = if 0.0 < len { len as i32 - 1 } else { 0 };
         self.cut = Some((1.0, 1.0 / n as f32));
     }
@@ -492,9 +563,9 @@ impl Voice {
         EnvelopeParams { attack: v(0), decay: v(1), sustain: v(2), hold: v(3), release: v(4), attack_curve: v(5), decay_curve: v(6), release_curve: v(7) }
     }
 
-    /// `UpdateParameters` [re:086a94] (`n` = block length, 0 at note start).
+    /// Parameter update [re:086a94] (`n` = block length, 0 at note start).
     fn update_parameters(&mut self, n: usize) {
-        // UpdateTransmod: envelope maxima over the block, velocity, external sources.
+        // Transmod update: envelope maxima over the block, velocity, external sources.
         let mut t = self.transmod_values;
         t[0] = 1.0;
         if n > 0 {
@@ -507,18 +578,51 @@ impl Voice {
         }
         self.modv[0] = 1.0;
 
-        // `UpdateSamplePlaybackPoints` runs once, in the first `ProcessBlock`
-        // (flag +0x9de); the note-start call (n = 0) must not move the
+        // The playback points update runs once, in the first block
+        // (flagged); the note-start call (n = 0) must not move the
         // points, or they compound.
         if self.first_block && n > 0 {
             self.update_sample_points();
         }
         self.update_loop_points();
 
+        // v1 [re:18d53d]: the direction follows the live layer every block.
+        if self.setup.as_ref().is_some_and(mirrors) {
+            let rev = self.setup.as_ref().is_some_and(|s| s.reversed);
+            self.pb.mirror = ((self.lane(lane::REVERSE) - 1.0).abs() <= 1e-6) ^ rev;
+        }
+
         // Borrowed field by field (not copied: ~5 KB per block).
         let setup = self.setup.as_ref().expect("voice started");
 
-        // UpdatePitchParameters [re:c6d172].
+        // An installed parameter model replaces the pitch and filter
+        // parameters below.
+        let mut model = crate::model::get();
+        if let Some(m) = model {
+            let outer = semitones(row_sum(&self.pad_pitch, &self.modv), true) + semitones(row_sum(&self.engine_pitch, &self.modv), true) + semitones(self.master_pitch, true);
+            let input = crate::model::ModelInput {
+                layer: &setup.layer,
+                lanes: &self.lanes,
+                velocity: self.velocity,
+                amp_env: &self.buf[2][..n],
+                free_env: &self.buf[3][..n],
+                outer_semitones: outer,
+                semitone_offset: setup.semitone_offset,
+                base: self.pb.base,
+                routings: setup.routings.as_ref(),
+                routing_raw: &setup.routing_raw,
+            };
+            if !m.update(&input, &mut self.model_out) {
+                model = None;
+                self.model_out.steps.clear();
+            }
+            // The timestretcher pulls the source at its own rate.
+            if self.stretch.is_some() {
+                self.model_out.steps.clear();
+            }
+        }
+
+        // Pitch parameter update [re:c6d172].
         let l = &setup.layer;
         let depth = |p: usize| l[p][1..].iter().zip(&self.modv[1..]).map(|(a, b)| a * b).sum::<f32>();
         let st = fine_semitones(l[lp::FINE][0])
@@ -533,14 +637,29 @@ impl Voice {
             + semitones(self.master_pitch, true)
             + semitones(self.lane(lane::COARSE), true)
             + octave(self.lane(lane::OCTAVE), true) * 12.0;
-        self.pb.step = crate::convert::pitch_step(st, self.pb.base);
+        let st = if model.is_some() { self.model_out.semitones } else { st };
+        self.pb.step = if model.is_some() { self.model_out.step } else { crate::convert::pitch_step(st, self.pb.base) };
         if self.stretch.is_some() {
-            // UpdateTimestretchParameters [re:e9b827]: DIRAC pulls the source at
-            // step 1.0 (+0x7d0), pitch 2^(st/12) (property 100), stretch
+            // Timestretch parameter update [re:e9b827]: DIRAC pulls the source at
+            // step 1.0, pitch 2^(st/12) (property 100), stretch
             // factor (property 101) from the amount or file/host tempo.
             self.pb.step = 1.0;
-            self.ts_pitch = (st / 12.0).exp2() as f32;
-            self.ts_factor = if l[lp::TS_TRACKS_BPM][0] >= 0.5 { setup.file_bpm / self.host_bpm.max(1.0) } else { crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) };
+            let tracks = l[lp::TS_TRACKS_BPM][0] >= 0.5;
+            if crate::rules::get().timestretch_v1 {
+                // v1 [re:d8985e]: tracking, the layer's source BPM over the
+                // host's; otherwise source over destination (the amount);
+                // at most 4. The pitch ratio is at least 0.5.
+                let ratio = match setup.stretch_bpm {
+                    Some((src, _)) if tracks => src as f64 / self.host_bpm as f64,
+                    _ if tracks => (setup.file_bpm / self.host_bpm.max(1.0)) as f64,
+                    _ => crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) as f64,
+                };
+                self.ts_factor = ratio.min(4.0) as f32;
+                self.ts_pitch = 2f64.powf(st / 12.0).max(0.5) as f32;
+            } else {
+                self.ts_pitch = (st / 12.0).exp2() as f32;
+                self.ts_factor = if tracks { setup.file_bpm / self.host_bpm.max(1.0) } else { crate::stretch::amount_factor(self.modulated(lp::TS_AMOUNT)) };
+            }
         }
 
         // UpdateFilterParameters [re:9f92ff].
@@ -553,6 +672,7 @@ impl Voice {
             (modulate_pos_neg(self.modulated(lp::CUTOFF), self.lane(lane::CUTOFF)), modulate_pos_neg(self.modulated(lp::RESONANCE), self.lane(lane::RESONANCE)), self.modulated(lp::DRIVE))
         };
         let drive = modulate_pos_neg(drive, self.lane(lane::DRIVE));
+        let (cut, res, drive) = if model.is_some() { (self.model_out.cutoff, self.model_out.resonance, self.model_out.drive) } else { (cut, res, drive) };
         self.filter.initialize(cut, res, ftype, drive, algo);
 
         // UpdateEnvelopeParameters [re:ea1070].
@@ -577,11 +697,12 @@ impl Voice {
 
         // UpdateMixParameters [re:2847ff].
         let g = self.modulated(lp::VOICE_GAIN);
-        let p = modulate_pos_neg(self.modulated(lp::VOICE_PAN), self.lane(lane::PAN));
+        // v1 pans by the Pan lane at the layer instead (`Rules::pan_v1`).
+        let p = if crate::rules::get().pan_v1 { self.modulated(lp::VOICE_PAN) } else { modulate_pos_neg(self.modulated(lp::VOICE_PAN), self.lane(lane::PAN)) };
         self.mix.set(g, p);
     }
 
-    /// Sample start/end offsets at note start (`UpdateSamplePlaybackPoints`).
+    /// Sample start/end offsets at note start (playback points update).
     fn update_sample_points(&mut self) {
         let (s, e) = crate::convert::sample_points(self.pb.start, self.pb.end + 1, self.pb.frames, self.modulated(lp::SAMPLE_START), self.modulated(lp::SAMPLE_END));
         self.pb.start = s;
@@ -634,9 +755,12 @@ impl Voice {
         Some(s.layer[lp::ALT_LOOP][0] >= 0.5)
     }
 
-    /// `ProcessXFade` [re:83b67b] for forward wrap-around loops (the common case).
+    /// Crossfade processing [re:83b67b] for forward wrap-around loops (the common case).
     fn xfade(&self, data: &SampleData, idx: i32, l: &mut f32, r: &mut f32) {
         let Some(ping_pong) = self.looping() else { return };
+        if crate::rules::get().loop_v1 {
+            return;
+        }
         let pb = &self.pb;
         let n = pb.xfade_len as i32;
         if ping_pong || pb.reverse || n == 0 || pb.end == 0 {
@@ -658,7 +782,7 @@ impl Voice {
         }
     }
 
-    /// `ProcessAudio` / `ProcessAudioVintage`, forward and reverse.
+    /// Audio processing (standard and vintage), forward and reverse.
     fn render(&mut self, n: usize) -> usize {
         let Some(mut st) = self.stretch.and_then(|i| self.stretchers[i].take()) else {
             let mut out = std::mem::take(&mut self.buf[0]);
@@ -686,7 +810,7 @@ impl Voice {
         if got < k { got.min(n) } else { n }
     }
 
-    /// Source reader (`ProcessAudio` / `DiracProc` [re:5dc8dd]): `n` frames at
+    /// Source reader (audio processing / stretch source callback [re:5dc8dd]): `n` frames at
     /// the current step with loops, crossfades and the end fade.
     fn read_source(&mut self, n: usize, out_l: &mut [f32], out_r: &mut [f32]) -> usize {
         // An empty region (end point at 0: a region of at most one frame,
@@ -699,13 +823,22 @@ impl Voice {
         let data = self.data.take().unwrap();
         let vintage = self.setup.as_ref().unwrap().vintage;
         let mut written = 0;
+        let end_fade_v1 = crate::rules::get().end_fade_v1;
         for i in 0..n {
             let fl = self.pb.pos.floor();
-            let idx = fl as i32;
-            let frac = (self.pb.pos - fl) as f32;
+            // The frame read here, before the advance below.
+            let read = fl;
             let end = self.pb.end as i32;
             let start = self.pb.start as i32;
-            let past = if self.pb.reverse { idx < start } else { end < idx };
+            let past = if self.pb.reverse { (fl as i32) < start } else { end < fl as i32 };
+            // The read point: the position, or its mirror in the window.
+            let (fl, frac, rev) = if self.pb.mirror {
+                let m = ((start + end) as f64 - self.pb.pos).max(start as f64);
+                (m.floor(), (m - m.floor()) as f32, true)
+            } else {
+                (fl, (self.pb.pos - fl) as f32, self.pb.reverse)
+            };
+            let idx = fl as i32;
             if past {
                 // ProcessEndFrameCheckWithLoop [re:5ca7d0].
                 if let Some(pp) = self.looping() {
@@ -720,14 +853,14 @@ impl Voice {
             let at = |ch: &[f32], k: i32| ch[k as usize];
             let (mut l, mut r);
             if vintage {
-                let k1 = if self.pb.reverse { (idx - 1).max(start) } else { (idx + 1) % end };
-                let k0 = if self.pb.reverse { idx } else { idx % end };
+                let k1 = if rev { (idx - 1).max(start) } else { (idx + 1) % end };
+                let k0 = if rev { idx } else { idx % end };
                 let a = vintage_tap(at(&data.left, k0), at(&data.left, k1), frac);
                 let b = data.right.as_ref().map(|rd| vintage_tap(at(rd, k0), at(rd, k1), frac));
                 (l, r) = self.sp1200.process(a, b);
             } else {
                 let taps = |ch: &[f32]| -> [f32; 3] {
-                    if self.pb.reverse { [at(ch, idx), at(ch, (idx - 1).max(start)), at(ch, (idx - 2).max(start))] } else { [at(ch, idx % end), at(ch, (idx + 1) % end), at(ch, (idx + 2) % end)] }
+                    if rev { [at(ch, idx), at(ch, (idx - 1).max(start)), at(ch, (idx - 2).max(start))] } else { [at(ch, idx % end), at(ch, (idx + 1) % end), at(ch, (idx + 2) % end)] }
                 };
                 let [a0, a1, a2] = taps(&data.left);
                 l = catmull_rom(self.prev[0], a0, a1, a2, frac);
@@ -743,14 +876,37 @@ impl Voice {
             out_l[i] = l;
             out_r[i] = if data.right.is_some() { r } else { l };
             written += 1;
+            if let Some(&st) = self.model_out.steps.get(i) {
+                self.pb.step = st;
+            }
             self.pb.advance();
             if let Some(pp) = self.looping() {
-                self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
+                if !pp && !self.pb.reverse && crate::rules::get().loop_v1 {
+                    self.pb.advance_in_loop_v1();
+                } else {
+                    self.pb.advance_in_loop(self.pb.pos.floor() as i32, pp);
+                }
             } else if self.cut.is_none() {
-                // 32-frame fade before the end of a one-shot.
-                let near = if self.pb.reverse { self.pb.pos.floor() < self.pb.start as f64 + 32.0 } else { self.pb.end as f64 - 32.0 <= self.pb.pos.floor() };
+                // 32-frame fade before the end of a one-shot, from this
+                // sample on ([re:233c99] passes the sample to the cut
+                // phase, [re:3c3b3d] fades from it). After the advance,
+                // the frame just read is checked against the end − 32
+                // (start + 32 in reverse) [re:233c99]; v1 [re:fece0b]
+                // checks the advanced position: end ≤ position + 34.
+                let near = if end_fade_v1 {
+                    if self.pb.reverse { self.pb.pos.floor() < self.pb.start as f64 + 32.0 } else { self.pb.end as f64 <= self.pb.pos + 2.0 + 32.0 }
+                } else if self.pb.reverse {
+                    read <= self.pb.start as f64 + 32.0
+                } else {
+                    self.pb.end as f64 - 32.0 <= read
+                };
                 if near {
                     self.cut(32.0);
+                    // A stretch voice's source frames do not line up with
+                    // the block: it fades from the block start.
+                    if self.stretch.is_none() {
+                        self.cut_from = i;
+                    }
                 }
             }
         }
@@ -758,7 +914,7 @@ impl Voice {
         written
     }
 
-    /// `ProcessBlock` [re:fd90be]: render `left/right.len()` frames, mixing into the outputs.
+    /// Block processing [re:fd90be]: render `left/right.len()` frames, mixing into the outputs.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         if !self.active {
             return;
@@ -786,7 +942,7 @@ impl Voice {
             self.filter.process(&mut a[0][..n], &mut rest[0][..n], 1.0 / n as f32);
         }
         if let Some((mut g, dg)) = self.cut {
-            for i in 0..n {
+            for i in std::mem::take(&mut self.cut_from).min(n)..n {
                 self.buf[2][i] *= g;
                 g -= dg;
                 if g < 0.0 {
@@ -797,7 +953,7 @@ impl Voice {
             }
             self.cut = Some((g.max(0.0), dg));
         }
-        // ProcessOutputs [re:55cc56].
+        // Output stage [re:55cc56].
         let (a, rest) = self.buf.split_at_mut(1);
         self.mix.process(&mut a[0][..n], &mut rest[0][..n]);
         let scale = self.setup.as_ref().unwrap().output_scale * self.vel_gain;
@@ -848,6 +1004,9 @@ mod tests {
             env_tracks: false,
             reversed: false,
             file_bpm: 0.0,
+            stretch_bpm: None,
+            routings: None,
+            routing_raw: [0.5; 4],
         }
     }
 
@@ -871,7 +1030,7 @@ mod tests {
         assert!(out[4500].abs() < 1e-6);
     }
 
-    /// `UpdateSamplePlaybackPoints` moves the region once per note (first
+    /// The playback points update moves the region once per note (first
     /// block), not again from the moved points.
     #[test]
     fn sample_start_applies_once() {

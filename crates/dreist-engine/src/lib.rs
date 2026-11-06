@@ -11,6 +11,7 @@ pub mod gsa;
 pub mod harness;
 pub mod hold;
 pub mod live;
+pub mod memory;
 pub mod rex;
 // Generated table: kept as written.
 #[rustfmt::skip]
@@ -19,6 +20,7 @@ pub mod metronome;
 pub mod midifile;
 pub mod modulation;
 pub mod pattern;
+pub mod preview;
 pub mod sampler;
 pub mod scene;
 pub mod sequencer;
@@ -27,7 +29,7 @@ pub mod songrec;
 pub mod tap;
 pub mod velsplit;
 
-pub use engine::{Dreist, Meters, RenderOptions, Route, SUB_OUTPUTS, StepWrite};
+pub use engine::{Dreist, FxOut, Meters, RenderOptions, Route, SUB_OUTPUTS, StepWrite};
 
 /// Write a 32-bit float stereo WAV.
 pub fn write_wav(path: &std::path::Path, sr: u32, left: &[f32], right: &[f32]) -> std::io::Result<()> {

@@ -48,8 +48,10 @@ impl VoiceFilter {
         }
     }
 
-    /// Back to the state after `new`, keeping the comb buffers and ramp
-    /// (no allocation at note start).
+    /// The cores back to their state after `new`, keeping the comb buffers
+    /// and ramp (no allocation at note start). The drive ramp is kept: the
+    /// original's reset only resets the filter cores, so a voice's drive
+    /// glides from its previous note's gain.
     pub fn reset(&mut self) {
         let sr = self.sr;
         self.algorithm = 0;
@@ -59,8 +61,6 @@ impl VoiceFilter {
         for c in &mut self.comb {
             c.reset();
         }
-        self.drive_target = 0.0;
-        self.drive_last = 0.0;
     }
 
     /// [re:a34549]: normalized cutoff, resonance, filter

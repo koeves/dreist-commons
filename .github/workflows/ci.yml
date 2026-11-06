@@ -1,0 +1,53 @@
+name: CI
+
+# Runs only as part of the tag-triggered release (release.yml) and by hand.
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Windows that tests open stay in the background (vendor/baseview).
+  DREIST_BACKGROUND_GUI: "1"
+
+# Tests that need an app's UI or factory assets skip without them; Dreist's
+# CI runs this suite against its assets.
+jobs:
+  linux:
+    # Engine, DSP, editor and GUI tests run headless on Linux.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        # The effect fingerprints hash float output, which differs between
+        # platforms: they are checked on macOS below, here non-fatal.
+        run: cargo test --locked --workspace -- --skip effects_match_fingerprints
+      - name: Effect fingerprints (platform-dependent)
+        continue-on-error: true
+        run: cargo test --locked -p dreist-dsp --test fx_harness effects_match_fingerprints
+
+  macos:
+    # The full suite, effect fingerprints included, and the AppKit window code.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Clippy (window)
+        run: cargo clippy --locked --workspace --all-targets --features dreist-gui/window -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
+      - name: Test (window)
+        run: cargo test --locked -p dreist-gui --features window

@@ -5,7 +5,7 @@
 
 use rustfft::{FftPlanner, num_complex::Complex32};
 
-/// [re:83de95] (16 bytes).
+/// [re:83de95].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransientPoint {
     pub pos: i32,
@@ -14,31 +14,31 @@ pub struct TransientPoint {
     pub mean: f32,
 }
 
-/// [re:a11c15] parameters (`Initialize`; values from `SliceAudioFile`).
+/// [re:a11c15] parameters (setup; values from the slicing call).
 #[derive(Debug, Clone, Copy)]
 pub struct Detector {
-    /// +0x10: mean multiplier.
+    /// Mean multiplier.
     pub threshold: f32,
-    /// +0x14: FFT size.
+    /// FFT size.
     pub fft: usize,
-    /// +0x18: hop in % of the FFT size.
+    /// Hop in % of the FFT size.
     pub overlap_pct: f32,
-    /// +0x1c: running-mean window (frames).
+    /// Running-mean window (frames).
     pub mean_window: usize,
-    /// +0x20: mean floor.
+    /// Mean floor.
     pub min_mean: f32,
-    /// +0x24: dynamic-threshold multiplier.
+    /// Dynamic-threshold multiplier.
     pub dyn_mult: f32,
-    /// +0x28: dynamic-threshold decay per sample.
+    /// Dynamic-threshold decay per sample.
     pub decay: f32,
-    /// +0x44 / +0x48: peak window and onset look-back (frames).
+    /// Peak window and onset look-back (frames).
     pub peak_window: usize,
     pub look_back: usize,
 }
 
 impl Default for Detector {
-    /// [re:c5ff4b]: Initialize(1.0, 1024, 12.5, 100,
-    /// 0.0025, 3.0, 0.0014); ctor +0x44 = 5, +0x48 = 6.
+    /// [re:c5ff4b]: setup with (1.0, 1024, 12.5, 100,
+    /// 0.0025, 3.0, 0.0014); peak window 5 and look-back 6 at construction.
     fn default() -> Detector {
         Detector { threshold: 1.0, fft: 1024, overlap_pct: 12.5, mean_window: 100, min_mean: 0.0025, dyn_mult: 3.0, decay: 0.0014, peak_window: 5, look_back: 6 }
     }
@@ -49,7 +49,7 @@ impl Detector {
         ((self.fft as f32 * self.overlap_pct * 0.01).floor() as usize).max(1)
     }
 
-    /// `DoOnsetDetection` [re:6451fb]: half-wave rectified spectral flux of
+    /// Onset detection [re:6451fb]: half-wave rectified spectral flux of
     /// Hann-windowed frames (stereo averaged), frames start one FFT early.
     pub fn onset_function(&self, left: &[f32], right: Option<&[f32]>) -> Vec<f32> {
         let n = self.fft;
@@ -89,7 +89,7 @@ impl Detector {
         out
     }
 
-    /// `PositionOnset` [re:707fa1]: argmax of the third difference near `u`.
+    /// Onset positioning [re:707fa1]: argmax of the third difference near `u`.
     fn position(&self, odf: &[f32], u: usize) -> usize {
         let lo = u.saturating_sub(self.look_back);
         let hi = (u + 2).min(odf.len().saturating_sub(1));
@@ -104,7 +104,7 @@ impl Detector {
         (u + 1 + arg).saturating_sub(self.look_back)
     }
 
-    /// [re:79ac65] + `PeakPicker` [re:0a87af].
+    /// [re:79ac65] + peak picking [re:0a87af].
     pub fn detect(&self, left: &[f32], right: Option<&[f32]>) -> Vec<TransientPoint> {
         let hop = self.hop();
         let mut odf = self.onset_function(left, right);
@@ -142,7 +142,7 @@ impl Detector {
     }
 }
 
-/// `SlicePoint` (`Serialize` [re:567a97]: `Start Locked Deleted Pos Strength
+/// `SlicePoint` (saved by [re:567a97] as `Start Locked Deleted Pos Strength
 /// DynSense Mean`; manual slices keep −50 in the three analysis fields).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SlicePoint {
@@ -153,14 +153,20 @@ pub struct SlicePoint {
     pub strength: f32,
     pub dyn_sense: f32,
     pub mean: f32,
+    /// Slice type ([re:a77ff2]): 0 none, 1 Kick, 2 Snare, 3 Hihat,
+    /// 4 Percussion ([`SLICE_TYPE_NAMES`]).
+    pub kind: u8,
 }
+
+/// [re:5c38bb]'s slice type names.
+pub const SLICE_TYPE_NAMES: [&str; 5] = ["No type", "Kick", "Snare", "Hihat", "Percussion"];
 
 impl SlicePoint {
     pub fn manual(start: u32, locked: bool) -> SlicePoint {
-        SlicePoint { start, pos: start as i32, locked, deleted: false, strength: -50.0, dyn_sense: -50.0, mean: -50.0 }
+        SlicePoint { start, pos: start as i32, locked, deleted: false, strength: -50.0, dyn_sense: -50.0, mean: -50.0, kind: 0 }
     }
 
-    /// `CanSliceBeUsedAtSensitivity` [re:ba60a9] + `EvaluateOnset` [re:4b4787].
+    /// Usable at a sensitivity [re:ba60a9], with the onset evaluation [re:4b4787].
     pub fn usable_at(&self, threshold: f32) -> bool {
         if self.locked {
             return true;
@@ -173,8 +179,7 @@ impl SlicePoint {
     }
 }
 
-/// Threshold for a 0..1 sensitivity (`GetUserSliceAnalysisForSensitivity`
-/// [re:1500d9]): `(1 − s^0.6)·29 + 0.5`.
+/// Threshold for a 0..1 sensitivity ([re:1500d9]): `(1 − s^0.6)·29 + 0.5`.
 pub fn sensitivity_threshold(sensitivity: f32) -> f32 {
     (1.0 - sensitivity.powf(0.6)) * 29.0 + 0.5
 }
@@ -186,7 +191,7 @@ pub fn analyze(left: &[f32], right: Option<&[f32]>) -> Vec<SlicePoint> {
         .detect(left, right)
         .into_iter()
         .filter(|p| (p.pos as usize) < left.len())
-        .map(|p| SlicePoint { start: p.pos as u32, pos: p.pos, locked: false, deleted: false, strength: p.strength, dyn_sense: p.dyn_sense, mean: p.mean })
+        .map(|p| SlicePoint { start: p.pos as u32, pos: p.pos, locked: false, deleted: false, strength: p.strength, dyn_sense: p.dyn_sense, mean: p.mean, kind: 0 })
         .collect();
     v.sort_by_key(|s| s.start);
     v
@@ -229,7 +234,7 @@ pub fn slice_markers(slices: &[SlicePoint], i: usize, region_end: u32) -> (u32, 
     (slices[i].start, end)
 }
 
-/// One sliced hit placed by `ExtractPatternFromAnalysis`.
+/// One sliced hit placed by the pattern extraction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SliceHit {
     pub slice: usize,
@@ -238,7 +243,7 @@ pub struct SliceHit {
     pub step: usize,
     /// Shift lane (0.5 = on the grid).
     pub shift: f32,
-    /// ForceLayer lane (`ConvertLayerIndexNormalisedValue`; 0 single-layer).
+    /// ForceLayer lane (normalized layer index; 0 single-layer).
     pub force_layer: f32,
 }
 
@@ -266,16 +271,49 @@ pub fn extract_pattern(slices: &[SlicePoint], start: u32, end: u32, bars: f32, b
 /// [`extract_pattern`] skipping pads whose pad, layer or track is locked
 /// (`blocked(pad, layer)`, `AssignSampleToPadNotUsingSliceType{Single,
 /// Multiple}Layers` [re:505fcb] / [re:49bc92]: the next free pad; with multiple
-/// layers, after pad 63 the next layer restarts at pad 0 unchecked).
+/// layers, after the last pad the next layer restarts at pad 0 unchecked).
 #[allow(clippy::too_many_arguments)]
 pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, bars: f32, beats: f32, multi_layer: bool, quantize: bool, blocked: &dyn Fn(usize, usize) -> bool) -> SlicedPattern {
+    extract_pattern_full(slices, start, end, bars, beats, multi_layer, quantize, false, blocked)
+}
+
+/// [`extract_pattern_with_locks`], and with `by_type` v1's slice type
+/// allocation ([re:e69998] / [re:40be16]): a slice's type picks a row of four
+/// pads (Kick 1–4, Snare 5–8, Hihat 9–12, Percussion 13–16; no type: no hit);
+/// it takes the row's first free pad (with multiple layers the first layer
+/// with one), else it plays a pad of the row that already holds a slice (a
+/// per-type round robin; with layers one shared pad / layer round robin).
+/// Pad locks are not checked there. Single layer, all slices are
+/// allocatable, not just 16.
+#[allow(clippy::too_many_arguments)]
+pub fn extract_pattern_full(
+    slices: &[SlicePoint],
+    start: u32,
+    end: u32,
+    bars: f32,
+    beats: f32,
+    multi_layer: bool,
+    quantize: bool,
+    by_type: bool,
+    blocked: &dyn Fn(usize, usize) -> bool,
+) -> SlicedPattern {
     let len = end.saturating_sub(start).max(1);
     let frac_bar = bars < 1.0 && beats >= 1.0;
     let e = if frac_bar { beats as f64 * 0.25 } else { 1.0 } / len as f64;
     let loop_bars = (bars as f64).max(1.0);
     let g = 0.0625 / loop_bars;
     let usable = |s: &SlicePoint| !s.deleted && start <= s.start && s.start < end;
-    let allocatable = slices.iter().filter(|s| !s.deleted && start <= s.start && s.start <= end).count().min(if multi_layer { 512 } else { 64 });
+    // [re:5f0bcb]: the app's pad count (v1 16: 16 slices, 128 with layers).
+    let pads = crate::rules::get().slice_pads.max(1);
+    let count = slices.iter().filter(|s| !s.deleted && start <= s.start && s.start <= end).count();
+    // [re:5f0bcb]: 128 with layers, all by type, else the pads.
+    let allocatable = if multi_layer {
+        count.min(pads * 8)
+    } else if by_type {
+        count
+    } else {
+        count.min(pads)
+    };
     // Nearest grid index and shift for a loop position d (0..1).
     let place = |d: f64| -> Option<(i64, f32)> {
         let k = loop_bars * 16.0;
@@ -325,6 +363,7 @@ pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, b
     let mut hits = Vec::new();
     let (mut pad, mut layer) = (-1i64, -1i64);
     let mut taken = 0;
+    let mut typed = TypedLayout::new(pads);
     for (si, s) in slices.iter().enumerate() {
         if taken >= allocatable {
             break;
@@ -341,14 +380,21 @@ pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, b
         if !(0..0x400).contains(&idx) {
             continue;
         }
+        if by_type {
+            if let Some((p, l)) = typed.assign(s.kind, multi_layer, si) {
+                let force = if multi_layer { layer_index_value(l) } else { 0.0 };
+                hits.push(SliceHit { slice: typed.layout[p][l], pad: p, layer: l, step: idx as usize, shift: if quantize { 0.5 } else { shift }, force_layer: force });
+            }
+            continue;
+        }
         // AssignSampleToPadNotUsingSliceType{Single,Multiple}Layers.
         pad += 1;
         let check_layer = if multi_layer { layer.max(0) as usize } else { 0 };
-        while pad < 64 && blocked(pad as usize, check_layer) {
+        while pad < pads as i64 && blocked(pad as usize, check_layer) {
             pad += 1;
         }
         let force;
-        if pad >= 64 {
+        if pad >= pads as i64 {
             if !multi_layer {
                 continue;
             }
@@ -378,6 +424,71 @@ pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, b
     SlicedPattern { steps, hits }
 }
 
+/// v1's pad layout for the slice type allocation: the slice on each pad and
+/// layer (`usize::MAX` free) and the round robin counters.
+struct TypedLayout {
+    layout: Vec<[usize; 8]>,
+    /// Per type ([re:e69998]); v1 starts them so the first reuse is the row's first pad.
+    row: [i64; 4],
+    /// Shared pad offset / layer with layers ([re:40be16]), from −1.
+    pad: i64,
+    layer: i64,
+}
+
+impl TypedLayout {
+    fn new(pads: usize) -> TypedLayout {
+        TypedLayout { layout: vec![[usize::MAX; 8]; pads.max(16)], row: [-1; 4], pad: -1, layer: -1 }
+    }
+
+    /// The pad and layer for slice `si` of type `kind`, recording it.
+    fn assign(&mut self, kind: u8, multi_layer: bool, si: usize) -> Option<(usize, usize)> {
+        let lo = match kind {
+            0 => return None,
+            2 => 4,
+            3 => 8,
+            4 => 12,
+            _ => 0,
+        };
+        let free = |t: &TypedLayout, l: usize| (lo..lo + 4).find(|&p| t.layout[p][l] == usize::MAX);
+        if !multi_layer {
+            if let Some(p) = free(self, 0) {
+                self.layout[p][0] = si;
+                return Some((p, 0));
+            }
+            if !(1..=4).contains(&kind) {
+                return Some((lo, 0));
+            }
+            let c = &mut self.row[kind as usize - 1];
+            *c += 1;
+            if *c >= lo as i64 + 4 || *c < lo as i64 {
+                *c = lo as i64;
+            }
+            return Some((*c as usize, 0));
+        }
+        if let Some((p, l)) = (0..8).find_map(|l| free(self, l).map(|p| (p, l))) {
+            self.layout[p][l] = si;
+            return Some((p, l));
+        }
+        let next = |p: i64| if p + 1 < 4 { p + 1 } else { 0 };
+        self.pad = next(self.pad);
+        self.layer = if self.layer + 1 > 7 { 0 } else { self.layer + 1 };
+        for _ in 0..8 {
+            for k in 0..4 {
+                if k > 0 {
+                    self.pad = next(self.pad);
+                }
+                let p = lo + self.pad as usize;
+                if self.layout[p][self.layer as usize] != usize::MAX {
+                    return Some((p, self.layer as usize));
+                }
+            }
+            self.pad = next(self.pad);
+            self.layer = if self.layer + 1 > 7 { 0 } else { self.layer + 1 };
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +502,19 @@ mod tests {
             }
         }
         v
+    }
+
+    #[test]
+    fn slice_types_fill_their_pad_rows() {
+        let kinds = [1u8, 2, 1, 0, 3, 4, 1, 1, 1, 1];
+        let sl: Vec<SlicePoint> = kinds.iter().enumerate().map(|(i, &k)| SlicePoint { kind: k, ..SlicePoint::manual(i as u32 * 1000, false) }).collect();
+        let p = extract_pattern_full(&sl, 0, 10_000, 1.0, 0.0, false, false, true, &|_, _| false);
+        let pads: Vec<(usize, usize)> = p.hits.iter().map(|h| (h.slice, h.pad)).collect();
+        // Kicks on pads 0..4, then the round robin replays pad 0 (slice 0).
+        assert_eq!(pads, vec![(0, 0), (1, 4), (2, 1), (4, 8), (5, 12), (6, 2), (7, 3), (0, 0), (2, 1)]);
+        let m = extract_pattern_full(&sl, 0, 10_000, 1.0, 0.0, true, false, true, &|_, _| false);
+        let kicks: Vec<(usize, usize)> = m.hits.iter().filter(|h| h.pad < 4).map(|h| (h.pad, h.layer)).collect();
+        assert_eq!(kicks, vec![(0, 0), (1, 0), (2, 0), (3, 0), (0, 1), (1, 1)]);
     }
 
     #[test]

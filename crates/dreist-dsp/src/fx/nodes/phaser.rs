@@ -1,5 +1,5 @@
-//! [re:297af4] (Phaser, kind 18, dual-mono; `Reset` [re:bcfa17],
-//! `ProcessBuffer` [re:a6a78c]): 2/4/6/8 first-order allpass stages (Mode
+//! [re:297af4] (Phaser, kind 18, dual-mono; reset [re:bcfa17],
+//! processing [re:a6a78c]): 2/4/6/8 first-order allpass stages (Mode
 //! 0–7; odd modes flip the feedback and output polarity), coefficient from
 //! a per-mode polynomial of the cosine-LFO-swept frequency, saturated
 //! input and DC-blocked feedback, ramped dry/wet gains.
@@ -85,7 +85,7 @@ impl Voice {
         let d_dry = ((1.0 - mix) * 5.0 * sgn * rs * rs - dry0) * inv_n;
         self.mode = mode;
         let d_wet = (mix * 5.0 - wet0) * inv_n;
-        let ft = p[2].exp2() * ctx.tune * isr2;
+        let ft = crate::fx::exp2(p[2]) * ctx.tune * isr2;
         let a = self.alt;
         self.alt = -a;
         self.x1[0] -= a;

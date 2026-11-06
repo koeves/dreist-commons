@@ -1,4 +1,4 @@
-/// `_PanArray` [re:698970] (bit patterns): per-index (left, right) gains.
+/// Pan table [re:698970] (bit patterns): per-index (left, right) gains.
 const PAN: [[u32; 2]; 128] = [
     [0x3fb504f7, 0x00000000],
     [0x3fb5021d, 0x3c800000],

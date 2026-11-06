@@ -1,5 +1,5 @@
-//! [re:95343c] (Vari-EQ; `InitializePorts` [re:c30681],
-//! `Voice::ProcessBuffer` [re:affd00]): one RBJ biquad per channel.
+//! [re:95343c] (Vari-EQ; port setup [re:c30681],
+//! processing [re:affd00]): one RBJ biquad per channel.
 
 use super::biquad::{Biquad, EQ_MODES};
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
@@ -28,7 +28,7 @@ impl Node for VariEq {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:193fb7]: both filters' coefficients and history.
+    /// Reset [re:193fb7]: both filters' coefficients and history.
     fn reset(&mut self) {
         self.f = [Biquad::default(); 2];
     }

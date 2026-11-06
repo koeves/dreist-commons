@@ -1,15 +1,15 @@
-//! [re:0585f8] (Channel Compressor; `Voice::ProcessBuffer`
+//! [re:0585f8] (Channel Compressor; processing
 //! [re:ab0032]) driving [re:f585ec] ([re:8d51bb]..[re:364f59]): a 1176-style
-//! FET compressor solved as a circuit — `Solve1176A` (FET gain stage, Newton
+//! FET compressor solved as a circuit — the FET gain stage solve (Newton
 //! on a piecewise square-law FET, ≤10 iterations) per channel, then the
-//! shared detector `SolveDRCR2` (diode rectifier into the attack/release RC,
+//! shared detector solve (diode rectifier into the attack/release RC,
 //! ≤10 iterations) whose control voltage feeds the next sample's FET.
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
 const VCRIT: f32 = 0.7871292;
 
-/// `Solve1176A(v1, v2, x, vctl)`.
+/// FET gain stage solve for `(v1, v2, x, vctl)`.
 fn solve_1176a(v1: &mut f32, v2: &mut f32, x: f32, vctl: f32) {
     let mut f4 = *v2;
     let mut f5 = *v1;
@@ -67,7 +67,7 @@ fn solve_1176a(v1: &mut f32, v2: &mut f32, x: f32, vctl: f32) {
     }
 }
 
-/// `SolveDRCR2(v1, v2, v3, in_l, in_r, attack, release, c, scale, sr)`.
+/// Detector solve for `(v1, v2, v3, in_l, in_r, attack, release, c, scale, sr)`.
 #[allow(clippy::too_many_arguments)]
 fn solve_drcr2(v1: &mut f32, v2: &mut f32, v3: &mut f32, p4: f32, p5: f32, p6: f32, p7: f32, p8: f32, p9: f32, p10: f32) {
     let f9 = p8 * p10;
@@ -264,7 +264,7 @@ impl Urei1176 {
         Urei1176 { ports, comp: Comp::new() }
     }
 
-    /// Gain-reduction meter (`ControlOut`, Voice + 0x17c).
+    /// Gain-reduction meter (control output).
     pub fn meter(&self) -> f32 {
         self.comp.meter[2]
     }
@@ -279,6 +279,11 @@ impl Default for Urei1176 {
 impl Node for Urei1176 {
     fn ports(&mut self) -> &mut Vec<Port> {
         &mut self.ports
+    }
+
+    /// The gain-reduction meter (control output 0).
+    fn output(&self, index: usize) -> Option<f32> {
+        (index == 0).then(|| self.meter())
     }
 
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {

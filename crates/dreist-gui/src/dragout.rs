@@ -2,13 +2,33 @@
 //! files an internal drag stands for become an `NSDraggingSession` from the
 //! editor's view (file URLs, the Finder icon of each file, copy operation).
 
+/// The class of the drag's source (NSDraggingSource: copy everywhere); its
+/// name is unique to this copy of the library (`objc_class`).
+#[cfg(all(feature = "window", target_os = "macos"))]
+#[allow(unexpected_cfgs)]
+pub(crate) fn source_class() -> &'static objc::runtime::Class {
+    use objc::runtime::{Class, Object, Sel};
+    use objc::{class, sel, sel_impl};
+
+    extern "C" fn mask(_: &Object, _: Sel, _: *mut Object, _: isize) -> usize {
+        1
+    }
+    static CLASS: std::sync::OnceLock<&'static Class> = std::sync::OnceLock::new();
+    CLASS.get_or_init(|| {
+        let mut decl = crate::objc_class::declare(&format!("{}DragOutSource", dreist_formats::profile::get().product), class!(NSObject));
+        unsafe {
+            decl.add_method(sel!(draggingSession:sourceOperationMaskForDraggingContext:), mask as extern "C" fn(&Object, Sel, *mut Object, isize) -> usize);
+        }
+        decl.register()
+    })
+}
+
 /// Start an OS drag of `files` from `ns_view` at the current event; false
 /// when it could not start.
 #[cfg(all(feature = "window", target_os = "macos"))]
 #[allow(unexpected_cfgs)]
 pub fn begin(ns_view: *mut std::ffi::c_void, files: &[std::path::PathBuf]) -> bool {
-    use objc::declare::ClassDecl;
-    use objc::runtime::{Class, Object, Sel};
+    use objc::runtime::Object;
     use objc::{class, msg_send, sel, sel_impl};
 
     #[repr(C)]
@@ -36,20 +56,6 @@ pub fn begin(ns_view: *mut std::ffi::c_void, files: &[std::path::PathBuf]) -> bo
         }
     }
 
-    // NSDraggingSource: copy everywhere.
-    extern "C" fn mask(_: &Object, _: Sel, _: *mut Object, _: isize) -> usize {
-        1
-    }
-    fn source_class() -> &'static Class {
-        if let Some(c) = Class::get(&format!("{}DragOutSource", dreist_formats::profile::get().product)) {
-            return c;
-        }
-        let mut decl = ClassDecl::new(&format!("{}DragOutSource", dreist_formats::profile::get().product), class!(NSObject)).expect("class");
-        unsafe {
-            decl.add_method(sel!(draggingSession:sourceOperationMaskForDraggingContext:), mask as extern "C" fn(&Object, Sel, *mut Object, isize) -> usize);
-        }
-        decl.register()
-    }
     fn nsstring(s: &str) -> *mut Object {
         let c = std::ffi::CString::new(s).unwrap_or_default();
         unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }

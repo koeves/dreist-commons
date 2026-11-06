@@ -18,8 +18,8 @@ pub mod src {
     pub const TRANSPORT: usize = 28;
 }
 
-/// [re:bf1705] ([re:3b6b9b]): raw source values (+0x194), polarity
-/// (`Polar_<Source>`, +0x88), and the derived scale/offset (+0xa8/+0x11c):
+/// [re:bf1705] ([re:3b6b9b]): raw source values, polarity
+/// (`Polar_<Source>`), and the derived scale/offset:
 /// unipolar sources map `v → v`, bipolar ones `v → 2v − 1`.
 #[derive(Debug, Clone)]
 pub struct TransmodHost {
@@ -36,7 +36,7 @@ impl Default for TransmodHost {
 }
 
 impl TransmodHost {
-    /// `SerializeTransmodHost` [re:49d996] (polarity) + macro values ([re:92292a]).
+    /// Transmod host state [re:49d996] (polarity) + macro values ([re:92292a]).
     pub fn from_root(root: &Node) -> TransmodHost {
         let mut h = TransmodHost::default();
         for (i, s) in TransmodSource::ALL.iter().enumerate() {
@@ -58,7 +58,7 @@ impl TransmodHost {
         std::array::from_fn(|i| if self.unipolar[i] { 0.0 } else { 1.0 })
     }
 
-    /// `PrecomputeModulationValuesForParameterSum`: `M_i = v_i·S_i − O_i`.
+    /// Modulation values for the parameter sum: `M_i = v_i·S_i − O_i`.
     pub fn m(&self) -> [f32; SOURCES] {
         let mut m: [f32; SOURCES] = std::array::from_fn(|i| self.values[i] * if self.unipolar[i] { 1.0 } else { 2.0 } - if self.unipolar[i] { 0.0 } else { 1.0 });
         m[0] = 1.0;
@@ -77,18 +77,18 @@ enum Gen {
     Ball(BouncingBall),
 }
 
-/// One modulator slot (`Modulator`, 800 bytes).
+/// One modulator slot (`Modulator`).
 /// More than any modulator type's parameter count (the sequencer's 22 plus gain).
 const MAX_PARAMS: usize = 32;
 
 pub struct Modulator {
     pub kind: ModulatorType,
     rows: Vec<Row>,
-    /// `ResetAtStart` (+0x38, default on).
+    /// `ResetAtStart` (default on).
     pub reset_at_start: bool,
-    /// `PadTrig<e>-<p>` (+0x39 + e·64 + p).
+    /// `PadTrig<e>-<p>`.
     pub pad_trig: Box<[[bool; 64]; 8]>,
-    /// `EngTrig<e>` (+0x239).
+    /// `EngTrig<e>`.
     pub eng_trig: [bool; 8],
     generator: Gen,
     sr: f32,
@@ -164,7 +164,7 @@ impl Modulator {
         std::array::from_fn(|i| self.rows.get(i).map_or(0.0, |r| param_sum(r, m)))
     }
 
-    /// `GetGain` [re:5092ad]: the last parameter.
+    /// Gain [re:5092ad]: the last parameter.
     pub fn gain(&self, m: &[f32; SOURCES]) -> f32 {
         self.rows.last().map(|r| param_sum(r, m)).unwrap_or(1.0)
     }
@@ -256,7 +256,7 @@ impl Modulator {
     }
 
     /// [re:e9c7da]; whether it retriggered
-    /// (`WillTriggerOnPad` [re:6571c3]).
+    /// ([re:6571c3]).
     pub fn note_on(&mut self, engine: usize, pad: usize, host: &TransmodHost, bpm: f32) -> bool {
         if self.pad_trig.get(engine).is_some_and(|e| e[pad]) {
             self.reset(0.0, bpm, host, true);

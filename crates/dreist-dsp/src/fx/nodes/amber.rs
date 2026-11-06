@@ -1,12 +1,12 @@
-//! [re:3a3c4e] (Amber Chorus; `InitializePorts` [re:31e04c] builds the
-//! LFO tables, `Voice::SetMode` [re:40c94f], `ProcessBuffer` [re:18487c]): a
+//! [re:3a3c4e] (Amber Chorus; port setup [re:31e04c] builds the
+//! LFO tables, mode setup [re:40c94f], processing [re:18487c]): a
 //! BBD-style multi-tap chorus with six modes. Each tap reads a mono delay
 //! line (fed by the summed input, plus feedback in some modes) through a
 //! cubic interpolator, then a DC blocker, a low-pass, an optional "bright"
 //! bypass and a 2-pole state-variable low-pass, and is panned by Spread.
 //!
 //! The original adds analogue noise to the LFOs and the delay input from
-//! [re:4c4947]/`+0xe0`, but nothing in the binary ever writes those
+//! [re:4c4947], but nothing in the original ever writes those
 //! buffers (they are only zeroed), so the noise terms are zero here.
 
 use std::sync::OnceLock;
@@ -115,7 +115,7 @@ pub struct Amber {
     mask: u32,
     idx: u32,
     phase: [f32; 6],
-    /// 0x19c DC blocker, 0x1a0 low-pass, 0x1a4 mode-3 second low-pass.
+    /// DC blocker, low-pass, mode-3 second low-pass.
     k_dc: f32,
     k_lp: f32,
     k_lp3: f32,
@@ -168,7 +168,7 @@ impl Amber {
         self.mask = size as u32 - 1;
     }
 
-    /// `SetMode`: coefficients, tap delays and the starting smoothed delays.
+    /// Mode setup: coefficients, tap delays and the starting smoothed delays.
     fn set_mode(&mut self, m: i32) {
         if self.mode == m {
             return;

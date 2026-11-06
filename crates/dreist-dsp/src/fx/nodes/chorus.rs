@@ -1,5 +1,5 @@
-//! [re:b7f410] (Chorus, kind 17; `Reset` [re:8c945e], `PrepareStream`
-//! [re:2951a8], `ProcessBuffer` [re:a45112]): a mono delay line read by four
+//! [re:b7f410] (Chorus, kind 17; reset [re:8c945e], stream setup
+//! [re:2951a8], processing [re:a45112]): a mono delay line read by four
 //! cubic taps, each swept by the sine/cosine LFO plus its own random walk
 //! (new targets from the [re:22e966] LCG every three LFO cycles), smoothed
 //! depth, Spread cross-mix, ramped wet/dry.
@@ -164,7 +164,7 @@ impl Node for Chorus {
         }
     }
 
-    /// `Reset` [re:8c945e]: four new targets, then four new current offsets.
+    /// Reset [re:8c945e]: four new targets, then four new current offsets.
     fn reset(&mut self) {
         self.depth = 0.0;
         self.idx = 0;

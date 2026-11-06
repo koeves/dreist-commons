@@ -1,5 +1,5 @@
-//! [re:a863c4] (Analog Ring Mod, kind 47; `Reset` [re:8c376b],
-//! `ProcessBuffer` [re:054f4a]): a four-diode ring modulator. The carrier is a
+//! [re:a863c4] (Analog Ring Mod, kind 47; reset [re:8c376b],
+//! processing [re:054f4a]): a four-diode ring modulator. The carrier is a
 //! band-limited square from a triangle at `2^Pitch · tune` (modes: sine-ish
 //! shaped, square, double-shaped, cubed), the input splits into positive
 //! and negative halves biasing the diode pair, the carrier-only response is
@@ -9,7 +9,7 @@
 use super::blocks::PolySect;
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
-/// `SetCoeffs(2, f, q, gain)` [re:e24f60] and the +0x48 compensation gain.
+/// Coefficients for type 2 with `(f, q, gain)` [re:e24f60] and the compensation gain.
 fn high_shelf(f: f32, q: f32, gain: f32) -> ([f32; 5], f32) {
     let g2 = ((gain / 1.5) / 6.0).exp2();
     let y = f32::from_bits(0xbe6a3000u32.wrapping_sub(g2.to_bits()) >> 1);

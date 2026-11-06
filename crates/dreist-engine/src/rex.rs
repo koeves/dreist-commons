@@ -6,12 +6,12 @@
 //! arm64 code, so the port runs a small x86_64 helper (`rex/rex_helper.c`,
 //! under Rosetta) that makes the same calls and streams the slices back.
 //!
-//! [re:ed55c5] / `RenderRexSlices` [re:e4edba]:
+//! [re:ed55c5] / slice rendering [re:e4edba]:
 //! output rate 44100; each slice rendered on its own; its position is
-//! `SamplesForTimeBase(ppq, 15360, original tempo / 1000, 44100)`.
-//! `RenderSlicesToCompositeNonTruncated` [re:655d99] lays the slices end to
+//! the sample offset of `ppq` at time base 15360, original tempo / 1000, 44100 Hz.
+//! The composite [re:655d99] lays the slices end to
 //! end (slice markers at their starts); a path ending in ".truncated"
-//! (`RenderSlicesToCompositeTruncated` [re:e54ca4]) mixes each slice in at its
+//! ([re:e54ca4]) mixes each slice in at its
 //! musical position in a buffer of the loop's PPQ length.
 
 use std::collections::HashMap;
@@ -41,7 +41,7 @@ pub struct Composite {
     pub slices: Vec<usize>,
     /// Original tempo in BPM.
     pub tempo: f32,
-    /// Bars and beats of the loop (`LoadViaREX`: PPQ length / 61440 ×
+    /// Bars and beats of the loop (PPQ length / 61440 ×
     /// denominator, over the numerator).
     pub bars: f32,
 }

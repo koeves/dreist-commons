@@ -1,5 +1,5 @@
-//! [re:55b4db] (Modulated Filter; `InitializePorts` [re:4ea5f6],
-//! `Voice::Reset` [re:c59236], `PrepareStream` [re:8abef9], `ProcessBuffer`
+//! [re:55b4db] (Modulated Filter; port setup [re:4ea5f6],
+//! reset [re:c59236], stream setup [re:8abef9], processing
 //! [re:4f3743]): Chamberlin state-variable filter with a polynomial soft
 //! clipper and diode feedback, cutoff modulated by a diode/RC envelope
 //! follower (Newton-solved per sample) and optional FM from the sidechain.
@@ -61,7 +61,7 @@ impl AutoFilter {
             smooth: 0.0,
             drive: 0.0,
             out_drive: 0.0,
-            // Voice::Reset leaves the pitch state at 1.0.
+            // Reset leaves the pitch state at 1.0.
             pitch: 1.0,
             wet: 1.0,
             alt: super::ssl_filter::DENORMAL,
@@ -81,7 +81,7 @@ impl Node for AutoFilter {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:c59236] (`state` is its field values); the rate
+    /// Reset [re:c59236] (`state` is its field values); the rate
     /// coefficients and the voice's denormal offset are kept.
     fn reset(&mut self) {
         let mut env = std::mem::take(&mut self.env);
@@ -94,7 +94,7 @@ impl Node for AutoFilter {
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         let n = inp[0].len();
         if self.sr != ctx.sample_rate {
-            // PrepareStream: 10 Hz DC blocker and 2.4 Hz envelope high-pass.
+            // Stream setup: 10 Hz DC blocker and 2.4 Hz envelope high-pass.
             self.sr = ctx.sample_rate;
             let inv = 1.0 / self.sr;
             self.c_dc = 1.0 - (inv * -62.831856).exp();
@@ -105,8 +105,8 @@ impl Node for AutoFilter {
         let drive_out = (p(4).abs() + p(4)) * 0.5;
         let mode = (((p(1).abs() + 4.0) - (p(1) - 4.0).abs()) * 0.5).round() as u32;
         let (pitch_t, res, fm, depth) = (p(2), p(3), p(11), p(10));
-        let attack = (p(8) - 1.0).exp2();
-        let release = (p(9) - 1.0).exp2();
+        let attack = crate::fx::exp2(p(8) - 1.0);
+        let release = crate::fx::exp2(p(9) - 1.0);
         let wet_t = p(5);
         let inv_n = 1.0 / n as f32;
         let inv_sr = 1.0 / self.sr;
@@ -193,20 +193,22 @@ impl Node for AutoFilter {
             self.pitch += d_pitch;
             let pc = self.pitch + self.env[i];
             let f = ((pc + 10.0).abs() - (pc - 10.0).abs()) * 0.5;
-            let f = f.exp2();
+            let f = crate::fx::exp2(f);
+            // One coefficient for both channels, FM from the left input
+            // (one exp2 call and one 0.24 clamp per sample in the original).
+            let w = (fm5 * inp[0][i] * f * w0 + f * w0) * 0.5;
+            let wc = ((w.abs() + 0.24) - (w - 0.24).abs()) * 0.5;
+            // The sine table, offset by 4096 bytes, indexed by `floor(wc·2048)` directly
+            // (no table-centre offset; wc is clamped to 0..0.24).
+            let v = wc * 2048.0;
+            let iv = v.floor();
+            let j = 1024 + iv as usize;
+            let g = ((st[j + 1] - st[j]) * (v - iv) + st[j]) * 4.0;
+            let t = (k * g * g) / 6.0;
+            let (kd, gg) = (k - t, g - t);
             let mut y = [0.0f32; 2];
             for c in 0..2 {
                 let x = inp[c][i];
-                let w = (fm5 * f * w0 * x + f * w0) * 0.5;
-                let wc = ((w.abs() + 0.24) - (w - 0.24).abs()) * 0.5;
-                // `ms_sin_tab + 0x1000` indexed by `floor(wc·2048)` directly
-                // (no table-centre offset; wc is clamped to 0..0.24).
-                let v = wc * 2048.0;
-                let iv = v.floor();
-                let j = 1024 + iv as usize;
-                let g = ((st[j + 1] - st[j]) * (v - iv) + st[j]) * 4.0;
-                let t = (k * g * g) / 6.0;
-                let (kd, gg) = (k - t, g - t);
                 let bp = self.bp[c];
                 self.lp[c] += sat(bp) * gg;
                 let lp = self.lp[c];

@@ -9,14 +9,14 @@ pub const B: usize = 32;
 pub type Block = [f32; B];
 
 thread_local! {
-    /// `_Randnext` [re:362ab5] (initial value 1): the engine-wide LCG shared by
+    /// [re:362ab5] (initial value 1): the engine-wide LCG shared by
     /// every instance (`× 0x41c64e6d + 0x3039`). Per thread, reset when an
     /// engine is built ([`crate::fx::nodes::reset_shared_rng`]), so renders
     /// are reproducible.
     static RANDNEXT: Cell<u32> = const { Cell::new(1) };
 }
 
-/// Advances `_Randnext` and returns the new state.
+/// Advances the engine-wide LCG and returns the new state.
 pub fn randnext() -> u32 {
     RANDNEXT.with(|c| {
         let r = c.get().wrapping_mul(0x41c64e6d).wrapping_add(0x3039);
@@ -35,7 +35,7 @@ pub fn rand_bipolar(r: u32) -> f32 {
     (r & 0x3fffffff) as f32 * 1.8626451e-09 - 1.0
 }
 
-/// `_AntiUnderflowNoise` (static init [re:9fbb60]): the first 32 LCG values
+/// Anti-underflow noise (static init [re:9fbb60]): the first 32 LCG values
 /// from seed 1 scaled by 1e-10, added to every input block.
 pub fn anti_underflow_noise() -> Block {
     let mut r = 1u32;
@@ -47,10 +47,10 @@ pub fn anti_underflow_noise() -> Block {
     b
 }
 
-/// `DelayItem` (ctor [re:f4e117]): power-of-two ring with write index `w`
-/// (+0x30), read index `r` (+0x38), length (+0x28) and gain (+0x40).
+/// `DelayItem` (construction [re:f4e117]): power-of-two ring with write index `w`,
+/// read index `r`, length and gain.
 pub struct DelayItem {
-    pub armed: bool, // +0x08, set by Reset; SetLength only clears memory once armed
+    pub armed: bool, // set by reset; a length change only clears memory once armed
     pub buf: Vec<f32>,
     pub size: i64,
     pub mask: i64,
@@ -74,7 +74,7 @@ impl DelayItem {
         DelayItem { armed: false, buf: vec![0.0; size as usize], size, mask, len: half, w: half, r: 0, gain: 0.5 }
     }
 
-    /// `SetLength` [re:bf3894].
+    /// Length change [re:bf3894].
     pub fn set_length(&mut self, n: i64) {
         let len = if n < self.size { n as i32 } else { self.size as i32 - 1 } as i64;
         if self.armed {
@@ -95,7 +95,7 @@ impl DelayItem {
         self.len = len;
     }
 
-    /// `Reset` [re:0a459a].
+    /// Reset [re:0a459a].
     pub fn reset(&mut self) {
         self.armed = true;
         self.buf.fill(0.0);
@@ -122,7 +122,7 @@ impl DelayItem {
         gain(out, g);
     }
 
-    /// `PickAdd` [re:ceb829].
+    /// Tap read-and-add [re:ceb829].
     pub fn pick_add(&self, out: &mut Block, d: i64, g: f32) {
         let u = self.tap_start(d);
         for (i, o) in out.iter_mut().enumerate() {
@@ -130,7 +130,7 @@ impl DelayItem {
         }
     }
 
-    /// `PickAddVariable` [re:f88cd5]: 16.16 read position gliding linearly to
+    /// Variable tap read-and-add [re:f88cd5]: 16.16 read position gliding linearly to
     /// `target` over the block, 4-point interpolation; returns the new position.
     pub fn pick_add_variable(&self, out: &mut Block, mut pos: i64, target: f32, g: f32) -> i64 {
         let step = ((target * 65536.0) as i64 - pos) / 32;
@@ -161,7 +161,7 @@ impl DelayItem {
         }
     }
 
-    /// `Comb::operator()` [re:f04500]: `y = buf[r]; buf[w] = y·g + x`.
+    /// Comb view [re:f04500]: `y = buf[r]; buf[w] = y·g + x`.
     pub fn comb(&mut self, out: &mut Block, inp: &Block) {
         let g = self.gain;
         for i in 0..B {
@@ -191,8 +191,8 @@ impl DelayItem {
     }
 }
 
-/// [re:459093]: x1 +0, x2 +4, y1 +8, y2 +0xc, b0 b1 b2 a1 a2 +0x10..,
-/// sample rate +0x24 (denominator signs folded into a1/a2).
+/// [re:459093]: x1, x2, y1, y2, b0 b1 b2 a1 a2,
+/// sample rate (denominator signs folded into a1/a2).
 #[derive(Clone, Copy, Default)]
 pub struct Biquad {
     pub x1: f32,
@@ -204,7 +204,7 @@ pub struct Biquad {
 }
 
 impl Biquad {
-    /// `SetSPoly` [re:33fffa]: bilinear transform (k = 2·sr) of
+    /// s-polynomial setup [re:33fffa]: bilinear transform (k = 2·sr) of
     /// `(p1 s² + p2 s + p3) / (p4 s² + p5 s + p6)`.
     pub fn set_spoly(&mut self, p1: f32, p2: f32, p3: f32, p4: f32, p5: f32, p6: f32) {
         let k = self.sr + self.sr;
@@ -221,7 +221,7 @@ impl Biquad {
         self.c[4] = n * (p5 * k - f3);
     }
 
-    /// Band-limit used by Inverse/Room (`Change*Response`): high-pass at
+    /// Band-limit used by Inverse/Room (response change): high-pass at
     /// `lo` Hz times a prewarped low-pass at `hi` Hz.
     pub fn set_band(&mut self, lo: f32, hi: f32) {
         let sr = self.sr;
@@ -230,7 +230,7 @@ impl Biquad {
         self.set_spoly(0.0, w, 0.0, 1.0, lo * 6.283 + w, lo * 6.283 * w);
     }
 
-    /// `SetShelving` [re:12f8e6]: low/high shelf pair; corner arguments are
+    /// Shelving setup [re:12f8e6]: low/high shelf pair; corner arguments are
     /// prewarped Hz, gains are linear ratios (both ≈1 → bypass).
     pub fn set_shelving(&mut self, f_lo: f32, g_lo: f32, f_hi: f32, g_hi: f32) {
         if (g_lo - 1.0).abs() < 0.01 && (g_hi - 1.0).abs() < 0.01 {
@@ -270,7 +270,7 @@ impl Biquad {
         self.c[4] = n * (ps - (k2 + pp));
     }
 
-    /// `operator()(float*)` [re:9abbc0] (in place).
+    /// Run [re:9abbc0] (in place).
     pub fn run(&mut self, x: &mut Block) {
         let [b0, b1, b2, a1, a2] = self.c;
         for v in x.iter_mut() {
@@ -284,7 +284,7 @@ impl Biquad {
         }
     }
 
-    /// `operator()(float*, const float*)` [re:178666].
+    /// Run [re:178666] (separate input and output).
     pub fn run2(&mut self, out: &mut Block, x: &Block) {
         let [b0, b1, b2, a1, a2] = self.c;
         let y0 = (((x[0] * b0 + self.x1 * b1) + self.x2 * b2) + self.y1 * a1) + self.y2 * a2;
@@ -307,7 +307,7 @@ impl Biquad {
     }
 }
 
-/// [re:7054d0]: sample rate +0, x1 +4, y1 +8, b0 b1 a1 +0xc...
+/// [re:7054d0]: sample rate, x1, y1, b0 b1 a1.
 #[derive(Clone, Copy, Default)]
 pub struct Bilin {
     pub sr: f32,
@@ -317,7 +317,7 @@ pub struct Bilin {
 }
 
 impl Bilin {
-    /// `Prewarp` [re:15c2f6]: first-order `(p1 s + p2) / (p3 s + p4)`.
+    /// Prewarped setup [re:15c2f6]: first-order `(p1 s + p2) / (p3 s + p4)`.
     pub fn prewarp(&mut self, p1: f32, p2: f32, p3: f32, p4: f32) {
         let sr = self.sr;
         let pk = sr * 3.1415927;
@@ -351,7 +351,7 @@ impl Bilin {
         self.c = [(z + gk) * n, (z - gk) * n, n * ((sr + sr) - pl)];
     }
 
-    /// `SetHPF` [re:b0002d].
+    /// High-pass setup [re:b0002d].
     pub fn set_hpf(&mut self, f: f32) {
         let k = self.sr + self.sr;
         let n = 1.0 / (k + f * 6.2831855);
@@ -359,7 +359,7 @@ impl Bilin {
         self.c = [b0, -b0, n * (k - f * 6.2831855)];
     }
 
-    /// `operator()(float*)` [re:461c96] (in place).
+    /// Run [re:461c96] (in place).
     pub fn run(&mut self, x: &mut Block) {
         let [b0, b1, a1] = self.c;
         for v in x.iter_mut() {
@@ -377,9 +377,9 @@ impl Bilin {
     }
 }
 
-/// [re:fb93db]: control rate +0 (sr/32), block period +4 (32/sr), waveform
-/// +8, frequency +0xc, BPM-sync fields +0x10/+0x14/+0x18, increment +0x1c,
-/// threshold +0x20, held value +0x28, slopes +0x2c..+0x38, phase +0x3c.
+/// [re:fb93db]: control rate (sr/32), block period (32/sr), waveform,
+/// frequency, BPM-sync fields, increment,
+/// threshold, held value, slopes, phase.
 #[derive(Clone, Copy)]
 pub struct Lfo {
     pub rate: f32,
@@ -397,8 +397,8 @@ pub struct Lfo {
 }
 
 impl Lfo {
-    /// The ctor field values every reverb writes, followed by its stray
-    /// `GetValue()` (waveform 0 at that point) which advances the phase once.
+    /// The construction values every reverb writes, followed by its stray
+    /// value read (waveform 0 at that point) which advances the phase once.
     pub fn new() -> Lfo {
         let mut l = Lfo {
             rate: 44100.0,
@@ -418,7 +418,7 @@ impl Lfo {
         l
     }
 
-    /// `SetLFO` [re:3bd702].
+    /// LFO setup [re:3bd702].
     pub fn set(&mut self, wave: i32, freq: f32, sym: f32) {
         self.freq = freq;
         self.wave = wave;
@@ -432,14 +432,14 @@ impl Lfo {
         self.slope[2] = -2.0 / (1.0 - s);
     }
 
-    /// Increment for frequency `f` (or the BPM-synced rate); the binary
-    /// computes `(period · 2^32) · f` (`ChangeSpin` [re:2800d0]).
+    /// Increment for frequency `f` (or the BPM-synced rate); the original
+    /// computes `(period · 2^32) · f` (spin change [re:2800d0]).
     pub fn set_freq(&mut self, f: f32) {
         self.freq = f;
         self.inc = if self.sync { ((self.sync_bpm / (self.sync_mult * 240.0)) * self.period * 4.2949018e9) as i32 } else { ((self.period * 4.2949018e9) * f) as i32 };
     }
 
-    /// `ChangeWaveInfo` part shared by the reverbs.
+    /// Rate-change part shared by the reverbs.
     pub fn set_rate(&mut self, sr: f32) {
         let period = 32.0 / sr;
         self.rate = sr * 0.03125;
@@ -447,7 +447,7 @@ impl Lfo {
         self.inc = if self.sync { ((self.sync_bpm / (self.sync_mult * 240.0)) * period * 4.2949018e9) as i32 } else { ((period * 4.2949018e9) * self.freq) as i32 };
     }
 
-    /// `GetValue` [re:80ab06]: evaluate at the current phase, then advance.
+    /// Value read [re:80ab06]: evaluate at the current phase, then advance.
     pub fn value(&mut self) -> f32 {
         let p = self.phase as i32;
         let v = match self.wave {
@@ -484,9 +484,9 @@ impl Default for Lfo {
     }
 }
 
-/// [re:96908b] (ctor [re:7998fe]) used as [re:58604e] ([re:8faa0f]): an
+/// [re:96908b] (construction [re:7998fe]) used as [re:58604e] ([re:8faa0f]): an
 /// allpass whose read tap is swept by a built-in LFO (16.16 offset,
-/// depth +0x98 = samples·65536).
+/// depth = samples·65536).
 pub struct DelayItemLfo {
     pub d: DelayItem,
     pub rate: f32,
@@ -524,7 +524,7 @@ impl DelayItemLfo {
         }
     }
 
-    /// `SetLFO(long depth, float freq)` [re:5604d1] (triangle).
+    /// LFO setup from depth and frequency [re:5604d1] (triangle).
     pub fn set_lfo(&mut self, depth: i64, freq: f32) {
         self.freq = freq;
         self.slope[0] = 2.0;
@@ -537,7 +537,7 @@ impl DelayItemLfo {
         self.depth = depth as f32 * 65536.0;
     }
 
-    /// `ChangeFreq` [re:a15365].
+    /// Frequency change [re:a15365].
     pub fn change_freq(&mut self, sr: f32) {
         let period = 32.0 / sr;
         self.period = period;
@@ -580,7 +580,7 @@ impl DelayItemLfo {
         }
     }
 
-    /// `Reset(float phase)` [re:9c9808].
+    /// Reset to a phase [re:9c9808].
     pub fn reset(&mut self, start: f32) {
         self.d.reset();
         self.start = start;
@@ -616,7 +616,7 @@ impl DelayItemLfo {
     }
 }
 
-/// `SamplesMulAdd(dst, a, b, g)`: `dst = b·g + a`.
+/// `dst = b·g + a`.
 #[inline]
 pub fn mul_add(dst: &mut Block, a: &Block, b: &Block, g: f32) {
     for i in 0..B {
@@ -624,7 +624,7 @@ pub fn mul_add(dst: &mut Block, a: &Block, b: &Block, g: f32) {
     }
 }
 
-/// `SamplesSub(dst, src)`: `dst −= src`.
+/// `dst −= src`.
 #[inline]
 pub fn sub(dst: &mut Block, src: &Block) {
     for i in 0..B {
@@ -639,7 +639,7 @@ pub fn gain(x: &mut Block, g: f32) {
     }
 }
 
-/// `SamplesMul(dst, src, g)`.
+/// `dst = src·g`.
 #[inline]
 pub fn mul(dst: &mut Block, src: &Block, g: f32) {
     for i in 0..B {
@@ -647,7 +647,7 @@ pub fn mul(dst: &mut Block, src: &Block, g: f32) {
     }
 }
 
-/// `SamplesMixMul(dst, src, g)`: `dst += src·g`.
+/// `dst += src·g`.
 #[inline]
 pub fn mix_mul(dst: &mut Block, src: &Block, g: f32) {
     for i in 0..B {
@@ -655,7 +655,7 @@ pub fn mix_mul(dst: &mut Block, src: &Block, g: f32) {
     }
 }
 
-/// `SamplesAdd(dst, a, b)`.
+/// `dst = a + b`.
 #[inline]
 pub fn add(dst: &mut Block, a: &Block, b: &Block) {
     for i in 0..B {
@@ -663,7 +663,7 @@ pub fn add(dst: &mut Block, a: &Block, b: &Block) {
     }
 }
 
-/// `SamplesMix(dst, src)`: `dst += src`.
+/// `dst += src`.
 #[inline]
 pub fn mix(dst: &mut Block, src: &Block) {
     for i in 0..B {

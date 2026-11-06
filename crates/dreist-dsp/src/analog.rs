@@ -1,5 +1,5 @@
 //! Lookup tables built at load time by the original ([re:a770d0]
-//! [re:fddb1b], called from `__GLOBAL__sub_I_VAnalog.cpp` with the constants
+//! [re:fddb1b], called from static initialisation with the constants
 //! below; [re:cdebed]), and the shared table reader.
 
 use std::sync::OnceLock;
@@ -22,15 +22,15 @@ pub struct AnalogTables {
     pub tanhlim: Vec<f32>,
     /// `ms_diodesvflim_tab`: diode clipper solved by Newton iteration.
     pub diodesvflim: Vec<f32>,
-    /// `ms_otalim_s_tab`: OTA transfer, scaled by 32.
+    /// OTA transfer, scaled by 32.
     pub otalim_s: Vec<f32>,
-    /// `ms_otalim_tab`: OTA transfer.
+    /// OTA transfer.
     pub otalim: Vec<f32>,
-    /// `ms_otalim1_tab`: OTA transfer on the unscaled input.
+    /// OTA transfer on the unscaled input.
     pub otalim1: Vec<f32>,
-    /// `ms_diodelim_tab`: diode pair clipper.
+    /// Diode pair clipper.
     pub diodelim: Vec<f32>,
-    /// `ms_diodelim_s_tab`: the same, scaled by 32 before the division.
+    /// The same, scaled by 32 before the division.
     pub diodelim_s: Vec<f32>,
     /// `ms_diodeonelim_tab`: single diode against the forward rail.
     pub diodeonelim: Vec<f32>,
@@ -169,8 +169,8 @@ pub fn tri_tab() -> &'static [f32] {
     })
 }
 
-/// Table read used by the analog filters: integer part saturated like
-/// `cvttps2dq` + `packssdw`, offset by 1024 (16-bit wrap), clamped to
+/// Table read used by the analog filters: integer part truncated and
+/// saturated to 16 bits, offset by 1024 (16-bit wrap), clamped to
 /// `0..=2047`, then linear interpolation with the next entry by `v - trunc(v)`.
 /// Returns `(index, frac)` so callers can read several tables at one point.
 #[inline]

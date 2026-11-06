@@ -30,19 +30,19 @@ pub enum UiEvent {
     /// Mouse on a custom control (non-empty `overload`): position local to it.
     Mouse { path: Vec<usize>, overload: String, kind: MouseKind, x: f32, y: f32 },
     /// A second left press on the same control within the double-click
-    /// time (`OnMouseLButtonDblClick`; event 8 for stock controls), after
+    /// time (event 8 for stock controls), after
     /// that press's own events.
     DoubleClicked { path: Vec<usize>, name: String },
     /// A left drag that started on control `from` (custom or stock) ended
     /// over a different control: `to` is the full hit path under the
     /// pointer (deepest last), `x`/`y` in root coordinates
-    /// ([re:4dff70] → the target's `OnDroppedObject`).
+    /// ([re:4dff70] → the target's drop handler).
     Dropped { from: Vec<usize>, to: Vec<usize>, x: f32, y: f32 },
     /// A drag from `from` (past the threshold) is over `to` (full hit path),
-    /// for drop-target feedback and drag cursors (`DragMove`).
+    /// for drop-target feedback and drag cursors.
     DragOver { from: Vec<usize>, to: Vec<usize>, x: f32, y: f32 },
     /// The pointer moved over a custom control with no button held
-    /// (`OnMouseMove` without a press), position local to it.
+    /// (a mouse move without a press), position local to it.
     Hover { path: Vec<usize>, overload: String, x: f32, y: f32 },
     /// The pointer entered another interactive control (or left them all):
     /// the [re:944095] 0x80 / 0x100 enter / leave listeners.
@@ -159,6 +159,14 @@ pub struct App {
     menu_slider: Option<usize>,
     /// The UI scale changed: the window should resize to size × scale.
     pub resize_request: bool,
+    /// Shift alone turns knobs ten times slower while dragging (the
+    /// original v1's fine mode: 2000 px a turn, [re:427435]). Off by default.
+    pub fine_drag: bool,
+    /// Ctrl + left button acts as the right button (the original v1's
+    /// one-button-mouse remap, [re:ac4dad]). Off by default.
+    pub ctrl_click_right: bool,
+    /// The current press is a remapped ctrl-click.
+    ctrl_press: bool,
     /// Running collapse panel folds.
     folds: Vec<crate::collapse::Anim>,
     /// The cursor the window should show ([re:752b0e]); reset to
@@ -174,7 +182,7 @@ pub struct App {
     pub tooltip: Option<crate::tooltip::Tip>,
 }
 
-/// `Editor::open` → [re:680872].
+/// Editor open → [re:680872].
 pub const MIN_WINDOW: (i32, i32) = (1150, 650);
 
 /// Pixels the pointer must travel before a press becomes a drag.
@@ -225,6 +233,9 @@ impl App {
             menu_slider: None,
             folds: Vec::new(),
             resize_request: false,
+            fine_drag: false,
+            ctrl_click_right: false,
+            ctrl_press: false,
             cursor: crate::cursor::Cursor::Arrow,
             split_drag: None,
             splits: Vec::new(),
@@ -282,7 +293,7 @@ impl App {
         }
     }
 
-    /// `Ctrl::IsHierarchyVisible`: the control and all its parents shown.
+    /// The control and all its parents shown.
     pub fn shown(&self, path: &[usize]) -> bool {
         let mut c = &self.root;
         for &i in path {
@@ -319,7 +330,7 @@ impl App {
         self.set_tooltip_at(a, text, pos);
     }
 
-    /// The delayed form (`SetToolTipText(.., false, ..)`, e.g. the browser
+    /// The delayed form (not immediate, e.g. the browser
     /// path buttons on mouse enter): shown after 50 ticks of the pointer
     /// staying within 4 px.
     pub fn set_tooltip_delayed(&mut self, a: crate::ctrl::Rect, text: &str, pos: crate::tooltip::Pos) {
@@ -409,8 +420,19 @@ impl App {
             .map(|n| &path[..n])
             .find(|p| {
                 self.ctrl(p).is_some_and(|c| {
-                    matches!(c.class.as_str(), "CtrlButton" | "CtrlPopupButton" | "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider" | "CtrlDisclosureButton" | "CtrlScrollBar")
-                        && c.enabled
+                    matches!(
+                        c.class.as_str(),
+                        "CtrlButton"
+                            | "CtrlPopupButton"
+                            | "CtrlKnob"
+                            | "CtrlTransmodKnob"
+                            | "CtrlSlider"
+                            | "CtrlTransmodSlider"
+                            | "CtrlPanSlider"
+                            | "CtrlRangeSlider"
+                            | "CtrlDisclosureButton"
+                            | "CtrlScrollBar"
+                    ) && c.enabled
                 })
             })
             .map(<[usize]>::to_vec)
@@ -513,14 +535,58 @@ impl App {
             return out;
         }
         if let Some((path, x0, y0, v0)) = self.pressed.clone() {
+            // Opt-in slider options (control attribute, else style).
+            let (flip, detent) = self
+                .ctrl(&path)
+                .map(|c| {
+                    let st = if self.skin.styles.styles.contains_key(&c.style) { c.style.as_str() } else { "ApplicationStyle" };
+                    let flip = crate::render::opt_bool(&self.skin.styles, st, c, "optFlipDirection", false);
+                    (flip, crate::render::opt_f32(&self.skin.styles, st, c, "realCentreDetent", 0.03))
+                })
+                .unwrap_or((false, 0.0));
+            let m = self.mods;
+            let self_fine = self.fine_drag && m.shift && !m.cmd && !m.alt && !m.ctrl;
             let Some(c) = self.ctrl_mut(&path) else { return out };
+            let dir = if flip { -1.0 } else { 1.0 };
+            let mut range_moved = false;
             let value = match c.class.as_str() {
-                "CtrlKnob" | "CtrlTransmodKnob" => Some((v0 + (y0 - y) / DRAG_RANGE).clamp(0.0, 1.0)),
-                "CtrlSlider" | "CtrlTransmodSlider" => Some(if c.rect.w < c.rect.h {
+                // [re:4ee9e7]: up raises value01 by 1 per 200 px (2000 px
+                // with shift).
+                "CtrlValueBox" => Some((v0 + (y0 - y) / if m.shift { 2000.0 } else { 200.0 }).clamp(0.0, 1.0)),
+                "CtrlKnob" | "CtrlTransmodKnob" => {
+                    let fine = self_fine;
+                    Some((v0 + (y0 - y) / if fine { DRAG_RANGE * 10.0 } else { DRAG_RANGE }).clamp(0.0, 1.0))
+                }
+                "CtrlSlider" | "CtrlTransmodSlider" if !flip => Some(if c.rect.w < c.rect.h {
                     (v0 + (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0)
                 } else {
                     (v0 + (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0)
                 }),
+                // `optFlipDirection` sliders, and pan sliders (snapping to
+                // the centre within `realCentreDetent`, default 0.03).
+                "CtrlSlider" | "CtrlTransmodSlider" | "CtrlPanSlider" => {
+                    let v = if c.rect.w < c.rect.h {
+                        (v0 + dir * (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0)
+                    } else {
+                        (v0 + dir * (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0)
+                    };
+                    Some(if c.class == "CtrlPanSlider" && (v - 0.5).abs() < detent { 0.5 } else { v })
+                }
+                // Range sliders move the handle the press picked
+                // (`dragPart` low / high), kept on its side of the other.
+                "CtrlRangeSlider" => {
+                    let v =
+                        if c.rect.w < c.rect.h { (v0 + (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0) } else { (v0 + (x - x0) / (c.rect.w - c.rect.h).max(1) as f32).clamp(0.0, 1.0) };
+                    let (lo, hi) = crate::render::range_values(c);
+                    let (key, v) = if c.attr("dragPart") == Some("low") { ("valueLow", v.min(hi)) } else { ("valueHigh", v.max(lo)) };
+                    if (v - c.attr_f32(key, 0.0)).abs() > 1e-6 {
+                        c.set_attr(key, v.to_string());
+                        c.value = v;
+                        out.push(UiEvent::ValueChanged { path: path.clone(), name: c.name.clone(), id: c.id, value: v });
+                        range_moved = true;
+                    }
+                    None
+                }
                 // Scroll position 0..1 over the track minus the thumb
                 // (`realPage`, the visible fraction).
                 "CtrlScrollBar" => {
@@ -544,6 +610,9 @@ impl App {
                     self.dirty = true;
                 }
             }
+            if range_moved {
+                self.dirty = true;
+            }
             return out;
         }
         let hit = self.hit(x, y);
@@ -555,7 +624,7 @@ impl App {
             if c.class == "CtrlWindowSizer" {
                 cur = Some(crate::cursor::Cursor::ResizeNwse);
             }
-            // Splitter bar enter ($_3): resize cursor unless locked.
+            // Splitter bar enter: resize cursor unless locked.
             if crate::splitter::on_bar(c, x as i32 - ox, y as i32 - oy) && !crate::splitter::locked(c) && crate::splitter::draggable(c) {
                 cur = Some(if crate::splitter::vertical(c) { crate::cursor::Cursor::UpDown } else { crate::cursor::Cursor::LeftRight });
             }
@@ -715,6 +784,8 @@ impl App {
     }
 
     pub fn mouse_down(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        self.ctrl_press = self.ctrl_click_right && button == MouseButton::Left && self.mods.ctrl;
+        let button = if self.ctrl_press { MouseButton::Right } else { button };
         let (x, y) = self.mouse;
         // A click anywhere commits a pending text edit.
         let mut committed = self.commit_edit();
@@ -760,12 +831,31 @@ impl App {
                 return committed;
             }
         }
+        // `dragable` value boxes (control attribute, else style; [re:4ad8c8]):
+        // a single press starts a drag that changes the value.
+        if button == MouseButton::Left {
+            if let Some((p, v0)) = deferred.as_ref().and_then(|p| self.ctrl(p).filter(|c| c.class == "CtrlValueBox" && self.opt_bool(c, "dragable")).map(|c| (p.clone(), c.value))) {
+                self.press_at = (x, y);
+                self.dragging = false;
+                self.drag_left = false;
+                self.pressed = Some((p.clone(), x, y, v0));
+                self.last_press = Some((p, std::time::Instant::now()));
+                self.dirty = true;
+                return committed;
+            }
+        }
         let more = self.mouse_down_inner(button);
         committed.extend(more);
         if let Some(p) = deferred {
             self.last_press = Some((p, std::time::Instant::now()));
         }
         committed
+    }
+
+    /// A control option: the control's attribute, else its style's.
+    fn opt_bool(&self, c: &Ctrl, k: &str) -> bool {
+        let st = if self.skin.styles.styles.contains_key(&c.style) { c.style.as_str() } else { "ApplicationStyle" };
+        crate::render::opt_bool(&self.skin.styles, st, c, k, false)
     }
 
     fn mouse_down_inner(&mut self, button: MouseButton) -> Vec<UiEvent> {
@@ -876,7 +966,7 @@ impl App {
                 }
                 return out;
             }
-            // A right press on a plain panel (`OnMouseRButtonDown` of the
+            // A right press on a plain panel (the right mouse down of the
             // panel under the pointer, e.g. an effect panel's background).
             if button == MouseButton::Right && !hit.is_empty() {
                 let name = self.ctrl(&hit).map(|c| c.name.clone()).unwrap_or_default();
@@ -890,7 +980,7 @@ impl App {
         out
     }
 
-    /// `SetIconicStateAnimated`: start folding (`iconic`) or unfolding the
+    /// Start folding (`iconic`) or unfolding the
     /// collapse panel at `path`; [`App::animate`] runs it.
     pub fn fold(&mut self, path: &[usize], iconic: bool) -> Vec<UiEvent> {
         let Some(c) = self.ctrl_mut(path) else { return Vec::new() };
@@ -911,7 +1001,7 @@ impl App {
         vec![UiEvent::Collapse { path: path.to_vec(), iconic, end: false }]
     }
 
-    /// `SetIconicState`: fold / unfold at once (start and end
+    /// Fold / unfold at once (start and end
     /// notifications).
     pub fn set_iconic(&mut self, path: &[usize], iconic: bool) -> Vec<UiEvent> {
         let Some(c) = self.ctrl_mut(path) else { return Vec::new() };
@@ -927,7 +1017,7 @@ impl App {
         vec![UiEvent::Collapse { path: path.to_vec(), iconic, end: false }, UiEvent::Collapse { path: path.to_vec(), iconic, end: true }]
     }
 
-    /// `Ctrl::SetRectAnimated(to, ms, curve, end)`: move the control at
+    /// Animated rect change (to, ms, curve, end): move the control at
     /// `path` from `from`; [`App::animate`] reports `UiEvent::Animated` with
     /// `tag` at the end.
     pub fn animate_rect(&mut self, path: &[usize], from: crate::ctrl::Rect, to: crate::ctrl::Rect, ms: f32, curve: fn(f32) -> f32, tag: u32) {
@@ -992,7 +1082,7 @@ impl App {
 
     /// [re:d703b9]: the pointer's travel in
     /// screen pixels is added to the root's (unscaled) size; an axis below
-    /// the minimum keeps its size and its anchor. `Editor::open` $_1 then
+    /// the minimum keeps its size and its anchor. The editor's resize handler then
     /// asks the host for the size × scale (at least 1150×650); the window
     /// follows through [`App::resize_request`].
     fn sizer_move(&mut self, x: f32, y: f32) {
@@ -1020,12 +1110,12 @@ impl App {
         }
     }
 
-    /// Whether the window sizer is being dragged (`SetIsLiveResizing`).
+    /// Whether the window sizer is being dragged (live resizing).
     pub fn live_resizing(&self) -> bool {
         self.sizer_drag.is_some()
     }
 
-    /// [re:9d17dc] / `OnMouseLButtonUp`: the bar
+    /// [re:9d17dc] / mouse up: the bar
     /// follows the pointer's travel since the press, clamped (draggable
     /// splitters only).
     fn split_move(&mut self, path: &[usize], start: i32, x: f32, y: f32, end: bool) -> Vec<UiEvent> {
@@ -1041,7 +1131,7 @@ impl App {
         vec![UiEvent::Split { path: path.to_vec(), pos, end }]
     }
 
-    /// `SetSplitterPosition` animations (250 ms Linear, floored steps).
+    /// Splitter position animations (250 ms Linear, floored steps).
     fn animate_splits(&mut self) -> Vec<UiEvent> {
         let now = std::time::Instant::now();
         let mut out = Vec::new();
@@ -1088,7 +1178,7 @@ impl App {
             return vec![UiEvent::RightClicked { path, name }];
         }
         let mut out = Vec::new();
-        // The drag keeps the press's transmod cursor (`OnMouseLButtonDown`);
+        // The drag keeps the press's transmod cursor (as on mouse down);
         // with a source selected a press on the centre / main track edits
         // the primary (base) value, the ring / strip the depth.
         let mut primary = false;
@@ -1099,11 +1189,24 @@ impl App {
                 self.cursor = cur;
             }
         }
+        let local = {
+            let (ox, oy) = self.origin(&path);
+            (x - ox as f32, y - oy as f32)
+        };
         let Some(c) = self.ctrl_mut(&path) else { return out };
         out.push(UiEvent::Pressed { path: path.clone(), name: c.name.clone() });
         let v0 = if primary {
             c.set_attr("dragPart", "primary".into());
             c.attr_f32("baseValue", c.value)
+        } else if c.class == "CtrlRangeSlider" {
+            // The handle nearer the press (the high one when they meet and
+            // the press is above them).
+            let (lo, hi) = crate::render::range_values(c);
+            let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+            let at = if w < h { 1.0 - (local.1 - w / 2.0) / (h - w).max(1.0) } else { (local.0 - h / 2.0) / (w - h).max(1.0) };
+            let low = (at - lo).abs() < (at - hi).abs() || ((at - lo).abs() == (at - hi).abs() && at < lo);
+            c.set_attr("dragPart", if low { "low" } else { "high" }.into());
+            if low { lo } else { hi }
         } else {
             c.value
         };
@@ -1123,6 +1226,7 @@ impl App {
     }
 
     pub fn mouse_up(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        let button = if std::mem::take(&mut self.ctrl_press) && button == MouseButton::Left { MouseButton::Right } else { button };
         if self.menu_slider.take().is_some() {
             return Vec::new();
         }
@@ -1355,4 +1459,63 @@ fn merge_rects(mut v: Vec<crate::ctrl::Rect>) -> Vec<crate::ctrl::Rect> {
 /// Text of a stepper value: whole numbers for whole steps.
 pub fn stepper_text(v: f32, step: f32) -> String {
     if step.fract() == 0.0 { format!("{}", v.round() as i64) } else { format!("{v:.2}") }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A press picks the nearer handle of a range slider; the drag moves
+    /// only that one and keeps it on its side of the other.
+    #[test]
+    fn range_sliders_drag_the_nearer_handle() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let mut slider = Ctrl { class: "CtrlRangeSlider".into(), name: "Cut".into(), rect: crate::ctrl::Rect::new(10, 10, 119, 19), visible: true, enabled: true, ..Ctrl::default() };
+        slider.set_attr("valueLow", "0.2".into());
+        slider.set_attr("valueHigh", "0.8".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 100), visible: true, enabled: true, children: vec![slider], ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        let get = |app: &App, k: &str| app.ctrl(&[0]).unwrap().attr_f32(k, -1.0);
+        // Near the low handle (x 10 + 9.5 + 0.2 × 100).
+        app.mouse_move(40.0, 19.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(60.0, 19.0);
+        assert!(ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { name, .. } if name == "Cut")));
+        assert!((get(&app, "valueLow") - 0.4).abs() < 1e-4);
+        assert!((get(&app, "valueHigh") - 0.8).abs() < 1e-4);
+        // Past the high handle: stops there.
+        app.mouse_move(190.0, 19.0);
+        assert!((get(&app, "valueLow") - 0.8).abs() < 1e-4);
+        app.mouse_up(MouseButton::Left);
+        // Near the high handle.
+        app.mouse_move(100.0, 19.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_move(110.0, 19.0);
+        assert!((get(&app, "valueHigh") - 0.9).abs() < 1e-4);
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn dragable_value_boxes_drag_their_value() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let mut vb = Ctrl { class: "CtrlValueBox".into(), name: "Num".into(), rect: crate::ctrl::Rect::new(10, 50, 30, 17), visible: true, enabled: true, ..Ctrl::default() };
+        vb.set_attr("optSingleClickEdit", "false".into());
+        let mut plain = vb.clone();
+        plain.name = "Plain".into();
+        plain.rect = crate::ctrl::Rect::new(60, 50, 30, 17);
+        vb.set_attr("dragable", "true".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 300), visible: true, enabled: true, children: vec![vb, plain], ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        app.mouse_move(20.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(20.0, 8.0);
+        assert!(ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { name, value, .. } if name == "Num" && (*value - 0.25).abs() < 1e-4)));
+        app.mouse_up(MouseButton::Left);
+        // Without `dragable` the press passes through: no value change.
+        app.mouse_move(70.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(70.0, 8.0);
+        assert!(!ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { .. })));
+        app.mouse_up(MouseButton::Left);
+    }
 }

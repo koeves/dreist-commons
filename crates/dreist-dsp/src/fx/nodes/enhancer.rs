@@ -1,5 +1,5 @@
-//! [re:66e923] (Enhancer, kind 7; `Voice::Reset` [re:68dc02],
-//! `Voice::ProcessBuffer` [re:84f941]): high-pass at `Frequency`, fold the
+//! [re:66e923] (Enhancer, kind 7; reset [re:68dc02],
+//! processing [re:84f941]): high-pass at `Frequency`, fold the
 //! part above an 80 Hz-smoothed envelope (`k = (1 − Mode)·16 − 4`), high-pass
 //! again and add `2^(Amount − 0.016367754)` of it to the dry signal.
 

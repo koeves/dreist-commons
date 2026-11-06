@@ -1,4 +1,4 @@
-//! Parameter tables for Layer, Pad and Engine, recovered from the engine binary.
+//! Parameter tables for Layer, Pad and Engine, as the original engine has them.
 //!
 //! Files store every parameter as a normalized `0..=1` float and omit values
 //! equal to the default. These tables give each parameter's serialized name,
@@ -7,13 +7,13 @@
 //! - names: [re:aa9ed1], [re:b4517a]
 //!   [re:e480d7], [re:386b20]
 //! - defaults: [re:39d754], [re:bbfa97]
-//! - ranges/curves: `*::GetParameterMinMaxRange`, `*::ConvertValue{To,From}MinMaxRange`
-//! - dB curve: [re:e947f6] / `DecibelsToValue01` [re:d8eda3]
+//! - ranges/curves: the per-object range and range-conversion functions
+//! - dB curve: [re:e947f6] / dB to normalized [re:d8eda3]
 
 /// Normalized value that maps to 0 dB: the cube root of 0.5 (`0x3f4b2ff5`).
 pub const UNITY_GAIN: f32 = f32::from_bits(0x3f4b_2ff5);
 
-/// `Envelope::kMax*InSeconds` ([re:f36b8e]..[re:ac5929]).
+/// Envelope stage maxima in seconds ([re:f36b8e]..[re:ac5929]).
 pub const MAX_ATTACK_SECS: f32 = 10.0;
 pub const MAX_DECAY_SECS: f32 = 10.0;
 pub const MAX_HOLD_SECS: f32 = 60.0;
@@ -51,6 +51,7 @@ impl Curve {
             Curve::Decibels => (-100.0, 6.0),
             Curve::Linear(lo, hi) => (lo, hi),
             Curve::Cutoff => (6.875, 28160.0),
+            Curve::Stretch if stretch_v1() => (10.0, 400.0),
             Curve::Stretch => (0.0, 800.0),
         }
     }
@@ -60,6 +61,15 @@ impl Curve {
             Curve::Decibels => value01_to_db(x).max(-100.0),
             Curve::Linear(lo, hi) => (hi - lo) * x + lo,
             Curve::Cutoff => (x * 12.0 - 6.0).exp2() * 440.0,
+            Curve::Stretch if stretch_v1() => {
+                if x > 0.5 {
+                    let f = x + x - 1.0;
+                    (f * f * f * 3.0 + 1.0) * 100.0
+                } else {
+                    let f = 1.0 - (x + x);
+                    ((1.0 - f * f * f) * 0.9 + 0.1) * 100.0
+                }
+            }
             Curve::Stretch if x < 0.5 => x * 200.0,
             Curve::Stretch => x * 1400.0 - 600.0,
         }
@@ -70,10 +80,26 @@ impl Curve {
             Curve::Decibels => db_to_value01(v),
             Curve::Linear(lo, hi) => (lo - v) / (lo - hi),
             Curve::Cutoff => ((v.clamp(6.0, 28160.0) / 440.0).log2() + 6.0) / 12.0,
+            Curve::Stretch if stretch_v1() => {
+                let r = (v / 100.0).clamp(0.1, 4.0);
+                if r > 1.0 { (((r - 1.0) / 3.0).cbrt() + 1.0) * 0.5 } else { (1.0 - (1.0 - (r - 0.1) / 0.9).cbrt()) * 0.5 }
+            }
             Curve::Stretch if v > 100.0 => (v - 100.0) / 1400.0 + 0.5,
             Curve::Stretch => v * 0.005,
         }
     }
+}
+
+static STRETCH_V1: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Use the original v1's timestretch amount curve for [`Curve::Stretch`]
+/// (10 %..400 %, cubic about 100 % at the centre, [re:dd87f2]).
+pub fn set_stretch_v1(on: bool) {
+    STRETCH_V1.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn stretch_v1() -> bool {
+    STRETCH_V1.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 const UNIT: Curve = Curve::Linear(0.0, 1.0);
@@ -116,10 +142,10 @@ macro_rules! param_enum {
 }
 
 param_enum! {
-    /// `Layer::LayerParameters`, in enum order. [re:c38326]
+    /// Layer parameters, in enum order. [re:c38326]
     /// renames five entries of the map [re:87acba] uses
-    /// (`ReplaceLayerParameters` [re:bec18e]: 0, 1, 8, 9, 7), so files store
-    /// `Cutoff`, `Cutoff_FreeEnvelope`, … [disasm].
+    /// ([re:bec18e]: 0, 1, 8, 9, 7), so files store
+    /// `Cutoff`, `Cutoff_FreeEnvelope`, ….
     LayerParam {
         Gain = "LayerGain", Pan = "LayerPan", VoiceGain, VoicePan, Octave, CoarseTune, FineTune, PreDelay = "PreDelayTime",
         FilterCutoff = "Cutoff", FilterResonance = "Resonance", FilterType, FilterDrive, FilterAlgorithm, FilterActive,
@@ -152,17 +178,17 @@ impl TransmodSource {
 }
 
 param_enum! {
-    /// `Pad::PadParameters`.
+    /// Pad parameters.
     PadParam { Gain, Pan, V2A, Pitch }
 }
 
 param_enum! {
-    /// `Engine::EngineParameters`.
+    /// Engine parameters.
     EngineParam { Gain, Pan, Pitch }
 }
 
 impl LayerParam {
-    /// `GetDefaultLayerParameter` for source 0. Modulation depths default to 0.
+    /// The layer parameter default for source 0. Modulation depths default to 0.
     /// Hold's -1 is clamped to 0 on load like every base value.
     pub fn default_value(self) -> f32 {
         use LayerParam::*;
@@ -237,7 +263,7 @@ impl EngineParam {
 }
 
 param_enum! {
-    /// `Modulator::ModulatorType`, serialized as the `Type` attribute.
+    /// Modulator types, serialized as the `Type` attribute.
     ModulatorType {
         LFO, MorphingLFO, SampleAndHold, ADEnvelope, MiniSequencer, Maths, Constant, BouncingBall,
     }
@@ -250,8 +276,8 @@ const SEQUENCER_PARAMS: [&str; 23] = [
 ];
 
 impl ModulatorType {
-    /// Parameter names in index order (`Modulator::Create*ParamsMap` [re:7abac1]..[re:5c6661];
-    /// counts match `GetNumberOfParametersForSource` [re:5e71ee]). Modulator parameters
+    /// Parameter names in index order (per-type parameter maps [re:7abac1]..[re:5c6661];
+    /// counts match the per-source parameter counts [re:5e71ee]). Modulator parameters
     /// are stored as `<Name>_ActualParameter`, depths as `<Name>_<Source>`.
     pub fn params(self) -> &'static [&'static str] {
         match self {
@@ -313,7 +339,7 @@ pub fn aux_send_name(i: usize) -> String {
     format!("AuxSend{i}")
 }
 
-/// `Effect::EEffectType`, serialized as `EffectType` ([re:8e9a01],
+/// Effect types, serialized as `EffectType` ([re:8e9a01],
 /// jump table at [re:2dad4e]). Index 0 is "No Effect".
 pub const EFFECT_TYPES: [&str; 48] = [
     "No Effect",
@@ -432,7 +458,7 @@ pub fn effect_type_index(name: &str) -> Option<usize> {
 }
 
 /// Front-panel parameter names per effect type ([re:c5d0fd]
-/// [re:737dba]); lengths match `GetNumberOfParametersForEffect` (table [re:73854e]).
+/// [re:737dba]); lengths match the per-effect parameter counts (table [re:73854e]).
 /// Presets store the underlying node values as `Parameter0..N`, plus `IsActive`,
 /// `Mix`, `Level`, `Trim`; factory defaults are each effect's `Default.fxpreset`.
 pub fn effect_param_names(effect: usize) -> &'static [&'static str] {
@@ -478,6 +504,11 @@ pub fn effect_param_names(effect: usize) -> &'static [&'static str] {
         44 => &["Room Size", "Decay", "Predelay", "Density", "Damping Freq", "Damping Gain"],
         45 => &["Model", "Delay Time", "Feedback", "Model Tone", "Sync", "Freeze", "Ping Pong", "Direction"],
         46 => &["Frequency", "AntiAlias"],
+        // As the original lists them ([re:737dba]): its option table
+        // ([re:d1711c]) makes panel parameter 0 the four-wave popup and its
+        // map ([re:72c1b1], [1, 0, 2, 3]) sends it to node port 1 (Mode),
+        // so the "Drive" label sits on the wave selector and "Mode" drives
+        // port 0 (Drive) ([re:a863c4]). Kept as shipped.
         47 => &["Drive", "Mode", "Pitch", "Tone"],
         _ => &[],
     }
@@ -511,7 +542,7 @@ pub fn effect_node_param(effect: usize, n: usize) -> usize {
     t.get(n).copied().unwrap_or(n)
 }
 
-/// Step graph lanes (`Step::StepGraphItems`). Serialized names are the display
+/// Step graph lanes. Serialized names are the display
 /// names set in [re:cf74e8] with spaces removed
 /// ([re:9b6bed]); attributes equal to the default are omitted.
 pub const STEP_LANES: [&str; 93] = [
@@ -530,6 +561,8 @@ pub fn step_lane_default(lane: usize) -> f32 {
         0 | 9 | 16 => 1.0,
         2 | 4 | 10 | 13 | 15 => 0.0,
         1 | 3 | 5..=8 | 11 | 12 | 14 | 17..=38 => 0.5,
+        // v1's routing depths: neutral.
+        V1_ROUTING_LANE..LANE_COUNT => 0.5,
         // Per FX slot: Active 0, everything else 1.
         39..=92 => {
             if (lane - 39).is_multiple_of(9) {
@@ -542,9 +575,21 @@ pub fn step_lane_default(lane: usize) -> f32 {
     }
 }
 
+/// The first of the original v1's four routing-depth lanes, after the 93
+/// lanes both versions share (see [`crate::legacy::ROUTING_DEPTH_LANES`]).
+pub const V1_ROUTING_LANE: usize = STEP_LANES.len();
+
+/// Every step lane: the shared ones and v1's routing depths.
+pub const LANE_COUNT: usize = V1_ROUTING_LANE + 4;
+
+/// A step lane's attribute name (shared lanes, then v1's routing depths).
+pub fn step_lane_name(lane: usize) -> Option<&'static str> {
+    STEP_LANES.get(lane).or_else(|| crate::legacy::ROUTING_DEPTH_LANES.get(lane.wrapping_sub(V1_ROUTING_LANE))).copied()
+}
+
 pub fn step_lane_index(name: &str) -> Option<usize> {
     static INDEX: std::sync::OnceLock<std::collections::HashMap<&'static str, usize>> = std::sync::OnceLock::new();
-    INDEX.get_or_init(|| STEP_LANES.iter().enumerate().map(|(i, l)| (*l, i)).collect()).get(name).copied()
+    INDEX.get_or_init(|| (0..LANE_COUNT).filter_map(|i| step_lane_name(i).map(|n| (n, i))).collect()).get(name).copied()
 }
 
 /// [re:9c4e55] (table [re:af5cce]): number of discrete values a
@@ -589,11 +634,11 @@ mod tests {
         assert_eq!(LayerParam::TimestretchMode as u8, 0x29);
         assert_eq!(LayerParam::from_name("FilterCutoff"), Some(LayerParam::FilterCutoff));
         assert_eq!(TransmodSource::ALL.len(), 0x1d);
-        // GetNumberOfParametersForSource packs the counts as bytes of 0x0302041705050605.
+        // The original packs the per-source counts as bytes of 0x0302041705050605.
         let counts: Vec<usize> = ModulatorType::ALL.iter().map(|t| t.params().len()).collect();
         assert_eq!(counts, 0x0302_0417_0505_0605u64.to_le_bytes().map(usize::from));
         assert_eq!(ModulatorType::MiniSequencer.default_value(21), 0.9375);
-        // Effect parameter counts from `GetNumberOfParametersForEffect` ([re:73854e]).
+        // Effect parameter counts from the original's table ([re:73854e]).
         let counts = [1, 2, 6, 4, 4, 2, 3, 5, 6, 6, 6, 5, 4, 3, 6, 6, 3, 6, 6, 6, 6, 9, 6, 3, 2, 4, 6, 4, 6, 4, 4, 4, 4, 4, 4, 4, 3, 6, 6, 5, 5, 3, 5, 6, 8, 2, 4];
         for (i, n) in counts.iter().enumerate() {
             assert_eq!(effect_param_names(i + 1).len(), *n, "{}", EFFECT_TYPES[i + 1]);

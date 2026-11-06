@@ -1,5 +1,5 @@
-//! [re:cc7e1d] subclasses: text → internal value (`ConvertFromText`,
-//! asm-checked in [re:cbf488]..[re:3e015d]). Only the forms that appear in the
+//! [re:cc7e1d] subclasses: text → internal value (text conversion,
+//! checked against [re:cbf488]..[re:3e015d]). Only the forms that appear in the
 //! effect port tables are handled. See the dreist-re effects notes.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub enum Conv {
     Cube,
     /// [re:1e86bb]: `atan(dB/8)/1.19029`.
     SslDecibel,
-    /// [re:8a91e8] (`ConvertFromText` [re:814520]): `−ln(max(q, 1e-6))`.
+    /// [re:8a91e8] (text conversion [re:814520]): `−ln(max(q, 1e-6))`.
     SslQ,
     /// A node-specific converter; the node supplies the values.
     Custom,
@@ -46,7 +46,7 @@ fn is_minus_inf(s: &str) -> bool {
 }
 
 impl Conv {
-    /// [re:fc9225] value of a port bound given as text (string-form constructors).
+    /// Internal value of a port bound given as text (string-form constructors).
     pub fn from_text(self, s: &str) -> f32 {
         let (num, unit) = split(s);
         let n = num.unwrap_or(0.0);

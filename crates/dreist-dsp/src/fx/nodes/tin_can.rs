@@ -1,5 +1,5 @@
-//! [re:97750e] (Tin Can Verb; `InitializePorts` [re:1c6c9c],
-//! `Voice::PrepareStream` [re:cec0ec], `Voice::ProcessBuffer` [re:3f85e2]):
+//! [re:97750e] (Tin Can Verb; port setup [re:1c6c9c],
+//! stream setup [re:cec0ec], processing [re:3f85e2]):
 //! Freeverb-style reverb — 8 damped combs and 4 allpasses per channel,
 //! crossfed 80/20 input, Pinch/Squeeze reshape the delay lengths.
 
@@ -44,7 +44,7 @@ impl TinCan {
         }
     }
 
-    /// `PrepareStream`: power-of-two buffers. The original allocates 5 s
+    /// Stream setup: power-of-two buffers. The original allocates 5 s
     /// (combs) and 2.5 s (allpasses); the lengths reach at most
     /// Size³·3 × the longest tuning (0.0358 s combs, 0.0131 s allpasses) ≈
     /// 0.108 s / 0.040 s, and the reads are relative to the shared write

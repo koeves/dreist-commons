@@ -1,5 +1,5 @@
-//! [re:403241] (Dirty DAC, kind 46; `Voice::Reset` [re:7302b2],
-//! `Voice::ProcessBuffer` [re:26214d]): low-pass at `(1.5 − AntiAlias)·Freq`,
+//! [re:403241] (Dirty DAC, kind 46; reset [re:7302b2],
+//! processing [re:26214d]): low-pass at `(1.5 − AntiAlias)·Freq`,
 //! plus a copy high-passed three times at `0.7·Freq` and multiplied by a
 //! band-limited square derived from a triangle running at `Freq` — the
 //! stair-step error of a zero-order-hold DAC.

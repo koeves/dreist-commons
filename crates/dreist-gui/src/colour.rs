@@ -120,7 +120,7 @@ fn atoi(s: &str) -> i32 {
 }
 
 /// [re:32c45e]: table [re:c14dfa] (47 × RGBA int),
-/// names from `CreateStandardColoursMap` [re:01614a].
+/// names from the standard colour map [re:01614a].
 pub const STANDARD: [(&str, Colour); 47] = {
     const fn c(r: u8, g: u8, b: u8, a: u8) -> Colour {
         Colour::rgba(r, g, b, a)

@@ -13,7 +13,7 @@
 //! load, no pitch compensation), [re:87acba] (load: when either hold
 //! is negative — the attribute's default is −1 — or the layer version is
 //! below 3000, unless OneShotLengthBound; with pitch compensation), the
-//! 0x87 `e_resetLayerHoldTime` message and `ResetEnvelopeState` (0x86).
+//! 0x87 `e_resetLayerHoldTime` message and the envelope state reset (0x86).
 
 use dreist_formats::params::LayerParam;
 

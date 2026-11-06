@@ -140,8 +140,9 @@ impl Envelope {
         self.stage != 0
     }
 
-    fn shaped((_, shape, curve): (f32, f32, Curve), x: f32) -> f32 {
-        if (shape - 0.5).abs() > 1e-6 { curve.eval(x) } else { x }
+    fn shaped((_, shape, curve): (f32, f32, Curve), x: f32, v1: bool) -> f32 {
+        let d = (shape - 0.5).abs();
+        if d > 1e-6 || (v1 && d >= 1e-6) { curve.eval(x) } else { x }
     }
 
     /// [re:cf759f]. Returns whether the envelope is still running.
@@ -153,7 +154,11 @@ impl Envelope {
             out.fill(0.0);
             return false;
         }
-        for o in out.iter_mut() {
+        // The app's rules may select v1's end rules: a decay ending at zero
+        // sustain stops at once, the release stops at y <= 0, the decay is
+        // not clamped and a curve counts from 1e-6.
+        let v1 = crate::rules::get().envelope_v1_ends;
+        for i in 0..out.len() {
             let mut y = 0.0;
             match self.stage {
                 1 => {
@@ -165,7 +170,7 @@ impl Envelope {
                 }
                 2 => {
                     self.value = (self.value + self.attack.0).min(1.0);
-                    y = Self::shaped(self.attack, self.value);
+                    y = Self::shaped(self.attack, self.value, v1);
                     if y >= 1.0 || self.attack_end <= self.time {
                         self.stage = 3;
                         self.value = 1.0;
@@ -175,9 +180,18 @@ impl Envelope {
                 3 => {
                     self.value -= self.decay.0;
                     let s = self.sustain;
-                    y = ((1.0 - s) * Self::shaped(self.decay, self.value) + s).max(0.0);
+                    y = (1.0 - s) * Self::shaped(self.decay, self.value, v1) + s;
+                    if !v1 {
+                        y = y.max(0.0);
+                    }
                     if self.decay_end <= self.time {
-                        if s.abs() >= 1e-6 {
+                        if v1 && s.abs() < 1e-6 {
+                            self.stage = 0;
+                            self.value = 0.0;
+                            out[i..].fill(0.0);
+                            self.last = 0.0;
+                            return false;
+                        } else if s.abs() >= 1e-6 {
                             self.stage = if self.one_shot { 5 } else { 4 };
                             self.value = s;
                             y = s;
@@ -204,14 +218,20 @@ impl Envelope {
                     let s = self.sustain;
                     self.value -= self.release.0;
                     let x = if s.abs() >= 1e-6 { self.value / s } else { self.value };
-                    y = (Self::shaped(self.release, x) * s).max(0.0);
+                    y = (Self::shaped(self.release, x, v1) * s).max(0.0);
+                    if v1 && y <= 0.0 {
+                        self.stage = 0;
+                        out[i..].fill(0.0);
+                        self.last = 0.0;
+                        return false;
+                    }
                     if y.abs() < 1e-6 {
                         self.stage = 0;
                     }
                 }
                 _ => {}
             }
-            *o = y;
+            out[i] = y;
             self.last = y;
             self.time += self.rate;
         }

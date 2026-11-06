@@ -6,7 +6,7 @@
 
 use crate::analog::{analog, lerp, lut_pos, sin_tab};
 
-/// [re:d068ec] (`CreateFilterModeMap` [re:a10a12]).
+/// [re:d068ec] (mode name map [re:a10a12]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SvfMode {
     L2,
@@ -40,7 +40,7 @@ struct Stage {
     prev_tap: [f32; 2],
 }
 
-/// Signals are scaled by 32 before every table read (`0xe0` slot).
+/// Signals are scaled by 32 before every table read.
 const IN_SCALE: f32 = 32.0;
 
 #[derive(Debug, Clone)]
@@ -83,20 +83,20 @@ impl Svf {
         f
     }
 
-    /// `SetSampleRate` [re:691eb1]: output DC blocker at 10 Hz.
+    /// Sample-rate setup [re:691eb1]: output DC blocker at 10 Hz.
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.inv_sr = 1.0 / sr;
         let e = (self.inv_sr * -62.831856).exp();
         self.dc_coef = ((2.0 - e) - e.abs()) * 0.5;
     }
 
-    /// `Initialize` [re:002722]. `cutoff` normalized (`440·2^(12c-6)` Hz),
+    /// Setup [re:002722]. `cutoff` normalized (`440·2^(12c-6)` Hz),
     /// `res` already through [re:e0adbe]'s resonance curve, `mode` normalized
     /// over the 10 modes. Changing mode clears all state.
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.octave = cutoff * 12.0 - 6.0;
         self.res = res * 0.909 + 0.101;
-        self.freq = self.octave.min(12.0).max(-12.0).exp2() * 440.0;
+        self.freq = crate::fx::exp2(self.octave.min(12.0).max(-12.0)) * 440.0;
         let m = (mode * 9.0).round() as i64;
         if m != self.mode_index {
             self.g1 = 0.0;

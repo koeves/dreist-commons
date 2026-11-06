@@ -66,7 +66,7 @@ fn doc_layer(doc: &mut Node, e: usize, p: usize, l: usize) -> &mut Node {
 /// Effect slot node under a layer/pad/engine (−1 = the enclosing level).
 fn doc_chain(doc: &mut Node, e: i32, p: i32, l: i32) -> Option<&mut Node> {
     let owner = if e == -4 && p >= 0 {
-        // `GetEffectChain`: −4 = global aux `p`, −3 = master.
+        // Effect chain lookup: −4 = global aux `p`, −3 = master.
         doc.child_mut_or_insert("GlobalAux", &format!("GlobalAux{p}"))
     } else if e == -3 {
         doc.child_mut_or_insert("MasterChannel", "MasterChannel")
@@ -128,6 +128,19 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                     id::SAMPLER_RECORD_SOURCE => sm.set("recordsource", crate::sampler::source_name(vi(0))),
                     _ => sm.set("inputthru", bool_str(v(0) >= 0.5)),
                 };
+            }
+            // `Rules::sampler_modes_v1`: the modes by name.
+            id::SAMPLER_START_MODE | id::SAMPLER_TIMED_MODE if dreist_dsp::rules::get().sampler_modes_v1 => {
+                let sm = doc.child_mut_or_insert("Sampler", "Sampler");
+                if sm.version.is_none() {
+                    sm.version = Some(2);
+                }
+                let i = vi(0).max(0) as usize;
+                if m.kind == id::SAMPLER_START_MODE {
+                    sm.set("startmode", crate::sampler::V1_START_MODES[i.min(3)]);
+                } else {
+                    sm.set("timedmode", crate::sampler::V1_TIMED_MODES[i.min(2)]);
+                }
             }
             id::SET_TEMPO => {
                 let t = doc.child_mut_or_insert("TimeInfo", "TimeInfo");
@@ -295,7 +308,16 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         let st =
                             doc.children.iter().find(|c| c.class == "Engine" && c.name.as_deref() == Some(&format!("Engine{k}"))).and_then(|n| n.children.iter().find(|c| c.class == "EngineState"));
                         let pat = st.and_then(|s| s.attr("CurrentPattern")).unwrap_or("0").to_string();
-                        let pow = st.and_then(|s| s.attr("PatternPower")).unwrap_or("true").to_string();
+                        let mut pow = st.and_then(|s| s.attr("PatternPower")).unwrap_or("true").to_string();
+                        // [re:90cf43]: v1 stores an empty pattern with its power off.
+                        if dreist_dsp::rules::get().scene_snapshot_v1 {
+                            let eng = doc.children.iter().find(|c| c.class == "Engine" && c.name.as_deref() == Some(&format!("Engine{k}")));
+                            let sp = eng.and_then(|n| n.child("StepPattern", &format!("StepPattern{pat}")));
+                            let any = sp.is_some_and(|sp| sp.children.iter().filter(|t| t.class == "Track").any(|t| t.children.iter().any(|s| s.class == "Step" && s.truthy("State"))));
+                            if !any {
+                                pow = "false".into();
+                            }
+                        }
                         (pat, pow)
                     })
                     .collect();
@@ -479,14 +501,14 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                     return;
                 }
                 if m.kind == id::SET_GRAPH_RANDOMISATION {
-                    if let Some(name) = dreist_formats::STEP_LANES.get(vi(1).max(0) as usize) {
+                    if let Some(name) = dreist_formats::params::step_lane_name(vi(1).max(0) as usize) {
                         pat.child_mut_or_insert("Track", &format!("Track{t}")).set(&format!("{name}Rand"), fmt(v(0).clamp(0.0, 1.0)));
                     }
                     return;
                 }
                 if m.kind == id::SET_STEP_GRAPH_STATE {
                     let lane = vi(0).max(0) as usize;
-                    let Some(name) = dreist_formats::STEP_LANES.get(lane) else { return };
+                    let Some(name) = dreist_formats::params::step_lane_name(lane) else { return };
                     if i(5) < 0 {
                         return;
                     }
@@ -497,7 +519,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         x = if x < 0.5 { 0.0 } else { 1.0 };
                     }
                     st.set(name, fmt(x));
-                    if *name == "Repeats" && x != 0.0 {
+                    if name == "Repeats" && x != 0.0 {
                         st.attrs.retain(|(k, _)| k != "LinkToPrevious");
                     }
                     return;
@@ -511,7 +533,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         continue;
                     }
                     if matches!(m.kind, id::CLEAR_TRACK_AUTOMATION | id::CLEAR_ALL_TRACK_AUTOMATION | id::CLEAR_ALL_PATTERN_AUTOMATION) {
-                        let only = (m.kind == id::CLEAR_TRACK_AUTOMATION).then(|| dreist_formats::STEP_LANES.get(vi(0).max(0) as usize).copied()).flatten();
+                        let only = (m.kind == id::CLEAR_TRACK_AUTOMATION).then(|| dreist_formats::params::step_lane_name(vi(0).max(0) as usize)).flatten();
                         for st in tr.children.iter_mut().filter(|c| c.class == "Step") {
                             st.attrs.retain(|(k, _)| k == "State" || only.is_some_and(|o| o != k.as_str()));
                         }
@@ -637,7 +659,7 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
 }
 
 impl Dreist {
-    /// Mirror a recorded step (`HandleRecordingMessage`).
+    /// Mirror a recorded step (recording message).
     pub(super) fn doc_step(&mut self, e: usize, pattern: usize, track: usize, step: usize) {
         let Some(s) = self.engines.get(e).and_then(|x| x.patterns.get(pattern)).and_then(|p| p.tracks.get(track)).and_then(|t| t.steps.get(step)).cloned() else {
             return;
@@ -660,7 +682,7 @@ pub fn write_step(doc: &mut Node, e: usize, pattern: usize, track: usize, step: 
     let tr = pat.child_mut_or_insert("Track", &format!("Track{track}"));
     let node = tr.child_mut_or_insert("Step", &format!("S{step}"));
     node.attrs.clear();
-    for (k, name) in dreist_formats::STEP_LANES.iter().enumerate() {
+    for (k, name) in (0..crate::pattern::LANES).filter_map(|k| dreist_formats::params::step_lane_name(k).map(|n| (k, n))) {
         if (s.lanes[k] - defaults.lanes[k]).abs() > 1e-9 {
             node.set(name, fmt(s.lanes[k]));
         }

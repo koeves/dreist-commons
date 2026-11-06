@@ -1,16 +1,16 @@
-//! Song recording ([re:c7a961] record state, +0xbc recorded
-//! pattern per track, +0xe4 "played" flags).
+//! Song recording ([re:c7a961] record state, recorded
+//! pattern per track, "played" flags).
 //!
 //! The engine only reports: while a pattern started or stopped by the
-//! user (not by the song) plays, `RecordPatternStart` [re:118fd2] /
-//! `RecordPatternStop` [re:02c0ef] post `e_songPatternStarted` 0x1f2 and
+//! user (not by the song) plays, pattern record start [re:118fd2] /
+//! stop [re:02c0ef] post `e_songPatternStarted` 0x1f2 and
 //! `e_songPatternStopped` 0x1f3 (499) to the editor, flagged with whether
 //! the song is recording. The editor turns them into parts: recorded ones
 //! go into the song, the others into the retro buffer ([re:6342d9]
-//!  [re:2af005], `PatternStopped` [re:be8eab]).
+//!  [re:2af005], pattern stopped [re:be8eab]).
 //!
 //! A stop starts a "stopped" part ([`STOP_PART`], pattern 0x19, never
-//! activated by `ActivateTrackChange` [re:dce201]) that lasts until the next
+//! activated by a track change [re:dce201]) that lasts until the next
 //! start or power-on.
 
 use crate::song::quantize_round;
@@ -57,7 +57,7 @@ impl SongRecorder {
         self.state == 2
     }
 
-    /// `RecordPatternStart`: closes the previous recorded pattern of the
+    /// Pattern start: closes the previous recorded pattern of the
     /// track, then opens `pattern` at the rounded time.
     pub fn record_start(&mut self, track: usize, pattern: usize, time: f64, phase: f64) {
         if track >= TRACKS || (pattern >= 24 && pattern != STOP_PART) || self.current[track] == Some(pattern) {
@@ -73,7 +73,7 @@ impl SongRecorder {
         self.events.push(SongEvent::Started { track, pattern, time: t, recording, phase });
     }
 
-    /// `RecordPatternStop`; `stop_part` opens a [`STOP_PART`] afterwards.
+    /// Pattern stop; `stop_part` opens a [`STOP_PART`] afterwards.
     pub fn record_stop(&mut self, track: usize, time: f64, stop_part: bool) {
         if track >= TRACKS {
             return;
@@ -89,7 +89,7 @@ impl SongRecorder {
         }
     }
 
-    /// `RecordAllPatternStops` [re:a5b1e3] (the event carries the flag given).
+    /// Every track's pattern stop [re:a5b1e3] (the event carries the flag given).
     fn record_all_stops(&mut self, time: f64, recording: bool) {
         for track in 0..TRACKS {
             if let Some(prev) = self.current[track].take() {
@@ -98,7 +98,7 @@ impl SongRecorder {
         }
     }
 
-    /// `StartRecording` [re:f375c2].
+    /// Start recording [re:f375c2].
     fn start(&mut self, time: f64) {
         if self.state == 2 {
             return;
@@ -109,7 +109,7 @@ impl SongRecorder {
         self.events.push(SongEvent::State(2));
     }
 
-    /// `StopRecording` [re:6ebf71].
+    /// Stop recording [re:6ebf71].
     fn stop(&mut self, time: f64) {
         if self.state != 2 {
             return;
@@ -119,7 +119,7 @@ impl SongRecorder {
         self.events.push(SongEvent::State(0));
     }
 
-    /// `ArmRecording` [re:e1dad3] (record on while the song is active): starts
+    /// Arm [re:e1dad3] (record on while the song is active): starts
     /// at once when the transport runs.
     pub fn arm(&mut self, playing: bool, time: f64) {
         if self.state != 0 {
@@ -133,7 +133,7 @@ impl SongRecorder {
         }
     }
 
-    /// `DisarmRecording` [re:1058a5].
+    /// Disarm [re:1058a5].
     pub fn disarm(&mut self, time: f64) {
         if self.state == 2 {
             self.stop(time);
@@ -144,7 +144,7 @@ impl SongRecorder {
         }
     }
 
-    /// `ProcessTransportChange` [re:816b04].
+    /// Transport change [re:816b04].
     pub fn transport(&mut self, playing: bool, time: f64, song_active: bool) {
         if playing {
             self.events.push(SongEvent::NewRetro);
@@ -162,7 +162,7 @@ impl SongRecorder {
         }
     }
 
-    /// `SetActive(false)` stops recording.
+    /// Deactivating the song stops recording.
     pub fn song_deactivated(&mut self, time: f64) {
         if self.state != 0 {
             self.stop(time);

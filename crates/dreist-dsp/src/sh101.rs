@@ -4,7 +4,7 @@
 
 use crate::analog::{analog, lut_pos};
 
-/// [re:892a33] names (`CreateFilterModeMap` [re:c0edaa]).
+/// [re:892a33] names (mode name map [re:c0edaa]).
 pub const SH101_MODES: [&str; 22] =
     ["L2", "L4", "B2", "B4", "H2", "H4", "P2", "NP2", "N2P2T", "N2L2T", "N2H1L1T", "P2N2T", "H2N2T", "H1L1N2T", "N2P2N2T", "N2", "N4", "N2L2", "H2N2", "H1N2L1", "N2N2AT", "N2N2BT"];
 
@@ -69,7 +69,7 @@ impl Sh101 {
         f
     }
 
-    /// `SetSampleRate` [re:9044ed]: 10 Hz high-pass on the input.
+    /// Sample-rate setup [re:9044ed]: 10 Hz high-pass on the input.
     pub fn set_sample_rate(&mut self, sr: f32, oversample: i32) {
         self.inv_sr = 1.0 / sr;
         let e = (self.inv_sr * -62.831856).exp();
@@ -77,7 +77,7 @@ impl Sh101 {
         self.limit = if oversample == 1 { 1.0 } else { 0.25 };
     }
 
-    /// `Initialize` [re:fbaa62]. Changing mode clears the state.
+    /// Setup [re:fbaa62]. Changing mode clears the state.
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.octave = cutoff * 12.0 - 6.0;
         self.res = res * 1.01;
@@ -96,7 +96,7 @@ impl Sh101 {
     pub fn process(&mut self, inp: [&[f32]; 2], out: [&mut [f32]; 2], inv_n: f32) {
         let t = &analog().otalim_s;
         let n = out[0].len();
-        let f = self.octave.exp2() * self.inv_sr * 440.0;
+        let f = crate::fx::exp2(self.octave) * self.inv_sr * 440.0;
         let r = (self.res * 4.03).min(32.0).max(0.0);
         if let Some(m) = MODE_MIX.get(self.mode) {
             self.mix = *m;
@@ -108,14 +108,14 @@ impl Sh101 {
         }
         let k = self.limit;
         let lim = |g: f32| ((g.abs() + k) - (g - k).abs()) * -4.53236;
-        let e_old = lim(self.g_prev).exp2();
+        let e_old = crate::fx::exp2(lim(self.g_prev));
         let frac = inv_n * n as f32;
         let g_new = (((f.abs() + 1.0) - (f - 1.0).abs()) * 0.5 - self.g_prev) * frac + self.g_prev;
         let r_old = self.r_prev;
         let r_new = frac * (r - r_old) + r_old;
         self.g_prev = g_new;
         self.r_prev = r_new;
-        let e_new = lim(g_new).exp2();
+        let e_new = crate::fx::exp2(lim(g_new));
         if n == 0 {
             return;
         }

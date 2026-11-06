@@ -23,9 +23,9 @@ pub fn slider_item(v: f32) -> String {
 /// separated by `,`. A menu with one shows only the grid; its cells are
 /// the selectable indices.
 pub const GRID: char = '\u{3}';
-/// Grid cell size and pitch ([re:2aab61] ctor [re:6db137]:
+/// Grid cell size and pitch ([re:2aab61] constructor [re:6db137]:
 /// 12 × 12 cells every 14 px from (2, 2); item size cols·14 + 6 ×
-/// rows·14 + 2, `GetRequestedTextSize` [re:ce04b6]).
+/// rows·14 + 2, [re:ce04b6]).
 const CELL: f32 = 12.0;
 const PITCH: f32 = 14.0;
 
@@ -56,17 +56,20 @@ fn grid(item: &str) -> Option<Grid> {
 pub fn slider_value(item: &str) -> Option<f32> {
     item.strip_prefix(SLIDER).and_then(|v| v.parse().ok())
 }
-/// Row height (`ComputeMenuSizeAndAddItemsToPort` [re:5bef62]: every row is at
+/// Row height ([re:5bef62]: every row is at
 /// least 20 px; text rows take max(font height, 20)).
 const ITEM_H: f32 = 20.0;
 /// Check item icon column ([re:cbc42a]
 /// [re:02414f]: 20 × 20).
 const CHECK_W: f32 = 20.0;
-/// Sub menu indicator column (`GetRequestedAdditionalAreaSize` [re:006869]:
+/// Sub menu indicator column ([re:006869]:
 /// 20 when the item has a sub menu; the column is laid out 4 wider).
 const SUB_W: f32 = 20.0;
 /// Check mark prefix the editors put on checked items.
 pub const CHECK: &str = "✓ ";
+/// Block icon prefix (v1's `MenuBlock.png` in the icon column, e.g. graph
+/// lanes that hold data; [re:822910]).
+pub const BLOCK: &str = "■ ";
 /// Prefix of a disabled item (drawn at alpha 0x80, not selectable).
 pub const DISABLED: char = '\u{2}';
 
@@ -85,10 +88,15 @@ fn is_sub(item: &str) -> bool {
     item.trim_end().ends_with('▸')
 }
 
-/// The item's label without the check prefix or sub menu marker.
+/// Whether the item carries the block icon.
+fn has_block(item: &str) -> bool {
+    item.strip_prefix(DISABLED).unwrap_or(item).starts_with(BLOCK)
+}
+
+/// The item's label without the check / block prefix or sub menu marker.
 fn label(item: &str) -> &str {
     let item = item.strip_prefix(DISABLED).unwrap_or(item);
-    let t = item.strip_prefix(CHECK).unwrap_or(item);
+    let t = item.strip_prefix(CHECK).or_else(|| item.strip_prefix(BLOCK)).unwrap_or(item);
     t.trim_end().strip_suffix('▸').map(str::trim_end).unwrap_or(t)
 }
 
@@ -103,7 +111,7 @@ pub struct Menu {
     pub y: f32,
     pub w: f32,
     pub hover: Option<usize>,
-    /// `SetIsAttachedMenu` (menus of popup buttons): only the bottom
+    /// Attached menu (menus of popup buttons): only the bottom
     /// corners are rounded; popup menus round all four.
     pub attached: bool,
 }
@@ -128,10 +136,10 @@ impl Menu {
 
     /// Whether any row is a check item (they share a 20 px icon column).
     fn has_checks(&self) -> bool {
-        self.checked.is_some() || self.items.iter().any(|i| i.starts_with(CHECK))
+        self.checked.is_some() || self.items.iter().any(|i| i.starts_with(CHECK) || has_block(i))
     }
 
-    /// Left of the text column (`SetActualSizes` [re:9f38a4]: icon at x = 2,
+    /// Left of the text column ([re:9f38a4]: icon at x = 2,
     /// text at icon width + 2).
     fn text_x(&self) -> f32 {
         if self.has_checks() { CHECK_W + 2.0 } else { 2.0 }
@@ -163,9 +171,9 @@ impl Menu {
         x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.height()
     }
 
-    /// [re:d71f90] and the items' `DrawHighlight`
-    /// [re:3cd087] / `DrawIcon` / `DrawText` [re:58bab5] /
-    /// `DrawSubMenuIndicator` [re:c0278b], [re:606f7b]
+    /// [re:d71f90] and the items' highlight
+    /// [re:3cd087] / icon / text [re:58bab5] /
+    /// sub menu indicator [re:c0278b], [re:606f7b]
     /// [re:5d7174], [re:5954a7].
     pub fn draw(&self, styles: &StyleSheet, p: &mut Painter) {
         let fill = styles.colour(MENU_STYLE, "colFill", Colour::WHITE);
@@ -241,9 +249,13 @@ impl Menu {
                 let (ix, iy) = (self.x + 2.0 + ((CHECK_W - 12.0) / 2.0).floor(), y + ((ITEM_H - 12.0) / 2.0).floor());
                 p.line(ix + 1.0, iy + 5.0, ix + 5.0, iy + 10.0, text, 3.0);
                 p.line(ix + 4.0, iy + 10.0, ix + 11.0, iy + 1.0, text, 3.0);
+            } else if has_block(item) {
+                // An 8 × 8 block in the text colour, centred in the icon column.
+                let (ix, iy) = (self.x + 2.0 + ((CHECK_W - 8.0) / 2.0).floor(), y + ((ITEM_H - 8.0) / 2.0).floor());
+                p.fill_rect(RectF::new(ix, iy, 8.0, 8.0), text);
             }
             let tw = (sub_x - tx - 2.0).max(0.0);
-            // `GetTextColour(_, enabled)`: alpha 0x80 when disabled.
+            // Text colour: alpha 0x80 when disabled.
             let tc = if is_disabled(item) { text.with_alpha(text.f_alpha() * 128.0 / 255.0) } else { text };
             p.text(RectF::new(self.x + tx + 2.0, y, tw, ITEM_H), label(item), tc, &font, HAlign::Left, VAlign::Center);
             if is_sub(item) {
@@ -265,7 +277,7 @@ pub fn menu_width(styles: &StyleSheet, fonts: &mut crate::text::Fonts, items: &[
         return (g.cols as f32 * PITCH + 6.0 + 4.0).max(min.min(g.cols as f32 * PITCH + 10.0));
     }
     let font = styles.font(MENU_STYLE);
-    let checks = items.iter().any(|i| i.starts_with(CHECK));
+    let checks = items.iter().any(|i| i.starts_with(CHECK) || has_block(i));
     let text = items
         .iter()
         .map(|s| {

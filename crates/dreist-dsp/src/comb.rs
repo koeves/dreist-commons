@@ -64,7 +64,7 @@ impl Comb {
         }
     }
 
-    /// `SetSampleRate` [re:07aa89]: power-of-two buffer of at least 0.2 s.
+    /// Sample-rate setup [re:07aa89]: power-of-two buffer of at least 0.2 s.
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.sr = sr;
         self.inv_sr = 1.0 / sr;
@@ -88,7 +88,7 @@ impl Comb {
         self.damp_coef = ((b + 1.0) - (b - 1.0).abs()) * 0.5;
     }
 
-    /// `Initialize` [re:af406e].
+    /// Setup [re:af406e].
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.positive = 0.5 <= mode;
         let c = cutoff * 12.0;
@@ -114,9 +114,9 @@ impl Comb {
         self.buf[w] -= d;
         self.damp -= d;
         let p = inv_n.min(0.03125);
-        let up = (-self.octave).exp2();
+        let up = crate::fx::exp2(-self.octave);
         let (delay_t, fb_t, dry_t, wet_t, damp_k) = if self.positive {
-            let fc = (self.octave - 2.0).exp2() * 440.0 * self.inv_sr;
+            let fc = crate::fx::exp2(self.octave - 2.0) * 440.0 * self.inv_sr;
             (up * 0.0022727272 * self.sr, fb_amount, norm * norm * 0.5, norm * 0.5, Some(fc))
         } else {
             (up * 0.0011363636 * self.sr, -fb_amount, norm * norm * 0.5, norm * -0.5, None)

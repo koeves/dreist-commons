@@ -1,4 +1,4 @@
-//! `Convertor::*` helpers used by [re:9d5283].
+//! Conversion helpers used by [re:9d5283].
 
 /// [re:a51561]: normalized gain to linear amplitude, `2g³`.
 pub fn gain_to_amp(g: f32) -> f32 {

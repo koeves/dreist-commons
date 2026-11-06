@@ -2,10 +2,12 @@
 //! [re:9f001e]). See the dreist-re sequencer notes.
 
 use dreist_formats::Node;
-use dreist_formats::params::{STEP_LANES, step_lane_default, step_lane_index};
+use dreist_formats::params::{step_lane_default, step_lane_index};
 
-/// Number of step graph lanes (`Step::StepGraphItems`).
-pub const LANES: usize = 93;
+/// Number of step graph lanes.
+/// Every step lane: the 93 both versions share and the original v1's
+/// four routing depths ([`dreist_formats::params::LANE_COUNT`]).
+pub const LANES: usize = dreist_formats::params::LANE_COUNT;
 /// Tracks per pattern (= pads per engine).
 pub const TRACKS: usize = 64;
 /// Patterns per engine.
@@ -20,10 +22,12 @@ pub mod lane {
     pub const LINK: usize = 10;
     pub const FORCE_LAYER: usize = 15;
     pub const PROBABILITY: usize = 16;
+    /// The original v1's routing-depth lanes (one per routing slot).
+    pub const ROUTING_DEPTH: usize = dreist_formats::params::V1_ROUTING_LANE;
 }
 
-/// `StepPattern::Resolution`: names registered by `Start()` ([re:58734c],
-/// `ReplaceResolution`), steps per 16th from table [re:660cc6].
+/// Pattern `Resolution`: names registered at startup ([re:58734c]),
+/// steps per 16th from table [re:660cc6].
 pub const RESOLUTION_NAMES: [&str; 14] = ["1", "1T", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64", "1/64T"];
 const STEPS_PER_16TH: [f64; 14] = [0.0625, 0.09375, 0.125, 0.1875, 0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
 
@@ -41,7 +45,7 @@ pub fn resolution_cycles(resolution: usize) -> i32 {
 }
 
 /// Index into [`RESOLUTION_NAMES`]; unknown names map to 14, which reads as
-/// 1.0 (`GetPatternResolutionFloatingPoint` falls back for indices > 13).
+/// 1.0 (the original falls back for indices > 13).
 pub fn resolution_index(name: &str) -> usize {
     RESOLUTION_NAMES.iter().position(|n| *n == name).unwrap_or(14)
 }
@@ -50,7 +54,7 @@ pub fn steps_per_16th(resolution: usize) -> f64 {
     STEPS_PER_16TH.get(resolution).copied().unwrap_or(1.0)
 }
 
-/// `StepPattern::SyncMode` (names from `Start()` `ReplaceSyncMode`; the legacy
+/// Pattern `SyncMode` (names registered at startup; the legacy
 /// names Sync/Trigger/Gate/Shot are also accepted, [re:33eee9]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
@@ -60,7 +64,7 @@ pub enum SyncMode {
     GateRestart,
 }
 
-/// `ReplaceSyncMode` names, by index.
+/// Sync mode names, by index.
 pub const SYNC_MODE_NAMES: [&str; 4] = ["Slave", "Slave restart", "Gate", "Gate restart"];
 
 impl SyncMode {
@@ -73,7 +77,7 @@ impl SyncMode {
             "Slave restart" | "Trigger" => SyncMode::SlaveRestart,
             "Gate" => SyncMode::Gate,
             "Gate restart" | "Shot" => SyncMode::GateRestart,
-            // "Slave", "Sync", and unknown (StringToSyncMode returns 4, treated as free-running).
+            // "Slave", "Sync", and unknown (the original's lookup returns 4, treated as free-running).
             _ => SyncMode::Slave,
         }
     }
@@ -119,17 +123,22 @@ impl StepData {
 #[derive(Debug, Clone)]
 pub struct TrackData {
     pub steps: Vec<StepData>,
-    /// `TrackLength` (+0x54): wraps the track before the pattern end.
+    /// `TrackLength`: wraps the track before the pattern end.
     pub length: u32,
-    /// `<Lane>Rand` per-lane randomisation (+0x70), default 0.5 = none.
+    /// `<Lane>Rand` per-lane randomisation, default 0.5 = none.
     pub rand: [f32; LANES],
+    /// `<Lane>Scal` and `<Lane>Comp` per-lane scale (offset) and
+    /// compression amounts, default 0.5 = none; only read with
+    /// [`dreist_dsp::rules::Rules::lanes_v1`] ([`lane_variant_v1`]).
+    pub scale: [f32; LANES],
+    pub comp: [f32; LANES],
     pub mute: bool,
     pub solo: bool,
 }
 
 impl TrackData {
     pub fn empty(steps: u32) -> TrackData {
-        TrackData { steps: vec![StepData::off(); steps as usize], length: steps, rand: [0.5; LANES], mute: false, solo: false }
+        TrackData { steps: vec![StepData::off(); steps as usize], length: steps, rand: [0.5; LANES], scale: [0.5; LANES], comp: [0.5; LANES], mute: false, solo: false }
     }
 
     /// Step `i`; steps past the stored ones are off (the original's
@@ -141,12 +150,12 @@ impl TrackData {
 
 #[derive(Debug, Clone)]
 pub struct PatternData {
-    /// `PatternSteps` (+0x2b0).
+    /// `PatternSteps`.
     pub steps: u32,
     pub resolution: usize,
     pub sync: SyncMode,
     pub tracks: Vec<TrackData>,
-    /// `MonoModeActive` (+0x2b4): one step per column (`MonoizeSteps`).
+    /// `MonoModeActive`: one step per column.
     pub mono: bool,
 }
 
@@ -154,7 +163,7 @@ pub struct PatternData {
 /// that parses as a number (the first attribute of each lane only, as
 /// `Node::f32` reads it).
 fn for_lanes(n: &Node, lane: impl Fn(&str) -> Option<usize>, mut set: impl FnMut(usize, f32)) {
-    let mut seen = [false; STEP_LANES.len()];
+    let mut seen = [false; LANES];
     for (k, v) in &n.attrs {
         if let Some(l) = lane(k).filter(|l| !std::mem::replace(&mut seen[*l], true)) {
             if let Ok(v) = v.parse() {
@@ -182,6 +191,8 @@ impl PatternData {
             track.mute = t.bool("Mute").unwrap_or(false);
             track.solo = t.bool("Solo").unwrap_or(false);
             for_lanes(t, |name| name.strip_suffix("Rand").and_then(step_lane_index), |l, v| track.rand[l] = v);
+            for_lanes(t, |name| name.strip_suffix("Scal").and_then(step_lane_index), |l, v| track.scale[l] = v);
+            for_lanes(t, |name| name.strip_suffix("Comp").and_then(step_lane_index), |l, v| track.comp[l] = v);
             for s in t.children_of("Step") {
                 let Some(k) = s.index().filter(|k| *k < steps) else { continue };
                 let step = &mut track.steps[k as usize];
@@ -218,18 +229,18 @@ impl PatternData {
         steps_per_16th(self.resolution)
     }
 
-    /// `GetPatternLengthIn16ths` [re:960cc4].
+    /// Pattern length in 16ths [re:960cc4].
     pub fn length_16ths(&self) -> f64 {
         self.steps as f64 / self.resolution()
     }
 
-    /// `GetPatternLengthInQN` [re:7eb86a].
+    /// Pattern length in quarter notes [re:7eb86a].
     pub fn length_qn(&self) -> f64 {
         self.length_16ths() * 0.25
     }
 }
 
-/// [re:9f001e] (values at +0x18, 128 doubles; `NumberOfSteps` +0x418).
+/// [re:9f001e] (128 doubles; `NumberOfSteps`).
 #[derive(Debug, Clone)]
 pub struct Swing {
     pub steps: u32,
@@ -273,6 +284,66 @@ pub fn randomised(value: f32, amount: f32, rand: &mut impl FnMut() -> f32) -> f3
     let r = rand() * s.abs();
     let v = if s <= 0.0 { value - r } else { r + value };
     v.clamp(0.0, 1.0)
+}
+
+/// The lanes the original v1 passes through its lane variant at note start
+/// ([re:bef782], [re:ab179d], [re:3f302e], [re:3b0509]): Velocity, Pan,
+/// Repeats, Reverse, the two pitch lanes, StartPoint, the four filter
+/// lanes and the four routing depths (`SetupNoteOnParameters` reads v1's
+/// lanes 19–22 through it). Every other lane is used as stored (no
+/// randomisation).
+pub const V1_VARIANT_LANES: [usize; 15] = [0, 1, 2, 4, 6, 7, 8, 11, 12, 13, 14, 93, 94, 95, 96];
+
+/// The original v1's compression target of a lane ([re:0d76e5]):
+/// 0.5 for the bipolar lanes (Pan, Shift, the pitch lanes, StartPoint,
+/// cutoff, resonance, drive and the sends), 1 for the rest.
+pub fn compression_target_v1(lane: usize) -> f32 {
+    if matches!(lane, 1 | 3 | 6 | 7 | 8 | 11 | 12 | 14 | 19..=22 | 93..=96) { 0.5 } else { 1.0 }
+}
+
+/// The original v1's lane value at note start ([re:51afe0]): the track's
+/// scale moves the value by `2·scale − 1`, its compression pulls it
+/// toward the lane's target (above 0.5) or pushes it away (below 0.5),
+/// then its randomisation adds or subtracts `|2·rand − 1|·r` (unrounded,
+/// unlike [`randomised`]); each stage clamps to 0..1 and is skipped within
+/// 1e-6 of 0.5. `rand` returns 0..1.
+pub fn lane_variant_v1(value: f32, scale: f32, comp: f32, rand_amount: f32, target: f32, rand: &mut impl FnMut() -> f32) -> f32 {
+    let clamp = |x: f32| {
+        if x <= 0.0 {
+            0.0
+        } else if x < 1.0 {
+            x
+        } else {
+            1.0
+        }
+    };
+    let mut v = clamp((scale + scale - 1.0) + value);
+    if (comp - 0.5).abs() >= 1e-6 {
+        if comp > 0.5 {
+            v = clamp((target - v) * (comp + comp - 1.0) + v);
+        } else {
+            let k = comp * -2.0 + 1.0;
+            if k.abs() >= 1e-6 {
+                v = if (target - 0.5).abs() >= 1e-6 { clamp(v - (v - (1.0 - target)) * k) } else { clamp(v - k * (target - v)) };
+            }
+        }
+    }
+    if (rand_amount - 0.5).abs() >= 1e-6 {
+        let s = rand_amount + rand_amount - 1.0;
+        if s.abs() >= 1e-6 {
+            let r = s.abs() * rand();
+            v = clamp(if 0.0 < s { v + r } else { v - r });
+        }
+    }
+    v
+}
+
+/// A track's lane value at note start under
+/// [`dreist_dsp::rules::Rules::lanes_v1`]: [`lane_variant_v1`] for
+/// [`V1_VARIANT_LANES`], the stored value for the others.
+pub fn lane_at_note_v1(step: &StepData, track: &TrackData, lane: usize, rand: &mut impl FnMut() -> f32) -> f32 {
+    let v = step.lanes[lane];
+    if V1_VARIANT_LANES.contains(&lane) { lane_variant_v1(v, track.scale[lane], track.comp[lane], track.rand[lane], compression_target_v1(lane), rand) } else { v }
 }
 
 /// [re:60d051] table [re:08ca81] (lane → style; 0 for
@@ -381,6 +452,8 @@ impl PatternData {
             .map(|t| {
                 let mut nt = TrackData::empty(steps);
                 nt.rand = t.rand;
+                nt.scale = t.scale;
+                nt.comp = t.comp;
                 nt.mute = t.mute;
                 nt.solo = t.solo;
                 let mut i = 0;
@@ -495,6 +568,70 @@ mod tests {
         assert!(!SyncMode::Slave.restarts() && !SyncMode::Slave.gated());
     }
 
+    /// v1's lane variant: scale offsets, compression toward the target
+    /// (or away from it), unrounded randomisation.
+    #[test]
+    fn v1_lane_variant_stages() {
+        let mut r = || 0.5f32;
+        let none = |v| lane_variant_v1(v, 0.5, 0.5, 0.5, 0.5, &mut || 0.5);
+        assert_eq!(none(0.3), 0.3);
+        // Scale 0.75 adds 0.5, clamped.
+        assert!((lane_variant_v1(0.3, 0.75, 0.5, 0.5, 0.5, &mut r) - 0.8).abs() < 1e-6);
+        assert_eq!(lane_variant_v1(0.7, 1.0, 0.5, 0.5, 0.5, &mut r), 1.0);
+        // Compression 0.75 halves the distance to the target.
+        assert!((lane_variant_v1(0.1, 0.5, 0.75, 0.5, 0.5, &mut r) - 0.3).abs() < 1e-6);
+        assert!((lane_variant_v1(0.2, 0.5, 0.75, 0.5, 1.0, &mut r) - 0.6).abs() < 1e-6);
+        // Below 0.5 it expands: away from 0.5, or toward 0 for target 1.
+        assert!((lane_variant_v1(0.4, 0.5, 0.25, 0.5, 0.5, &mut r) - 0.35).abs() < 1e-6);
+        assert!((lane_variant_v1(0.8, 0.5, 0.25, 0.5, 1.0, &mut r) - 0.4).abs() < 1e-6);
+        // Randomisation 0.7: ±0.4·r, not rounded to 1 %.
+        assert!((lane_variant_v1(0.3, 0.5, 0.5, 0.703, 0.5, &mut r) - (0.3 + 0.406 * 0.5)).abs() < 1e-5);
+        assert!((lane_variant_v1(0.3, 0.5, 0.5, 0.25, 0.5, &mut r) - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn v1_lane_set_and_targets() {
+        let mut t = TrackData::empty(4);
+        t.scale[lane::SHIFT] = 1.0;
+        t.scale[1] = 1.0;
+        let s = StepData::off();
+        let mut r = || 0.0f32;
+        // Shift is used as stored, Pan through the variant.
+        assert_eq!(lane_at_note_v1(&s, &t, lane::SHIFT, &mut r), 0.5);
+        assert_eq!(lane_at_note_v1(&s, &t, 1, &mut r), 1.0);
+        assert_eq!(compression_target_v1(0), 1.0);
+        assert_eq!(compression_target_v1(11), 0.5);
+        assert_eq!(compression_target_v1(lane::FORCE_LAYER), 1.0);
+    }
+
+    /// `<Lane>Scal` / `<Lane>Comp` parse like `<Lane>Rand`.
+    #[test]
+    fn scale_and_compression_parse() {
+        let mut p = Node::new("StepPattern", None);
+        let mut t = Node::new("Track", Some("Track2"));
+        t.set("PanScal", "0.75");
+        t.set("FilterCutoffComp", "0.2");
+        p.children.push(t);
+        let d = PatternData::from_node(&p);
+        assert_eq!(d.tracks[2].scale[1], 0.75);
+        assert_eq!(d.tracks[2].comp[11], 0.2);
+        assert_eq!(d.tracks[2].scale[0], 0.5);
+    }
+
+    /// The original v1's routing-depth lanes load after the shared ones
+    /// and stay neutral unless a step sets them.
+    #[test]
+    fn routing_depth_lanes_load() {
+        const _: () = assert!(LANES == std::mem::size_of::<dreist_dsp::voice::Lanes>() / 4);
+        let p = Node::parse(r#"<StepPattern name="StepPattern0" PatternSteps="4"><Track name="Track0" Ampenvdepth2Rand="0.75"><Step name="S1" State="true" Ampenvdepth2="0.8" Freeenvdepth1="0.2" /></Track></StepPattern>"#).unwrap();
+        let d = PatternData::from_node(&p);
+        let t = &d.tracks[0];
+        assert_eq!(t.step(1).lanes[lane::ROUTING_DEPTH..lane::ROUTING_DEPTH + 4], [0.5, 0.8, 0.2, 0.5]);
+        assert_eq!(t.step(0).lanes[lane::ROUTING_DEPTH + 1], 0.5);
+        assert_eq!(t.rand[lane::ROUTING_DEPTH + 1], 0.75);
+        assert!(V1_VARIANT_LANES.contains(&(lane::ROUTING_DEPTH + 3)));
+    }
+
     #[test]
     fn randomisation_is_identity_at_half() {
         let mut r = || 0.7;
@@ -506,7 +643,7 @@ mod tests {
 
     #[test]
     fn snapped_lanes_follow_set_graph_status() {
-        let mut l = [0.0f32; 93];
+        let mut l = [0.0f32; LANES];
         l[4] = 0.62;
         l[lane::LINK] = 1.0;
         l[lane::REPEATS] = 0.3;
@@ -515,7 +652,7 @@ mod tests {
         assert_eq!(l[4], 1.0);
         assert_eq!(l[lane::LINK], 0.0);
         assert_eq!(l[lane::VELOCITY], 1.0);
-        let mut l = [0.0f32; 93];
+        let mut l = [0.0f32; LANES];
         l[4] = 0.49;
         snap_lanes(&mut l);
         assert_eq!(l[4], 0.0);

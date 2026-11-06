@@ -11,7 +11,7 @@ use dreist_formats::Node;
 
 use crate::engine::Route;
 
-/// One of the two metronome voices ([re:1cf147] / `+0x5fc8`):
+/// One of the two metronome voices ([re:1cf147]):
 /// plays its sample from the start at unity pitch, scaled by the
 /// metronome gain ([re:f01d09]).
 #[derive(Debug, Clone, Default)]
@@ -71,13 +71,13 @@ impl ClickVoice {
 #[derive(Debug, Clone)]
 pub struct Metronome {
     pub muted: bool,
-    /// Normalized gain (`SetGain`, reset 0.7937 = 0 dB) and output location.
+    /// Normalized gain (reset 0.7937 = 0 dB) and output location.
     pub gain: f32,
     pub route: Route,
-    /// Click state (+0x44): −1 idle, 2 bar, 1 beat; countdown (+0x48).
+    /// Click state: −1 idle, 2 bar, 1 beat; countdown.
     state: i32,
     counter: i32,
-    /// Voice +0x32c8 holds `Bar.wav`, +0x5fc8 `Beat.wav`.
+    /// The bar voice holds `Bar.wav`, the beat voice `Beat.wav`.
     pub bar_voice: ClickVoice,
     pub beat_voice: ClickVoice,
 }
@@ -114,9 +114,9 @@ impl Metronome {
         self.bar_voice.sample.is_some() || self.beat_voice.sample.is_some()
     }
 
-    /// `ProgressClick` [re:23b2a1] for a new 16th `n16`, `delay` samples ahead.
-    /// Bars (n16 % 16 == 0) start voice +0x5fc8 and other beats voice
-    /// +0x32c8, so the downbeat plays `Beat.wav` (original quirk, kept).
+    /// Advance the click [re:23b2a1] for a new 16th `n16`, `delay` samples ahead.
+    /// Bars (n16 % 16 == 0) start the beat voice and other beats the bar
+    /// voice, so the downbeat plays `Beat.wav` (original quirk, kept).
     pub fn progress_click(&mut self, n16: i32, delay: i32) {
         if self.muted || self.state != -1 || n16 & 3 != 0 {
             return;
@@ -152,7 +152,7 @@ impl Metronome {
         }
     }
 
-    /// Render both voices (`ProcessAllVoices` tail) into `out`.
+    /// Render both voices (end of the voice processing) into `out`.
     pub fn render(&mut self, host_sr: f32, out: [&mut [f32]; 2]) {
         let g = gain_to_amp(self.gain);
         let [l, r] = out;

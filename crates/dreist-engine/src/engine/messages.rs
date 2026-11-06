@@ -17,7 +17,7 @@ fn clamp_param(src: usize, v: f32) -> f32 {
 }
 
 impl Dreist {
-    /// Queue a message for the next block (`PostMessageToSynth`).
+    /// Queue a message for the next block (to the synth).
     pub fn post_message(&mut self, m: Message) {
         self.messages.push(m);
     }
@@ -78,7 +78,7 @@ impl Dreist {
         self.doc_apply(m);
     }
 
-    /// A message for the editor (`PostMessageToEditor`).
+    /// A message for the editor.
     pub(super) fn post_editor(&mut self, mut m: Message) {
         if self.editor_messages.len() < 256 {
             m.editor = true;
@@ -127,7 +127,7 @@ impl Dreist {
             // `e_registryOptionsChanged` [ForcedLayersFallThrough,
             // SendActiveSensing] ([re:5e0672] stores the
             // first in [re:b2a80f]; active sensing does nothing in
-            // the plugin: `UpdateSendActiveSensingFromOption` is empty).
+            // the plugin: its option update is empty).
             id::REGISTRY_OPTIONS_CHANGED => self.forced_fallthrough = vb(0),
             // `e_registryMIDIOptionsChanged` [send notes, send CCs].
             id::REGISTRY_MIDI_OPTIONS_CHANGED => {
@@ -135,7 +135,7 @@ impl Dreist {
                 self.send_ccs = vb(1);
             }
             id::TOGGLE_RECORD => {
-                // HandleTransportMessage 0x14: with the song active, record
+                // Transport message 0x14: with the song active, record
                 // arms / disarms song recording.
                 self.recording = vb(0);
                 if self.song.active {
@@ -149,10 +149,10 @@ impl Dreist {
             }
             id::TOGGLE_QUANTIZE => self.quantize = vb(0),
             id::SET_METRONOME_LEVEL => self.metronome.gain = v(0).clamp(0.0, 1.0),
-            // Header Options menu ([re:4139f8] $_6 [re:d718a1]):
-            // metronome output (an `EAudioOutputs` index), pre-roll length
+            // Header Options menu ([re:4139f8] / [re:d718a1]):
+            // metronome output (an output location index), pre-roll length
             // 0..3, pre-roll only when recording, wait for MIDI, metronome
-            // only when recording ([re:781091] / +0xac / +0xad / +0x90).
+            // only when recording ([re:781091]).
             id::SET_METRONOME_OUTPUT_LOCATION => self.metronome.route = Route::from_index(vi(0).max(0) as usize),
             id::SET_PREROLL_MODE => self.preroll_mode = vi(0).clamp(0, 3) as u32,
             id::SET_PREROLL_ONLY_ON_REC => self.preroll_only_rec = vb(0),
@@ -183,7 +183,7 @@ impl Dreist {
                     set_row(x.aux.get_mut(vi(0) as usize), vi(2), v(1));
                 }
             }
-            // Output routing (mixer OutputCombo): v0 = `EAudioOutputs` index.
+            // Output routing (mixer OutputCombo): v0 = output location index.
             id::SET_PAD_OUTPUT | id::SET_LAYER_OUTPUT | id::SET_ENGINE_OUTPUT | id::SET_GLOBAL_AUX_OUTPUT => {
                 let r = super::Route::from_index(vi(0).max(0) as usize);
                 match m.kind {
@@ -209,7 +209,7 @@ impl Dreist {
                     }
                 }
             }
-            // `HandleGlobalAuxMessage` 0xa3: [re:892cf2] (`IsPreFade`).
+            // Global aux message 0xa3: [re:892cf2] (`IsPreFade`).
             id::SET_GLOBAL_AUX_PRE_POST => {
                 if let Some(a) = usize::try_from(e).ok().and_then(|e| self.aux.get_mut(e)) {
                     a.pre_fade = vb(0);
@@ -249,7 +249,7 @@ impl Dreist {
                 }
             }
             id::SET_MODULATION_SOURCE_PARAMETER => {
-                // HandleModulationMessage 0x30: I0 slot; v1 param, value index 3
+                // Modulation message 0x30: I0 slot; v1 param, value index 3
                 // ([re:61f280] with 4 values), v2 source.
                 if let Some(Some(md)) = self.mods.get_mut(e.max(0) as usize) {
                     if e >= 0 {
@@ -278,14 +278,14 @@ impl Dreist {
                     self.recompute_audible();
                 }
             }
-            // HandlePadMessage 0x51/0x52: Pad+0x2d8 (0x52 = lround(v·4)).
+            // Pad messages 0x51/0x52: the pad layer mode (0x52 = lround(v·4)).
             id::SET_PAD_LAYER_MODE | id::SET_PAD_LAYER_MODE01 => {
                 let n = if m.kind == id::SET_PAD_LAYER_MODE { vi(0) } else { (v(0) * 4.0).round() as i32 };
                 if let Some(p) = self.pad_mut(e, i(1)) {
                     p.mode = layer_mode_from_index(n);
                 }
             }
-            // 0x53: Pad+0x380+j.
+            // 0x53: the pad's linkage j.
             id::SET_PAD_LINKAGE => {
                 let (p, j) = (i(1), vi(0));
                 if let (Some(x), Ok(p), Ok(j)) = (self.engines.get_mut(e.max(0) as usize), usize::try_from(p), usize::try_from(j)) {
@@ -318,10 +318,10 @@ impl Dreist {
                     if m.kind == id::SET_LAYER_VELOCITY_SPLIT_MIN { l.slot.vel_low = x } else { l.slot.vel_high = x }
                 }
             }
-            // `HandlePatternMessage` 0xd9 (objdump at [re:cc1ad3]): with the engine
+            // Pattern message 0xd9 ([re:cc1ad3]): with the engine
             // gate open and record armed, the bound lane of track index 4
             // takes the value at the engine's current step (through the
-            // linkage, as 0xd6), and `SetGraphRecordLastCC` queues it for the
+            // linkage, as 0xd6), and the graph record queue keeps it for the
             // next step the track reaches.
             id::SET_INSTO_MIDI_GRAPH_VALUE => {
                 let track = i(4);
@@ -353,9 +353,9 @@ impl Dreist {
                 self.engines[e as usize].state.set_graph_record(track as usize, lane as usize, cc);
                 self.doc_step(e as usize, pat as usize, track as usize, step as usize);
             }
-            // `HandlePatternMessage` 0xd8 (objdump [re:4734a6]..[re:96b124]): with the
+            // Pattern message 0xd8 ([re:4734a6]..[re:96b124]): with the
             // gate open and record armed, the current pad's displayed lane
-            // takes the value at the current step and `SetGraphRecordLastCC`
+            // takes the value at the current step and the graph record queue
             // queues it for the next step. Port: [e, pad, −1, pattern]
             // [value, lane]; the editor writes the current step itself (0xd6),
             // so this only queues.
@@ -388,7 +388,7 @@ impl Dreist {
                 }
             }
             id::SONG_SET_ACTIVE => {
-                // SetActive [re:733eb8]: off stops song recording, on resumes it
+                // Song active [re:733eb8]: off stops song recording, on resumes it
                 // while record is on.
                 let pos = self.song_position();
                 if !vb(0) {
@@ -432,7 +432,7 @@ impl Dreist {
                 let on = self.song.loop_enabled;
                 self.set_song_loop(on, v(0) as f64, v(1) as f64);
             }
-            // HandleSceneMessage: v0 = scene.
+            // Scene messages: v0 = scene.
             id::SCENE_TRIGGER => {
                 let sc = vi(0).clamp(0, 95) as usize;
                 self.trigger_scene(sc, 0, vb(1));
@@ -445,7 +445,16 @@ impl Dreist {
             id::SCENE_PASTE => self.scenes.paste(vi(0).clamp(0, 95) as usize),
             id::SCENE_SNAPSHOT | id::SCENE_CLEAR | id::SCENE_SET_START_MODE => {
                 let sc = vi(0).clamp(0, 95) as usize;
-                let states: [(usize, bool); ENGINES] = std::array::from_fn(|k| self.engines.get(k).map_or((0, true), |x| (x.state.current_pattern, x.state.pattern_power)));
+                // [re:90cf43]: v1 stores an engine on an empty pattern with
+                // its pattern power off.
+                let v1 = dreist_dsp::rules::get().scene_snapshot_v1;
+                let states: [(usize, bool); ENGINES] = std::array::from_fn(|k| {
+                    self.engines.get(k).map_or((0, true), |x| {
+                        let pat = x.state.current_pattern;
+                        let empty = v1 && x.patterns.get(pat).is_none_or(|p| p.tracks.iter().all(|t| t.steps.iter().all(|s| !s.on)));
+                        (pat, x.state.pattern_power && !empty)
+                    })
+                });
                 let Some(scene) = self.scenes.scenes.get_mut(sc) else { return };
                 match m.kind {
                     id::SCENE_SNAPSHOT => {
@@ -462,7 +471,7 @@ impl Dreist {
             // `e_setLayerAudioFile{Start,End,LoopStart,LoopEnd}Sample` 0x76..0x79
             // [e, p, l] = frame: the layer's markers. The `…Sample01`
             // variants 0x7a..0x7d (MIDI-learnable SP / EP / LS / LE buttons)
-            // carry 0..1: frame = round(v·(frames − 1)) (HandleLayerMessage,
+            // carry 0..1: frame = round(v·(frames − 1)) (layer message,
             // ±0.5 from [re:70089a]).
             id::SET_LAYER_START_SAMPLE
             | id::SET_LAYER_END_SAMPLE
@@ -491,7 +500,7 @@ impl Dreist {
                     t.loop_len = t.loop_end.saturating_sub(t.loop_start);
                 }
             }
-            // HandleLayerMessage: the value is the mode index (automation
+            // Layer message: the value is the mode index (automation
             // sends 0..1, scaled by 15 / 3).
             id::SET_LAYER_CUT_MODE | id::SET_LAYER_PLAY_MODE => {
                 let (e, p, l) = (i(0), i(1), i(2));
@@ -512,10 +521,10 @@ impl Dreist {
                     }
                 }
             }
-            // `HandleLayerMessage` 0x6b / 0x6e / 0x6f / 0x70 for the target
+            // Layer messages 0x6b / 0x6e / 0x6f / 0x70 for the target
             // layers: synthesis mode (automation sends 0..1, rounded),
-            // reverse (+0x364), phase (`SetPhasePosition` ±1) and envelope
-            // pitch tracking (+0x4ea).
+            // reverse, phase position (±1) and envelope
+            // pitch tracking.
             id::SET_LAYER_SYNTHESIS_MODE | id::SET_LAYER_REVERSE_STATUS | id::SET_LAYER_PHASE_POSITION | id::SET_LAYER_ENVELOPE_TRACKING => {
                 let (e, p, l) = (i(0), i(1), i(2));
                 if e < 0 || p < 0 {
@@ -533,6 +542,17 @@ impl Dreist {
                             id::SET_LAYER_REVERSE_STATUS => t.reversed = on,
                             id::SET_LAYER_PHASE_POSITION => t.output_scale = if on { -1.0 } else { 1.0 },
                             _ => t.env_tracks = on,
+                        }
+                    }
+                }
+                // v1 reads the layer's reverse status every block [re:18d53d].
+                if m.kind == id::SET_LAYER_REVERSE_STATUS && dreist_dsp::rules::get().reverse_v1 {
+                    for vo in &mut self.voices {
+                        if matches!(vo.state, VoiceState::Pending | VoiceState::Playing) && vo.slot.engine as i32 == e && vo.slot.pad as i32 == p && (l < 0 || vo.slot.layer as i32 == l) {
+                            vo.voice.set_reversed(on);
+                            if let Some((_, s)) = vo.pending.as_mut() {
+                                s.reversed = on;
+                            }
                         }
                     }
                 }
@@ -564,7 +584,7 @@ impl Dreist {
             | id::SET_PATTERN_MONO_MODE => {
                 self.pattern_edit(m);
             }
-            // `HandlePreviewMessage` [re:355ba9].
+            // Preview messages [re:355ba9].
             id::SET_PREVIEW_VOLUME => self.preview_volume = v(0).clamp(0.0, 1.0),
             id::STOP_PREVIEW => self.stop_preview(),
             id::SET_PREVIEW_LOOP_MODE => self.set_preview_loop(vb(0)),
@@ -594,7 +614,7 @@ impl Dreist {
             }
             id::SET_NOTE_REPEAT_BASE => {
                 if let Some(x) = self.engines.get_mut(e as usize) {
-                    // HandleTransportMessage 0x20: float values (bindings) → round(v·13).
+                    // Transport message 0x20: float values (bindings) → round(v·13).
                     x.state.note_repeat_base = (v(0) * 13.0).round().clamp(0.0, 13.0) as u32;
                 }
             }
@@ -608,7 +628,7 @@ impl Dreist {
                     x.timing.swing_depth = v(0);
                 }
             }
-            // [re:c1ac41] / `SetTempoDenominator` (1..16).
+            // [re:c1ac41] / tempo denominator (1..16).
             id::SET_ENGINE_TEMPO_NUM | id::SET_ENGINE_TEMPO_DENOM => {
                 if let Some(x) = self.engines.get_mut(e as usize) {
                     let n = (v(0).round() as i32).clamp(1, 16) as u32;
@@ -620,8 +640,8 @@ impl Dreist {
                     x.timing.tempo_multiplier = x.timing.tempo_num as f64 / x.timing.tempo_den as f64;
                 }
             }
-            // `HandleEffectChangeMessage` [re:391a17]: chain active (+0x20) /
-            // chain mix (+0x24) from value 0.
+            // Effect change message [re:391a17]: chain active /
+            // chain mix from value 0.
             id::SET_FX_CHAIN_ACTIVE | id::SET_FX_CHAIN_MIX => {
                 let Some(chain) = self.chain_mut(i(0), i(1), i(2)) else { return };
                 if m.kind == id::SET_FX_CHAIN_ACTIVE {
@@ -631,7 +651,7 @@ impl Dreist {
                 }
             }
             id::SET_FX_PARAMETER | id::SET_FX_MIX | id::SET_FX_LEVEL | id::SET_FX_TRIM | id::SET_FX_ACTIVE => {
-                // HandleEffectChangeMessage [re:391a17]: chain at (engine, pad, layer),
+                // Effect change message [re:391a17]: chain at (engine, pad, layer),
                 // slot = Index3 ([re:61f280]<4,4>) else value0.
                 let slot = if i(3) >= 0 { i(3) } else { vi(0) };
                 let (e, p, l) = (i(0), i(1), i(2));
@@ -649,7 +669,7 @@ impl Dreist {
                 }
             }
             id::SAMPLER_TOGGLE_ARMED..=id::SAMPLER_AUTO_MODE => self.sampler_message(m),
-            // SetPlaybackState and the
+            // The playback state and the
             // editor messages are not handled by the port yet.
             _ => {}
         }
@@ -664,7 +684,7 @@ impl Dreist {
         let selected = self.selected_engine;
         let s = &mut self.sampler;
         // Arming takes the auto-allocation target from the selected engine
-        // (`GetAutoSamplerTarget`, kept by the editor; MIDI follow reads
+        // (kept by the editor; MIDI follow reads
         // its engine).
         if s.state == State::Idle && matches!(m.kind, id::SAMPLER_TOGGLE_ARMED | id::SAMPLER_SET_ARMED) {
             s.target_engine = Some(selected);
@@ -728,7 +748,7 @@ impl Dreist {
         self.pad_mut(e, p)?.layers.get_mut(usize::try_from(l).ok()?)
     }
 
-    /// [re:7d62e7] (vfunc 0x680): −1 selects the
+    /// [re:7d62e7]: −1 selects the
     /// enclosing level; engine −4 is global aux `p`, −3 the master.
     fn chain_mut(&mut self, e: i32, p: i32, l: i32) -> Option<&mut crate::fx::FxChain> {
         match e {
@@ -748,12 +768,14 @@ impl Dreist {
         Some(&mut self.layer_mut(e, p, l)?.fx)
     }
 
-    /// `HandleLayerMessage` 0x66 → [re:34ea12].
-    /// `e_tuneLayer` 0x88 (`HandleLayerMessage` [re:db5a60] →
+    /// Layer message 0x66 → [re:34ea12].
+    /// `e_tuneLayer` 0x88 (layer message [re:db5a60] →
     /// [re:f8581c]): coarse / fine tune so the sample's BPM
     /// (metadata, else the length guess) plays at the tempo: semitones =
     /// 12·log2(tempo/BPM), coarse = semitones/24 + 0.5 (unquantised), fine
-    /// = the remainder past the nearest semitone ·0.5 + 0.5. The editor
+    /// = the remainder past the nearest semitone ·0.5 + 0.5, taken from the
+    /// unclamped coarse value (beyond ±12 semitones fine keeps the
+    /// fraction, as the original's routine does). The editor
     /// hears of both (0x1c8; port: `automation_out`).
     fn tune_layer(&mut self, e: i32, p: i32, l: i32) {
         let Some(layer) = self.layer_mut(e, p, l) else { return };
@@ -762,11 +784,19 @@ impl Dreist {
         if tempo <= 0.0 || (tempo - src).abs() < 1e-6 {
             return;
         }
-        let semis = (tempo / src).ln() * 17.312_34;
-        let coarse = (semis / 24.0 + 0.5).clamp(0.0, 1.0);
-        let s = (coarse - 0.5) * 24.0;
-        let r = if s < 0.0 { (s - 0.5).trunc() } else { (s + 0.5).trunc() };
-        let fine = ((s - r) * 0.5 + 0.5).clamp(0.0, 1.0);
+        let ratio = (tempo / src).abs();
+        if ratio == 0.0 {
+            return;
+        }
+        // In double, as the original: semitones = 12·log2(ratio); the
+        // normalised pitch (−12 − x)/(−12 − 12) in float; fine from the
+        // unclamped coarse value. Both are clamped only when stored.
+        let semis = (ratio as f64).ln() * 17.312339006067457;
+        let coarse_u = (-12.0f32 - semis as f32) / (-12.0f32 - 12.0);
+        let s = (coarse_u as f64 - 0.5) * 24.0;
+        let r = (s + if s < 0.0 { -0.5 } else { 0.5 }) as i32 as f64;
+        let fine = (((s - r) * 0.5 + 0.5) as f32).clamp(0.0, 1.0);
+        let coarse = coarse_u.clamp(0.0, 1.0);
         for (par, v) in [(dreist_formats::LayerParam::CoarseTune, coarse), (dreist_formats::LayerParam::FineTune, fine)] {
             self.set_layer_param(e, p, l, par as i32, 0, v);
             let m = Message::new(id::SET_LAYER_PARAMETER, &[e, p, l], &[par as u8 as f32, v, 0.0]);
@@ -803,7 +833,7 @@ impl Dreist {
         }
     }
 
-    /// `HandlePadMessage` 0x4e → [re:fc38b1].
+    /// Pad message 0x4e → [re:fc38b1].
     fn set_pad_param(&mut self, e: i32, p: i32, param: i32, source: i32, value: f32) {
         let Ok(source) = usize::try_from(source) else { return };
         if source >= SOURCES {
@@ -820,7 +850,7 @@ impl Dreist {
         }
     }
 
-    /// `HandleEngineMessage` 0x90 → [re:a4cbaf].
+    /// Engine message 0x90 → [re:a4cbaf].
     fn set_engine_param(&mut self, e: i32, param: i32, source: i32, value: f32) {
         let Ok(source) = usize::try_from(source) else { return };
         if source >= SOURCES {
@@ -857,7 +887,7 @@ impl Dreist {
             return;
         }
         match m.kind {
-            // `HandlePatternMessage` 0xbf/0xc0/0xc1: lane (v0) of the track,
+            // Pattern messages 0xbf/0xc0/0xc1: lane (v0) of the track,
             // every lane of the track, every lane of the pattern.
             id::CLEAR_TRACK_AUTOMATION if t >= 0 => {
                 pat.revert_lanes(Some(t as usize), Some(v[0].max(0.0) as usize));
@@ -871,7 +901,7 @@ impl Dreist {
                 pat.revert_lanes(None, None);
                 return;
             }
-            // [re:c10fda] / `QuantizeStepVelocities`:
+            // [re:c10fda] / step velocity quantize:
             // Shift / Velocity back to their defaults (selected-only is an
             // editor selection in the port).
             id::QUANTIZE_PATTERN_TIMING => {
@@ -969,7 +999,7 @@ fn set_row(row: Option<&mut super::Row>, source: i32, value: f32) {
     }
 }
 
-/// `EPadLayerMode` ([re:b9e7b0] order).
+/// Pad layer mode ([re:b9e7b0] order).
 fn layer_mode_from_index(n: i32) -> dreist_dsp::voices::LayerMode {
     use dreist_dsp::voices::LayerMode::*;
     match n {
@@ -1403,13 +1433,32 @@ mod tests {
     #[test]
     fn aux_and_master_chains_and_pre_fade() {
         let Some(mut g) = hollow() else { return };
-        // `GetEffectChain`: engine −4 = aux (pad index), −3 = master.
+        // Effect chain lookup: engine −4 = aux (pad index), −3 = master.
         g.apply_message(&Message::new(id::SET_FX_CHAIN_ACTIVE, &[-4, 1, -1], &[0.0]));
         assert!(!g.aux[1].fx.chain.active);
         g.apply_message(&Message::new(id::SET_FX_CHAIN_MIX, &[-3, -1, -1], &[0.25]));
         assert_eq!(g.master_fx.chain.mix, 0.25);
         g.apply_message(&Message::new(id::SET_GLOBAL_AUX_PRE_POST, &[2], &[1.0]));
         assert!(g.aux[2].pre_fade);
+    }
+
+    /// The editor's layer trigger plays that layer only, as a live note
+    /// the pad release ends.
+    #[test]
+    fn layer_hit_plays_one_layer() {
+        let Some(mut g) = hollow() else { return };
+        g.stop();
+        let valid = |g: &Dreist, p: usize| (0..8).filter(|&l| g.engines[0].pads[p].layers[l].slot.valid).collect::<Vec<_>>();
+        let Some(pad) = (0..16).find(|&p| valid(&g, p).len() > 1) else { return };
+        let layer = valid(&g, pad)[1];
+        g.layer_hit(0, pad, layer, 100, 0);
+        let (mut l, mut r) = (vec![0.0f32; 256], vec![0.0f32; 256]);
+        g.process(&mut l, &mut r);
+        let playing: Vec<_> = g.voices.iter().filter(|v| v.state == VoiceState::Playing).map(|v| (v.slot.pad as usize, v.slot.layer as usize, v.live)).collect();
+        assert_eq!(playing, vec![(pad, layer, true)]);
+        g.pad_hit(0, pad, 100, 0);
+        g.process(&mut l, &mut r);
+        assert!(g.voices.iter().filter(|v| v.state == VoiceState::Playing).count() > 1);
     }
 
     #[test]

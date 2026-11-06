@@ -3,7 +3,7 @@
 
 use dreist_formats::Node;
 
-/// Song times are quantized to 1/960 QN (`SongPart::QuantizeTime*` [re:4c3473]).
+/// Song times are quantized to 1/960 QN ([re:4c3473]).
 const Q: f64 = 960.0;
 
 pub fn quantize_round(t: f64) -> f64 {
@@ -50,12 +50,12 @@ impl SongPart {
 #[derive(Debug, Clone, Default)]
 pub struct Song {
     pub active: bool,
-    /// [re:fc9225] song loop (`SongLoopEnabled` +0xed, `SongLoopStart` +0xf0,
-    /// `SongLoopEnd` +0xf8; defaults off, 0, 16; rounded on load).
+    /// Internal song loop (`SongLoopEnabled`, `SongLoopStart`,
+    /// `SongLoopEnd`; defaults off, 0, 16; rounded on load).
     pub loop_enabled: bool,
     pub loop_start: f64,
     pub loop_end: f64,
-    /// Host cycle ([re:e95dcb] on, +0x58 start, +0x60 end, QN); takes
+    /// Host cycle ([re:e95dcb] on, start, end, QN); takes
     /// the internal loop's place while the host reports it.
     pub host_loop: Option<(f64, f64)>,
     /// One track per engine, parts sorted by start.
@@ -94,7 +94,7 @@ impl Song {
         song
     }
 
-    /// `IsLoopActive` [re:7aa2a4]: the host cycle when the host reports one,
+    /// [re:7aa2a4]: the host cycle when the host reports one,
     /// else the internal loop.
     pub fn loop_active(&self) -> bool {
         self.host_loop.is_some() || self.loop_enabled
@@ -105,16 +105,16 @@ impl Song {
         self.host_loop.unwrap_or((self.loop_start, self.loop_end))
     }
 
-    /// `GetPpqPosAccountingForInternalLoop` [re:455502] / `GetEffectivePpqPos`
+    /// [re:455502] /
     /// [re:5634e1]: wrap positions past the loop end back into the loop (the
-    /// host cycle +0x58/+0x60 when the host loop flag +0x50 is on, else the
+    /// host cycle when the host loop flag is on, else the
     /// internal loop).
     pub fn effective_ppq(&self, ppq: f64) -> f64 {
         let (s, e) = self.loop_range();
         if self.loop_active() && e < ppq && s < e { (ppq - e) % (e - s) + s } else { ppq }
     }
 
-    /// `GetSongLengthQN`: end of the last part.
+    /// Song length in QN: end of the last part.
     pub fn length_qn(&self) -> f64 {
         self.tracks.iter().flatten().map(|p| p.end()).fold(0.0, f64::max)
     }
@@ -131,14 +131,14 @@ impl Song {
     }
 }
 
-/// What a song change does to an engine (`ActivateTrackChange` [re:dce201]).
+/// What a song change does to an engine ([re:dce201]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChangeKind {
     /// Type 2: pattern power on, select `pattern`, resync to `phase` (QN).
     Start { pattern: usize, phase: f64 },
     /// Type 0: stop the song-triggered pattern (message 0xab).
     Stop,
-    /// Type 1: `ResyncSong` [re:662b0c] — every engine's gate off (loop wrap).
+    /// Type 1: song resync [re:662b0c] — every engine's gate off (loop wrap).
     Resync,
 }
 
@@ -158,7 +158,7 @@ pub struct EngineView {
 }
 
 /// Song playback cursor ([re:4b40ed], the end of the last cued
-/// range; `+0x80` set after a loop wrap).
+/// range; a flag set after a loop wrap).
 #[derive(Debug, Clone)]
 pub struct SongCursor {
     cued_to: Option<f64>,
@@ -170,7 +170,7 @@ impl SongCursor {
         SongCursor { cued_to: None, wrapped: false }
     }
 
-    /// `CueUpTrackChanges` [re:ff4062] for a host block starting at `ppq` QN,
+    /// Cue up track changes [re:ff4062] for a host block starting at `ppq` QN,
     /// `frames` long. With the internal loop on, a range crossing the loop end
     /// is cued up to the end, a `Resync` is placed at the loop point, and the
     /// rest is cued from the loop start (and the next block resyncs again).
@@ -196,7 +196,7 @@ impl SongCursor {
         let mut cued = *self.cued_to.get_or_insert(a);
         let mut resynced = false;
         if (cued - a).abs() > 0.5 {
-            // [re:c10d76] jump: RecordAllPatternStops, ResyncSong, restart here.
+            // Transport jump: record every pattern stop, resync the song, restart here.
             resync(views, out);
             cued = a;
             resynced = true;
@@ -248,7 +248,7 @@ impl SongCursor {
     }
 }
 
-/// `CueUpTrackChangesInRange` [re:b8174e] for one track over `[a, b)`; offsets
+/// Cue up track changes [re:b8174e] for one track over `[a, b)`; offsets
 /// are relative to `r` (QN at the block start). `fresh` (after a loop wrap)
 /// disables the "already playing this pattern" shortcut.
 #[allow(clippy::too_many_arguments)]

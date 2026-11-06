@@ -109,7 +109,7 @@ fn step_engine_effect_attributes_are_known() {
     fn walk(n: &Node, bad: &mut Vec<String>) {
         for (k, v) in &n.attrs {
             let (base, src) = k.split_once('_').map_or((k.as_str(), None), |(b, s)| (b, Some(s)));
-            // Factory .fxpreset files also carry depths for sources [re:b00098] does not
+            // Factory .fxpreset files also carry depths for sources the original does not
             // have (EngineGraph1-4, GlobalSlot1-10, Macro5-10); the loader ignores them.
             let src_ok = n.class == "Effect" || src.is_none_or(|s| TransmodSource::from_name(s).is_some());
             let ok = match n.class.as_str() {

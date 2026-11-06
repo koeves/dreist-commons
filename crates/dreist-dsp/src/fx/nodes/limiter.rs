@@ -1,5 +1,5 @@
-//! [re:71cd73] (`InitializePorts` [re:e2cf51], `Voice::ProcessBuffer`
-//! [re:4799a8], `Voice::Reset` [re:d640a7]): tanh soft clipper above a knee.
+//! [re:71cd73] (port setup [re:e2cf51], processing
+//! [re:4799a8], reset [re:d640a7]): tanh soft clipper above a knee.
 
 use super::math::clip01;
 use crate::fx::{Ctx, Node, Port, ports, ports_from};

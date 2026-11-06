@@ -32,13 +32,11 @@ pub fn take() -> Vec<isize> {
     CHOSEN.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default()
 }
 
-/// Replace the application's main menu: the app menu (About, Preferences,
-/// the given extra items, Hide / Hide Others / Show All, Quit) followed by
-/// `menus`.
+/// The class of the menu items' target, which records the chosen tags; its
+/// name is unique to this copy of the library (`objc_class`).
 #[cfg(all(feature = "window", target_os = "macos"))]
-#[allow(unexpected_cfgs, unsafe_op_in_unsafe_fn)]
-pub fn install(app_name: &str, app_items: &[Item], menus: &[(String, Vec<Item>)]) {
-    use objc::declare::ClassDecl;
+#[allow(unexpected_cfgs)]
+pub(crate) fn target_class() -> &'static objc::runtime::Class {
     use objc::runtime::{Class, Object, Sel};
     use objc::{class, msg_send, sel, sel_impl};
 
@@ -48,16 +46,25 @@ pub fn install(app_name: &str, app_items: &[Item], menus: &[(String, Vec<Item>)]
             v.push(tag);
         }
     }
-    fn target_class() -> &'static Class {
-        if let Some(c) = Class::get(&format!("{}MenuTarget", dreist_formats::profile::get().product)) {
-            return c;
-        }
-        let mut decl = ClassDecl::new(&format!("{}MenuTarget", dreist_formats::profile::get().product), class!(NSObject)).expect("class");
+    static CLASS: std::sync::OnceLock<&'static Class> = std::sync::OnceLock::new();
+    CLASS.get_or_init(|| {
+        let mut decl = crate::objc_class::declare(&format!("{}MenuTarget", dreist_formats::profile::get().product), class!(NSObject));
         unsafe {
             decl.add_method(sel!(menuChosen:), chosen as extern "C" fn(&Object, Sel, *mut Object));
         }
         decl.register()
-    }
+    })
+}
+
+/// Replace the application's main menu: the app menu (About, Preferences,
+/// the given extra items, Hide / Hide Others / Show All, Quit) followed by
+/// `menus`.
+#[cfg(all(feature = "window", target_os = "macos"))]
+#[allow(unexpected_cfgs, unsafe_op_in_unsafe_fn)]
+pub fn install(app_name: &str, app_items: &[Item], menus: &[(String, Vec<Item>)]) {
+    use objc::runtime::{Object, Sel};
+    use objc::{class, msg_send, sel, sel_impl};
+
     fn nsstring(s: &str) -> *mut Object {
         let c = std::ffi::CString::new(s).unwrap_or_default();
         unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }

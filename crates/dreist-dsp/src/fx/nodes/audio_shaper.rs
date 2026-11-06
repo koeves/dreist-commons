@@ -1,7 +1,7 @@
-//! [re:741970] (Distortion, kind 19; `Reset` [re:e4a051],
-//! `ProcessBuffer` [re:29ca21]): band-limit (LP then HP one-poles), drive into
-//! one of four shapers (0 diode pair `ms_diodelim_tab`, 1 OTA
-//! `ms_otalim1_tab`, 2/3 soft hard-limit at ±19 or +19/−1 in 1/20.1 units),
+//! [re:741970] (Distortion, kind 19; reset [re:e4a051],
+//! processing [re:29ca21]): band-limit (LP then HP one-poles), drive into
+//! one of four shapers (0 diode pair, 1 OTA on the unscaled input,
+//! 2/3 soft hard-limit at ±19 or +19/−1 in 1/20.1 units),
 //! tone low-pass, dirty/clean mix, 2 Hz DC blocker and wet/dry.
 
 use super::math::sat;
@@ -74,7 +74,7 @@ impl Node for AudioShaper {
         let p = |i: usize| self.ports[i].value;
         let mode = (((p(0).abs() + 3.0) - (p(0) + -3.0).abs()) * 0.5).round() as u32;
         let onepole = |v: f32| {
-            let h = (v + 1.0).exp2();
+            let h = crate::fx::exp2(v + 1.0);
             (-((h + h) * 0.5 * 6.2831855 * isr)).exp()
         };
         let e_lp = onepole(p(2));

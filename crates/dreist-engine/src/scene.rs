@@ -1,4 +1,4 @@
-//! `SceneManager` ([re:832d2b]): 96 scenes, each a snapshot of every
+//! The scene manager ([re:832d2b]): 96 scenes, each a snapshot of every
 //! engine's current pattern and pattern power, triggered live (UI/MIDI) and
 //! applied at sample-accurate offsets, optionally quantised to the next beat
 //! or bar. See the dreist-re song notes ("Scenes").
@@ -6,12 +6,12 @@
 use dreist_formats::Node;
 
 pub const SCENES: usize = 96;
-/// `AddSceneChangeNoGateCheck`: at most 128 pending changes.
+/// At most 128 pending scene changes.
 const MAX_CHANGES: usize = 128;
-/// `SetBypassTrack(8)` = no engine bypassed.
+/// Bypass track 8 = no engine bypassed.
 pub const NO_BYPASS: usize = 8;
 
-/// `Scene::Start` (`kStartModeStrings` [re:a964e3]: "imm", "beat", "bar").
+/// A scene's start mode ([re:a964e3]: "imm", "beat", "bar").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StartMode {
     #[default]
@@ -30,15 +30,15 @@ impl StartMode {
     }
 }
 
-/// `SceneEngine` (+0x14 `patt`, +0x18 `pattpower`).
+/// `SceneEngine` (`patt`, `pattpower`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SceneEngine {
     pub pattern: usize,
     pub power: bool,
 }
 
-/// `Scene` (0x188 bytes): +0x14 `used`, +0x1c `start`, `Eng0..7` at +0x20.
-/// Its `name` (VFixedString_64 at +0x170) lives only in the document (the
+/// `Scene`: `used`, `start`, `Eng0..7`.
+/// Its `name` (VFixedString_64) lives only in the document (the
 /// editor's): scene edits on the audio thread copy no strings.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Scene {
@@ -90,14 +90,14 @@ pub enum SceneEvent {
 
 #[derive(Debug, Clone)]
 pub struct SceneManager {
-    /// `Scene` clipboard (+0x9338, valid flag +0x94c0).
+    /// `Scene` clipboard (and its valid flag).
     pub clipboard: Option<Scene>,
     /// For the editor (drained by the host).
     pub events: Vec<SceneEvent>,
     pub scenes: Vec<Scene>,
-    /// `CurrentScene` (+0x9330), -1 = none.
+    /// `CurrentScene`, -1 = none.
     pub current: i32,
-    /// `SetBypassTrack` (+0x94c4).
+    /// The bypassed engine.
     pub bypass: usize,
     changes: Vec<SceneChange>,
 }
@@ -137,7 +137,7 @@ impl SceneManager {
         &self.changes
     }
 
-    /// `AddSceneChange` [re:e448a6]. A release (`on == false`) while changes are
+    /// Queue a scene change [re:e448a6]. A release (`on == false`) while changes are
     /// pending re-queues every pending "on" change as an "off" at the same
     /// delta (the release's own scene/delta are then ignored).
     pub fn add(&mut self, scene: usize, delta: u32, on: bool, clock: Option<&SceneClock>) {
@@ -157,8 +157,8 @@ impl SceneManager {
         self.add_no_gate_check(scene, delta, on, clock);
     }
 
-    /// `AddSceneChangeNoGateCheck` [re:3c6b4d]: quantise "on" changes by the
-    /// scene's start mode, append (≤ 128), sort by `CompareDelta`.
+    /// Queue without the gate check [re:3c6b4d]: quantise "on" changes by the
+    /// scene's start mode, append (≤ 128), sort by delta.
     pub fn add_no_gate_check(&mut self, scene: usize, mut delta: u32, on: bool, clock: Option<&SceneClock>) {
         if scene > SCENES {
             return;
@@ -180,16 +180,16 @@ impl SceneManager {
             return;
         }
         self.changes.push(SceneChange { scene, delta, on });
-        // `AddSceneChangeNoGateCheck` [re:3c6b4d]: 0x1eb for a queued "on"
+        // [re:3c6b4d]: 0x1eb for a queued "on"
         // change that is not immediate (delta ≠ 0, any start mode).
         if on && delta != 0 {
             self.notify(SceneEvent::Cued(scene));
         }
-        // CompareDelta [re:97e4ab]: by delta, "on" before "off" at equal deltas.
+        // Ordering [re:97e4ab]: by delta, "on" before "off" at equal deltas.
         self.changes.sort_by(|a, b| a.delta.cmp(&b.delta).then(b.on.cmp(&a.on)));
     }
 
-    /// `ComputeBlockEnd` [re:74956d]: the first change after `start`, capped at `end`.
+    /// [re:74956d]: the first change after `start`, capped at `end`.
     pub fn block_end(&self, start: u32, end: u32) -> u32 {
         match self.changes.iter().find(|c| c.delta > start) {
             Some(c) => c.delta.min(end),
@@ -197,7 +197,7 @@ impl SceneManager {
         }
     }
 
-    /// `ProcessSceneChanges` [re:99dd06]: pop the changes due at `start` (late
+    /// [re:99dd06]: pop the changes due at `start` (late
     /// ones are clamped to `start`), in order. Scene 96 entries are inert.
     pub fn pop_due(&mut self, start: u32) -> Option<SceneChange> {
         while let Some(c) = self.changes.first_mut() {
@@ -215,7 +215,7 @@ impl SceneManager {
         None
     }
 
-    /// `ProcessEndOfBlock` [re:ee20a2]: rebase the remaining deltas.
+    /// End of block [re:ee20a2]: rebase the remaining deltas.
     pub fn end_of_block(&mut self, n: u32) {
         if self.changes.iter().any(|c| c.delta < n) {
             self.changes.clear();
@@ -226,7 +226,7 @@ impl SceneManager {
         }
     }
 
-    /// `ProcessTransportChange` [re:8b7b7d]: transport stopped → drop pending changes.
+    /// Transport change [re:8b7b7d]: transport stopped → drop pending changes.
     /// Queue an editor notification (bounded when nobody drains them).
     pub fn notify(&mut self, e: SceneEvent) {
         if self.events.len() < 256 {
@@ -239,7 +239,7 @@ impl SceneManager {
         self.notify(SceneEvent::Cleared);
     }
 
-    /// `e_sceneTriggerNext` / `Prev` 0x10b / 0x10c (`HandleMessage`
+    /// `e_sceneTriggerNext` / `Prev` 0x10b / 0x10c (message handler
     /// [re:6105bb]): press triggers the scene after / before the current one
     /// (scene 0 when none; nothing past either end), release turns the
     /// pending "on" changes (or else the current scene) off.
@@ -261,7 +261,7 @@ impl SceneManager {
         }
     }
 
-    /// `e_sceneCut` 0x111 / `e_sceneCopy` 0x112 / `PasteSceneFromClipboard`
+    /// `e_sceneCut` 0x111 / `e_sceneCopy` 0x112 / paste
     /// [re:99a82e] (0x113).
     pub fn copy(&mut self, scene: usize, cut: bool) {
         if let Some(&s) = self.scenes.get(scene) {

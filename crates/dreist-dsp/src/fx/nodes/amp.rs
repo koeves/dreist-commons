@@ -1,5 +1,5 @@
 //! [re:828d0f] ([re:83a34d]), the Gain effect
-//! (`InitializePorts` [re:c2ae81], `Voice::ProcessBuffer` [re:cc6036]).
+//! (port setup [re:c2ae81], processing [re:cc6036]).
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
@@ -25,7 +25,7 @@ impl Node for Amp {
         &mut self.ports
     }
 
-    /// `Voice::Reset` [re:cff9b2].
+    /// Reset [re:cff9b2].
     fn reset(&mut self) {
         self.gain = 0.0;
     }

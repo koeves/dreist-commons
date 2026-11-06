@@ -23,3 +23,6 @@ pub use mouse_cursor::MouseCursor;
 pub use window::*;
 pub use window_info::*;
 pub use window_open_options::*;
+
+#[cfg(target_os = "macos")]
+pub use macos::{background_gui, BACKGROUND_GUI_ENV};

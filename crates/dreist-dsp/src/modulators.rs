@@ -6,7 +6,7 @@
 use crate::analog::sin_tab;
 use std::sync::OnceLock;
 
-/// [re:d3662a] ([re:a4c946]): 32-bit LCG; `Seed` mixes the clock,
+/// [re:d3662a] ([re:a4c946]): 32-bit LCG; seeding mixes the clock,
 /// which the port replaces with a caller-supplied seed.
 #[derive(Debug, Clone, Copy)]
 pub struct Randomiser {
@@ -18,7 +18,7 @@ impl Randomiser {
         Randomiser { state: seed.wrapping_mul(0x0a82_5735).wrapping_add(0x35dc_5a6b) }
     }
 
-    /// `Seed` [re:45d0e3]: `state = (seed + clock)·[re:a1a935] + 0x35dc5a6b`.
+    /// Seeding [re:45d0e3]: `state = (seed + clock)·[re:a1a935] + 0x35dc5a6b`.
     pub fn reseed(&mut self, salt: u32) {
         self.state = self.state.wrapping_add(salt).wrapping_mul(0x0a82_5735).wrapping_add(0x35dc_5a6b);
     }
@@ -85,7 +85,7 @@ pub fn frequency_hz(rate: f32, sync: f32, bpm: f32) -> f32 {
     1.0 / ((4.0 / DIV[i]) * (60.0 / bpm))
 }
 
-/// `LFO::LFOShape` (`CreateLFOShapeMap`): Sin, Cos, Triangle, SawUp, SawDown,
+/// LFO shape names: Sin, Cos, Triangle, SawUp, SawDown,
 /// Square, ArcSin, ArcCos, Noise; selected by `lround(Shape·8)`.
 #[derive(Debug, Clone)]
 pub struct Lfo {
@@ -422,13 +422,13 @@ impl MiniSequencer {
         self.counter = 0;
     }
 
-    /// The step being played (+0x20, [re:ee0d71]
+    /// The step being played ([re:ee0d71]
     /// [re:0d75ba]).
     pub fn current_step(&self) -> u32 {
         self.step
     }
 
-    /// `ResetFromHostOrPattern`.
+    /// Reset from the host or pattern position.
     pub fn set_step(&mut self, step: u32) {
         self.step = step;
         self.counter = 0;
@@ -492,7 +492,7 @@ impl MathModulator {
         self.flip = true;
     }
 
-    /// `Process(a, b, op)` [re:f86080] (asm-checked): returns the unipolar output.
+    /// Processing of `(a, b, op)` [re:f86080] (checked against the original): returns the unipolar output.
     pub fn op(&mut self, a: f32, b: f32, op: u32) -> f32 {
         let aa = a + a - 1.0;
         let bb = b + b - 1.0;

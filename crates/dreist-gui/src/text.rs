@@ -129,7 +129,7 @@ impl Fonts {
         (w, h)
     }
 
-    /// `ShortenStringUsingTextAttributes`: fit `s` into `width` with "...".
+    /// Fit `s` into `width` with "...".
     pub fn shorten(&mut self, spec: &FontSpec, s: &str, width: f32, mode: Shorten) -> String {
         if mode == Shorten::None || width <= 0.0 || self.measure(spec, s).0 <= width {
             return s.to_string();

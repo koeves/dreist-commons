@@ -4,7 +4,7 @@
 
 use crate::analog::{analog, lerp, lut_pos};
 
-/// [re:e1a2d5] (`CreateFilterModeMap` [re:8b9ff3]).
+/// [re:e1a2d5] (mode name map [re:8b9ff3]).
 pub const MS20_MODES: [&str; 4] = ["LPF", "BPF", "HPF", "Notch"];
 
 #[derive(Debug, Clone)]
@@ -31,14 +31,14 @@ impl Ms20 {
         f
     }
 
-    /// `SetSampleRate` [re:8892c5]: 10 Hz DC blocker on the output.
+    /// Sample-rate setup [re:8892c5]: 10 Hz DC blocker on the output.
     pub fn set_sample_rate(&mut self, sr: f32) {
         self.inv_sr = 1.0 / sr;
         let e = (self.inv_sr * -62.831856).exp();
         self.dc_coef = ((2.0 - e) - e.abs()) * 0.5;
     }
 
-    /// `Initialize` [re:b4eb83].
+    /// Setup [re:b4eb83].
     pub fn initialize(&mut self, cutoff: f32, res: f32, mode: f32) {
         self.mode = (mode * 3.0).round() as u32;
         self.octave = cutoff * 12.0 - 6.0;
@@ -48,7 +48,7 @@ impl Ms20 {
     /// `Process` [re:10e482] (`inv_n` = 1/len).
     pub fn process(&mut self, inp: &[f32], out: &mut [f32], inv_n: f32) {
         let t = analog();
-        let f = self.octave.exp2() * (self.inv_sr * 440.0);
+        let f = crate::fx::exp2(self.octave) * (self.inv_sr * 440.0);
         let e = (((f.abs() + 1.0) - (f - 1.0).abs()) * -std::f32::consts::PI).exp();
         let s = if self.res == 0.0 { 0.0 } else { self.res.sqrt() };
         let s = s + s;

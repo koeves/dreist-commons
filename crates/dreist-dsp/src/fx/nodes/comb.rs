@@ -1,5 +1,5 @@
-//! [re:5939a7] (Comb Filter; `Voice::PrepareStream` [re:72902e],
-//! `ProcessBuffer` [re:e9754c]): tuned feedback comb with cubic-interpolated
+//! [re:5939a7] (Comb Filter; stream setup [re:72902e],
+//! processing [re:e9754c]): tuned feedback comb with cubic-interpolated
 //! taps, saturated input, clipped feedback and audio-rate phase/frequency
 //! modulation from its `ModIn` port. The effect runs it dual-mono
 //! ([re:7441ff]): one instance per channel, each fed its
@@ -53,7 +53,7 @@ impl Voice {
         }
     }
 
-    /// `PrepareStream`: buffer for [re:46f4da]+8 / 20 samples (power of two).
+    /// Stream setup: buffer for [re:46f4da]+8 / 20 samples (power of two).
     fn prepare(&mut self, sr: f32) {
         let m = 384000.0f32 / 20.0;
         let m = ((m - 2.0).abs() + m + 2.0) * 0.5;
@@ -159,7 +159,7 @@ impl Default for Comb {
 }
 
 impl Comb {
-    /// `PrepareStream` on a rate change.
+    /// Stream setup on a rate change.
     fn prepare(&mut self, sr: f32) {
         if self.sr != sr {
             self.sr = sr;

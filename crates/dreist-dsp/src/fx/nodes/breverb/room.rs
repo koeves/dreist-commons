@@ -1,5 +1,5 @@
-//! [re:9f5917] (ctor [re:b6e43d], ChangeWaveInfo [re:ed44da], SetParameterVal
-//! [re:28c7be], ChangeSizes [re:c8ed8e], Process [re:8f5d48]): the early tap network
+//! [re:9f5917] (construction [re:b6e43d], rate change [re:ed44da], parameter set
+//! [re:28c7be], size change [re:c8ed8e], processing [re:8f5d48]): the early tap network
 //! (band-limited inputs) feeding two cross-coupled damped feedback delays
 //! with a multi-tap late section.
 
@@ -7,7 +7,7 @@ use super::blocks::*;
 use super::early::{Core, Taps};
 use super::{Algo, Param};
 
-/// `_RoomReverbParam` [re:51ffca].
+/// Room parameter table [re:51ffca].
 pub const PARAMS: &[Param] = &[
     Param(1, 0.2, 4.5),        // 0 Time
     Param(0, 0.0, 100.0),      // 1 Size
@@ -90,7 +90,7 @@ impl Room {
         r
     }
 
-    /// `ChangeRoomResponse` [re:33e494].
+    /// Room response change [re:33e494].
     fn change_response(&mut self) {
         self.band[0].sr = self.c.sr;
         self.band[0].set_band(self.low, self.high);
@@ -103,7 +103,7 @@ impl Room {
         self.damp[1].c = self.damp[0].c;
     }
 
-    /// `ChangeRevTime` [re:aab46b]: loop gain for a 60 dB (×0.01) decay over
+    /// Reverb time change [re:aab46b]: loop gain for a 60 dB (×0.01) decay over
     /// `min(time, 5)` seconds.
     fn change_rev_time(&mut self) {
         let t = self.time * self.time_mult;
@@ -202,7 +202,7 @@ impl Algo for Room {
         }
     }
 
-    /// `Reset` [re:37567b].
+    /// Reset [re:37567b].
     fn reset(&mut self) {
         self.blk_d = [0.0; B];
         self.blk_c = [0.0; B];

@@ -1,4 +1,4 @@
-//! [re:29dbfb] (constructor [re:3b06c3], `Tap` [re:bf2f59], `GetTempo`
+//! [re:29dbfb] (constructor [re:3b06c3], tap [re:bf2f59], tempo
 //! [re:b2ec19]), driven by `e_tapTempo` 0x1b.
 //!
 //! - Starts at 120 BPM with its stopwatch running.
@@ -8,7 +8,7 @@
 //! - With at least 3 intervals the tempo becomes 60 / mean interval
 //!   (written as (60000 / (mean·1000·0.25))·0.25) and the tap reports a
 //!   new tempo; when the intervals sum to more than 2 s the newest one is
-//!   dropped again (`vector::pop_back`).
+//!   dropped again.
 
 use std::time::Instant;
 

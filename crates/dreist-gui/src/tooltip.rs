@@ -2,18 +2,18 @@
 //!
 //! - [re:eb2a9b] asks the control under the pointer
 //!   (then its parents) for text on every move, press and wheel event
-//!   (`UpdateToolTipForEvent` [re:45d114]) and shows it at once
-//!   (`SetToolTipText(.., immediate = true, ..)` [re:d57db3] →
-//!   `ShowToolTip` [re:13518c] → `AppearToolTip` [re:4c11d7]); a control
+//!   ([re:45d114]) and shows it at once
+//!   (set with immediate = true [re:d57db3] →
+//!   show [re:13518c] → appear [re:4c11d7]); a control
 //!   without a provider hides it, as does leaving the window.
-//! - `AppearToolTip`: unchanged text while shown does nothing; else the
+//! - Appearing: unchanged text while shown does nothing; else the
 //!   size is the text size + (10, 5) (multi-line: widest line, line
 //!   heights + 5 apart), at least 20 × 20, placed against the control's
 //!   rectangle by [`Pos`], kept inside the window (x ≥ 0), and starts the
 //!   auto-hide count: 150 ticks of the 30 Hz [re:6556de] (5 s).
-//! - `OnMouseLButtonUp` → `HideToolTipDelayed` [re:da2cdc]: hidden now for
+//! - Mouse up → delayed hide [re:da2cdc]: hidden now for
 //!   [`Pos::Middle`], else after 100 ticks (3.3 s).
-//! - `Draw` [re:cc7150]: `DrawDefaultFill` of `TooltipStyle`, the text in its
+//! - Drawing [re:cc7150]: the default fill of `TooltipStyle`, the text in its
 //!   colText / font, centred; lines share the height evenly.
 
 use std::time::{Duration, Instant};
@@ -24,18 +24,18 @@ use crate::paint::{Painter, RectF};
 use crate::style::{HAlign, StyleSheet, VAlign};
 
 pub const STYLE: &str = "TooltipStyle";
-/// `+0x2a8` / `+0x2ac`: padding added to the text size.
+/// Padding added to the text size.
 const PAD: (f32, f32) = (10.0, 5.0);
 const MIN: f32 = 20.0;
 const TICK: f32 = 1.0 / 30.0;
-/// `AppearToolTip`: `+0x2a4 = 0x96`.
+/// Appearing: auto-hide count 150.
 pub const AUTO_HIDE: Duration = Duration::from_millis((150.0 * TICK * 1000.0) as u64);
-/// `ShowToolTip`'s appear count (`+0x268 = 0x32`).
+/// Delayed show: appear count 50.
 pub const SHOW_DELAY: Duration = Duration::from_millis((50.0 * TICK * 1000.0) as u64);
-/// `HideToolTipDelayed`: `+0x2a4 = 0x64`.
+/// Delayed hide: count 100.
 pub const DELAYED_HIDE: Duration = Duration::from_millis((100.0 * TICK * 1000.0) as u64);
 
-/// [re:25cf21] (`AppearToolTip` switch).
+/// [re:25cf21] (placement switch when appearing).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Pos {
     /// Centred above (5 px gap).
@@ -73,13 +73,13 @@ pub struct Tip {
     pub pos: Pos,
     /// When it disappears.
     pub hide_at: Instant,
-    /// A delayed tooltip (`ShowToolTip(.., immediate = false, ..)`) not yet
+    /// A delayed tooltip (shown with immediate = false) not yet
     /// shown: when it appears and where the pointer was (a move of more
-    /// than 4 px restarts the 50 ticks, `OnMouseMoveTT` [re:939074]).
+    /// than 4 px restarts the 50 ticks, [re:939074]).
     pub pending: Option<(Instant, (f32, f32))>,
 }
 
-/// Text size as `AppearToolTip` measures it.
+/// Text size as the original measures it when appearing.
 fn measure(fonts: &mut crate::text::Fonts, styles: &StyleSheet, text: &str) -> (f32, f32) {
     let font = styles.font(STYLE);
     if !text.contains('\n') {

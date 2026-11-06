@@ -26,6 +26,12 @@ impl std::error::Error for LoadError {}
 
 /// Decode a whole file to de-interleaved f32 (integer PCM scaled by 2^-(bits-1)).
 pub fn load(path: &Path) -> Result<SampleData, LoadError> {
+    load_unless(path, &|| false)
+}
+
+/// [`load`], giving up (with an error) between packets once `cancelled`
+/// returns true.
+pub fn load_unless(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<SampleData, LoadError> {
     let err = |e: &dyn std::fmt::Display| LoadError(format!("{}: {e}", path.display()));
     // REX loops through the helper ([re:e1396a]).
     if crate::rex::is_rex(path) {
@@ -47,6 +53,9 @@ pub fn load(path: &Path) -> Result<SampleData, LoadError> {
     let mut channels = 0usize;
     let mut interleaved: Vec<f32> = Vec::new();
     loop {
+        if cancelled() {
+            return Err(err(&"cancelled"));
+        }
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(symphonia::core::errors::Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
@@ -117,8 +126,8 @@ impl SampleCache {
     }
 
     /// Tempo from the sample's `.gsa` sidecar (positive): the active
-    /// analysis (User, else Master; [re:fb32a7] / +0x118 →
-    /// [re:1d38e7], read by `UpdateTimestretchParameters` at
+    /// analysis (User, else Master; [re:fb32a7] →
+    /// [re:1d38e7], read by the timestretch parameter update at
     /// [re:dc2d9d]). Read again only when the file changed.
     pub fn sidecar_bpm(&mut self, sample: &Path) -> Option<f32> {
         let gsa = sample.with_extension("gsa");
@@ -129,6 +138,14 @@ impl SampleCache {
         let bpm = stamp.and_then(|_| crate::gsa::SliceFile::load(&gsa)).map(|f| f.bpm).filter(|b| *b > 0.0);
         self.sidecars.insert(gsa, (stamp, bpm));
         bpm
+    }
+
+    /// Forget `paths`: the next lookup reads them from disk again (a
+    /// file changed outside the app).
+    pub fn forget(&mut self, paths: &[PathBuf]) {
+        for p in paths {
+            self.files.remove(p);
+        }
     }
 
     /// Forget samples nothing else holds any more and failed lookups (a
@@ -142,6 +159,14 @@ impl SampleCache {
 #[cfg(test)]
 mod cache_tests {
     use super::*;
+
+    #[test]
+    fn forgotten_samples_load_again() {
+        let mut c = SampleCache::default();
+        c.files.insert("a".into(), Some(Arc::new(SampleData { left: vec![0.0; 4], right: None, sample_rate: 44100.0 })));
+        c.forget(&["a".into()]);
+        assert!(!c.files.contains_key(Path::new("a")));
+    }
 
     #[test]
     fn prune_keeps_samples_in_use() {

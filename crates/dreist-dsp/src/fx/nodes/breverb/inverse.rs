@@ -1,5 +1,5 @@
-//! [re:de3bd1] (ctor [re:f49597], ChangeWaveInfo [re:944e2a],
-//! SetParameterVal [re:0999a3], ChangeSizes [re:f3c19a], Process [re:8d0bb5]): the
+//! [re:de3bd1] (construction [re:f49597], rate change [re:944e2a],
+//! parameter set [re:0999a3], size change [re:f3c19a], processing [re:8d0bb5]): the
 //! early multi-tap network followed by a band-limited second tap stage
 //! whose gains rise towards the end (reverse envelope).
 
@@ -7,7 +7,7 @@ use super::blocks::*;
 use super::early::{Core, Taps};
 use super::{Algo, Param};
 
-/// `_InverseReverbParam` [re:c1122a].
+/// Inverse parameter table [re:c1122a].
 pub const PARAMS: &[Param] = &[
     Param(1, 0.1, 1.5),       // 0 Time (s); used as a size position
     Param(0, 0.0, 100.0),     // 1 Diffusion
@@ -68,7 +68,7 @@ impl Inverse {
         r
     }
 
-    /// `ChangeInverseResponse` [re:560f1b].
+    /// Inverse response change [re:560f1b].
     fn change_response(&mut self) {
         self.band[0].sr = self.c.sr;
         self.band[0].set_band(self.low, self.high);
@@ -153,7 +153,7 @@ impl Algo for Inverse {
         }
     }
 
-    /// `Reset` [re:3707a3].
+    /// Reset [re:3707a3].
     fn reset(&mut self) {
         self.c.reset();
         for d in &mut self.second {

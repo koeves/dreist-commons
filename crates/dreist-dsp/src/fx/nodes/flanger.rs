@@ -1,5 +1,5 @@
-//! [re:6695a0] (Flanger, kind 16; `Reset` [re:519138], `PrepareStream`
-//! [re:743a2b], `ProcessBuffer` [re:0b99bd]): two cubic-interpolated delay lines
+//! [re:6695a0] (Flanger, kind 16; reset [re:519138], stream setup
+//! [re:743a2b], processing [re:0b99bd]): two cubic-interpolated delay lines
 //! swept by a raised-cosine LFO (right channel phase-offset), saturated and
 //! DC-blocked feedback, cross-mixed by Spread, wet/dry.
 
@@ -40,7 +40,7 @@ impl Flanger {
         Flanger { ports, alt: f32::from_bits(ALT), idx: 0, phase: 0.0, delay: [0.0; 2], dc: [0.0; 2], max_delay: 0.0, k_dc: 0.0, buf: [Vec::new(), Vec::new()], mask: 0, sr: 0.0 }
     }
 
-    /// `PrepareStream`: both lines hold `2·max(0.01·384000, 2) + 4` samples
+    /// Stream setup: both lines hold `2·max(0.01·384000, 2) + 4` samples
     /// rounded up to a power of two.
     fn prepare(&mut self, sr: f32) {
         let m = 384000.0f32 * 0.01;

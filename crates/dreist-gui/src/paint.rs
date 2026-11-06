@@ -4,7 +4,7 @@
 //! Angles follow the original: degrees, 0 = +x, increasing clockwise on
 //! screen (y down).
 
-use tiny_skia::{FillRule, Mask, Paint, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap, Point, RadialGradient, SpreadMode, Stroke, StrokeDash, Transform};
 
 use crate::colour::Colour;
 use crate::style::{FontSpec, HAlign, VAlign};
@@ -38,6 +38,142 @@ fn paint(c: Colour) -> Paint<'static> {
     p.set_color_rgba8(c.r, c.g, c.b, c.a);
     p.anti_alias = true;
     p
+}
+
+/// A linear gradient paint from `p0` to `p1` through `stops` (offset
+/// 0..1, colour); a solid paint when the gradient degenerates.
+fn gradient_paint(p0: (f32, f32), p1: (f32, f32), stops: &[(f32, Colour)]) -> Paint<'static> {
+    let col = |c: Colour| tiny_skia::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let first = stops.first().map(|s| s.1).unwrap_or(Colour::TRANSPARENT);
+    let stops: Vec<GradientStop> = stops.iter().map(|(o, c)| GradientStop::new(*o, col(*c))).collect();
+    let mut p = paint(first);
+    if let Some(shader) = LinearGradient::new(Point::from_xy(p0.0, p0.1), Point::from_xy(p1.0, p1.1), stops, SpreadMode::Pad, Transform::identity()) {
+        p.shader = shader;
+    }
+    p
+}
+
+/// A fill gradient: from the fill colour to `to`, top to bottom (or left
+/// to right when `horizontal`) across the shape's bounds, or outwards from
+/// a centre when `radial` is set.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Gradient {
+    pub to: Colour,
+    pub horizontal: bool,
+    pub radial: Option<Radial>,
+}
+
+/// A radial gradient's centre (`cx`, `cy`, fractions of the shape's bounds
+/// from its top left) and radii (`r`, `r0`: fractions of the bounds' width
+/// across and of their height along, so it is elliptical in non-square
+/// shapes): the fill colour up to `r0`, blending to the end colour at `r`
+/// and beyond.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Radial {
+    pub cx: f32,
+    pub cy: f32,
+    pub r: f32,
+    pub r0: f32,
+}
+
+/// A radial gradient paint centred at `(cx, cy)` with radii `rx` / `ry`.
+fn radial_paint(cx: f32, cy: f32, rx: f32, ry: f32, stops: &[(f32, Colour)]) -> Paint<'static> {
+    let col = |c: Colour| tiny_skia::Color::from_rgba8(c.r, c.g, c.b, c.a);
+    let first = stops.first().map(|s| s.1).unwrap_or(Colour::TRANSPARENT);
+    let stops: Vec<GradientStop> = stops.iter().map(|(o, c)| GradientStop::new(*o, col(*c))).collect();
+    let mut p = paint(first);
+    if rx > 0.0 && ry > 0.0 {
+        let t = Transform::from_row(rx, 0.0, 0.0, ry, cx, cy);
+        if let Some(shader) = RadialGradient::new(Point::from_xy(0.0, 0.0), Point::from_xy(0.0, 0.0), 1.0, stops, SpreadMode::Pad, t) {
+            p.shader = shader;
+        }
+    }
+    p
+}
+
+/// A small deterministic hash (seeded noise for textures).
+fn hash3(a: u32, b: u32, c: u32) -> u32 {
+    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h = h.wrapping_mul(0x297A_2D39);
+    h ^ (h >> 15)
+}
+
+/// The noise value (-1..1) of `hash3(seed, a, b)`.
+fn unit(seed: u32, a: u32, b: u32) -> f32 {
+    (hash3(seed, a, b) & 0xFFFF) as f32 / 32767.5 - 1.0
+}
+
+/// Box-blur premultiplied RGBA `data` (`w` x `h`) by `r` px, three passes
+/// each way (close to a gaussian).
+fn box_blur(data: &mut [u8], w: usize, h: usize, r: usize) {
+    if r == 0 || w == 0 || h == 0 {
+        return;
+    }
+    let mut line = vec![0u32; w.max(h) * 4];
+    let n = (2 * r + 1) as u32;
+    for _ in 0..3 {
+        for pass in 0..2 {
+            let (len, count) = if pass == 0 { (w, h) } else { (h, w) };
+            for j in 0..count {
+                let idx = |i: usize| if pass == 0 { (j * w + i) * 4 } else { (i * w + j) * 4 };
+                for i in 0..len {
+                    let k = idx(i);
+                    for ch in 0..4 {
+                        line[i * 4 + ch] = data[k + ch] as u32;
+                    }
+                }
+                let mut sum = [0u32; 4];
+                // Window [i - r, i + r], zero outside.
+                for i in 0..r.min(len) {
+                    for ch in 0..4 {
+                        sum[ch] += line[i * 4 + ch];
+                    }
+                }
+                for i in 0..len {
+                    if i + r < len {
+                        for ch in 0..4 {
+                            sum[ch] += line[(i + r) * 4 + ch];
+                        }
+                    }
+                    let k = idx(i);
+                    for ch in 0..4 {
+                        data[k + ch] = (sum[ch] / n) as u8;
+                    }
+                    if i >= r {
+                        for ch in 0..4 {
+                            sum[ch] -= line[(i - r) * 4 + ch];
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Text drawing options: extra space between letters (logical px), a
+/// horizontal scale (below 1 condenses) and a slant (degrees, positive
+/// leans right). The default draws plain text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextFx {
+    pub spacing: f32,
+    pub scale_x: f32,
+    pub slant: f32,
+}
+
+impl Default for TextFx {
+    fn default() -> TextFx {
+        TextFx { spacing: 0.0, scale_x: 1.0, slant: 0.0 }
+    }
+}
+
+impl TextFx {
+    /// Only letter spacing (or nothing): drawn without a transform.
+    fn upright(&self) -> bool {
+        (self.scale_x - 1.0).abs() < 1e-4 && self.slant.abs() < 1e-4
+    }
 }
 
 /// Cubic Bézier approximation of a circular arc (centre, radii, degrees).
@@ -101,6 +237,8 @@ pub struct Painter<'a> {
     pub mask: Option<Mask>,
     mask_clip: Option<(i32, i32, i32, i32)>,
     pub scale: f32,
+    /// Dash pattern (dash, gap) of the strokes drawn while set.
+    pub dash: Option<(f32, f32)>,
 }
 
 /// Set the device pixels of the clip rectangle `(x, y, w, h)` (logical
@@ -125,7 +263,7 @@ fn set_rect(m: &mut Mask, (x, y, w, h): (i32, i32, i32, i32), scale: f32, v: u8)
 impl<'a> Painter<'a> {
     pub fn new(pm: &'a mut Pixmap, fonts: &'a mut Fonts, scale: f32) -> Painter<'a> {
         let clip = (0, 0, (pm.width() as f32 / scale) as i32, (pm.height() as f32 / scale) as i32);
-        Painter { pm, fonts, tx: 0.0, ty: 0.0, clip, mask: None, mask_clip: None, scale }
+        Painter { pm, fonts, tx: 0.0, ty: 0.0, clip, mask: None, mask_clip: None, scale, dash: None }
     }
 
     fn transform(&self) -> Transform {
@@ -210,11 +348,129 @@ impl<'a> Painter<'a> {
         if c.a == 0 || width <= 0.0 {
             return;
         }
+        self.stroke_path_with(path, &paint(c), width);
+    }
+
+    fn stroke_path_with(&mut self, path: &tiny_skia::Path, paint: &Paint, width: f32) {
         let t = self.transform();
-        let s = Stroke { width, ..Stroke::default() };
+        let dash = self.dash.filter(|(d, g)| *d > 0.0 && *g > 0.0).and_then(|(d, g)| StrokeDash::new(vec![d, g], 0.0));
+        let s = Stroke { width, dash, ..Stroke::default() };
         let b = self.device_bounds(path, width / 2.0);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
-        self.pm.stroke_path(path, &paint(c), &s, t, m);
+        self.pm.stroke_path(path, paint, &s, t, m);
+    }
+
+    /// Fill `path` with a linear gradient from `from` to `g.to` across its
+    /// bounds.
+    pub fn fill_path_gradient(&mut self, path: &tiny_skia::Path, from: Colour, g: Gradient) {
+        let b = path.bounds();
+        if (from.a == 0 && g.to.a == 0) || b.width() <= 0.0 || b.height() <= 0.0 {
+            return;
+        }
+        if from == g.to {
+            return self.fill_path(path, from);
+        }
+        let stops = [(0.0, from), (1.0, g.to)];
+        let paint = match g.radial {
+            Some(r) => {
+                let inner = if r.r > 0.0 { (r.r0 / r.r).clamp(0.0, 0.999) } else { 0.0 };
+                radial_paint(b.left() + r.cx * b.width(), b.top() + r.cy * b.height(), r.r * b.width(), r.r * b.height(), &[(inner, from), (1.0, g.to)])
+            }
+            None => {
+                let (p0, p1) = if g.horizontal { ((b.left(), 0.0), (b.right(), 0.0)) } else { ((0.0, b.top()), (0.0, b.bottom())) };
+                gradient_paint(p0, p1, &stops)
+            }
+        };
+        let t = self.transform();
+        let db = self.device_bounds(path, 0.0);
+        let m = if self.need_mask(db) { self.mask.as_ref() } else { None };
+        self.pm.fill_path(path, &paint, FillRule::Winding, t, m);
+    }
+
+    /// Fill `path` in `c`, or with a gradient from `c` when `g` is set.
+    pub fn fill_path_opt(&mut self, path: &tiny_skia::Path, c: Colour, g: Option<Gradient>) {
+        match g {
+            Some(g) => self.fill_path_gradient(path, c, g),
+            None => self.fill_path(path, c),
+        }
+    }
+
+    /// Stroke `path` with a vertical gradient through `stops` (offsets
+    /// 0..1 from the top of its bounds to the bottom).
+    pub fn stroke_path_vgradient(&mut self, path: &tiny_skia::Path, stops: &[(f32, Colour)], width: f32) {
+        let b = path.bounds();
+        if width <= 0.0 || b.height() <= 0.0 {
+            return;
+        }
+        self.stroke_path_with(path, &gradient_paint((0.0, b.top()), (0.0, b.bottom()), stops), width);
+    }
+
+    /// Overlay `path` with a deterministic brushed texture: light and dark
+    /// streaks along x (`streak` logical px long, smoothly interpolated)
+    /// plus a per-row shade, `amount` (0..1) the strongest alpha. `seed`
+    /// picks the pattern; the same inputs always draw the same pixels.
+    pub fn fill_path_noise(&mut self, path: &tiny_skia::Path, amount: f32, streak: f32, seed: u32) {
+        let b = path.bounds();
+        let amount = amount.clamp(0.0, 1.0);
+        if amount <= 0.0 || b.width() <= 0.0 || b.height() <= 0.0 {
+            return;
+        }
+        let s = self.scale;
+        let (w, h) = ((b.right() * s).ceil().max(1.0) as u32, (b.bottom() * s).ceil().max(1.0) as u32);
+        let Some(mut tex) = Pixmap::new(w, h) else { return };
+        let len = (streak * s).max(1.0);
+        let data = tex.data_mut();
+        for y in 0..h {
+            let row = unit(seed, y, 0x0F0F);
+            for x in 0..w {
+                let f = x as f32 / len;
+                let k = f.floor();
+                let t = f - k;
+                let t = t * t * (3.0 - 2.0 * t);
+                let a0 = unit(seed, y, k as u32 * 2 + 1);
+                let a1 = unit(seed, y, k as u32 * 2 + 3);
+                let n = (0.45 * row + 0.55 * (a0 + (a1 - a0) * t)).clamp(-1.0, 1.0);
+                let a = (n.abs() * amount * 255.0).round() as u8;
+                let v = if n > 0.0 { a } else { 0 };
+                let i = ((y * w + x) * 4) as usize;
+                data[i..i + 4].copy_from_slice(&[v, v, v, a]);
+            }
+        }
+        let shader = tiny_skia::Pattern::new(tex.as_ref(), SpreadMode::Pad, tiny_skia::FilterQuality::Nearest, 1.0, Transform::from_scale(1.0 / s, 1.0 / s));
+        let paint = Paint { anti_alias: true, shader, ..Default::default() };
+        let t = self.transform();
+        let db = self.device_bounds(path, 0.0);
+        let m = if self.need_mask(db) { self.mask.as_ref() } else { None };
+        self.pm.fill_path(path, &paint, FillRule::Winding, t, m);
+    }
+
+    /// A soft glow behind text: `s` drawn as [`text_fx`](Self::text_fx)
+    /// would in `c`'s colour, blurred by `radius` logical px and
+    /// multiplied by `strength` (above 1 brightens the blur's core).
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_glow(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign, fx: TextFx, radius: f32, strength: f32) {
+        if s.is_empty() || c.a == 0 || r.w <= 0.0 || r.h <= 0.0 || radius <= 0.0 {
+            return;
+        }
+        let sc = self.scale;
+        let pad = (radius * 2.0).ceil() + 1.0;
+        let (pw, ph) = (((r.w + 2.0 * pad) * sc).ceil() as u32, ((r.h + 2.0 * pad) * sc).ceil() as u32);
+        let Some(mut tmp) = Pixmap::new(pw.max(1), ph.max(1)) else { return };
+        {
+            let mut tp = Painter::new(&mut tmp, &mut *self.fonts, sc);
+            tp.text_fx(RectF::new(pad, pad, r.w, r.h), s, c.with_alpha(1.0), font, h, v, fx);
+        }
+        let (w, hh) = (tmp.width() as usize, tmp.height() as usize);
+        box_blur(tmp.data_mut(), w, hh, ((radius * sc) / 1.7).round().max(1.0) as usize);
+        let k = strength.max(0.0) * c.f_alpha();
+        for px in tmp.data_mut().iter_mut() {
+            *px = (*px as f32 * k).round().min(255.0) as u8;
+        }
+        let tx = ((r.x - pad + self.tx) * sc).round();
+        let ty = ((r.y - pad + self.ty) * sc).round();
+        let b = (tx, ty, pw as f32, ph as f32);
+        let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        self.pm.draw_pixmap(0, 0, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::from_translate(tx, ty), m);
     }
 
     pub fn fill_rect(&mut self, r: RectF, c: Colour) {
@@ -277,7 +533,7 @@ impl<'a> Painter<'a> {
         }
     }
 
-    /// `DrawArc(rect, start, sweep, clockwise, colour, width)`.
+    /// Arc stroke (rect, start, sweep, clockwise, colour, width).
     pub fn stroke_arc(&mut self, r: RectF, start: f32, sweep: f32, clockwise: bool, c: Colour, width: f32) {
         if sweep.abs() < 1e-3 {
             return;
@@ -348,6 +604,61 @@ impl<'a> Painter<'a> {
 
     /// [re:128485].
     pub fn text(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign) {
+        self.text_spaced(r, s, c, font, h, v, 0.0);
+    }
+
+    /// The width of `s` in `font` with `spacing` between letters.
+    pub fn text_width(&mut self, font: &FontSpec, s: &str, spacing: f32) -> f32 {
+        let n = s.chars().count();
+        self.fonts.measure(font, s).0 + spacing * n.saturating_sub(1) as f32
+    }
+
+    /// [`text`](Self::text) with [`TextFx`]: letter spacing is drawn
+    /// directly; a horizontal scale or a slant draws the text into a layer
+    /// and transforms it into place (scaled from its aligned edge, slanted
+    /// about the rect's vertical middle).
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_fx(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign, fx: TextFx) {
+        if fx.upright() {
+            return self.text_spaced(r, s, c, font, h, v, fx.spacing);
+        }
+        if s.is_empty() || c.a == 0 || r.h <= 0.0 {
+            return;
+        }
+        let sc = self.scale;
+        let sx = fx.scale_x.clamp(0.1, 4.0);
+        let k = fx.slant.clamp(-45.0, 45.0).to_radians().tan();
+        let tw = self.text_width(font, s, fx.spacing);
+        const PAD: f32 = 2.0;
+        let lw = tw + 2.0 * PAD;
+        let (pw, ph) = ((lw * sc).ceil().max(1.0) as u32, (r.h * sc).ceil().max(1.0) as u32);
+        let Some(mut tmp) = Pixmap::new(pw, ph) else { return };
+        {
+            let mut tp = Painter::new(&mut tmp, &mut *self.fonts, sc);
+            tp.text_spaced(RectF::new(PAD, 0.0, tw + PAD, r.h), s, c, font, HAlign::Left, v, fx.spacing);
+        }
+        let sw = tw * sx;
+        let start = match h {
+            HAlign::Left => r.x,
+            HAlign::Center => r.x + (r.w - sw) / 2.0,
+            HAlign::Right => r.x + r.w - sw,
+        };
+        // Layer (u, v) -> (start + sx (u - pad) - k (v - mid), r.y + v), device px.
+        let (pad, mid) = (PAD * sc, r.h * sc / 2.0);
+        let tx = (start + self.tx) * sc - sx * pad + k * mid;
+        let ty = (r.y + self.ty) * sc;
+        let t = Transform::from_row(sx, 0.0, -k, 1.0, tx, ty);
+        let lean = k.abs() * mid;
+        let b = (tx.min(tx - k * r.h * sc) - 1.0, ty, lw * sc * sx + lean * 2.0 + 2.0, r.h * sc);
+        let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        let paint = tiny_skia::PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() };
+        self.pm.draw_pixmap(0, 0, tmp.as_ref(), &paint, t, m);
+    }
+
+    /// [`text`](Self::text) with `spacing` logical px added after every
+    /// letter but the last.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_spaced(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign, spacing: f32) {
         if s.is_empty() || c.a == 0 {
             return;
         }
@@ -358,7 +669,11 @@ impl<'a> Painter<'a> {
         let fonts = &*self.fonts;
         let size = fonts.size(font) * scale;
         let Some(primary) = fonts.font_for(font, 'A') else { return };
-        let width: f32 = s.chars().map(|ch| fonts.font_for(font, ch).map(|f| f.metrics(ch, size).advance_width).unwrap_or(0.0)).sum();
+        let mut width: f32 = s.chars().map(|ch| fonts.font_for(font, ch).map(|f| f.metrics(ch, size).advance_width).unwrap_or(0.0)).sum();
+        let gap = spacing * scale;
+        if gap != 0.0 {
+            width += gap * s.chars().count().saturating_sub(1) as f32;
+        }
         let (asc, desc) = primary.horizontal_line_metrics(size).map(|m| (m.ascent, m.descent)).unwrap_or((size * 0.8, -size * 0.2));
         let (rx, ry, rw, rh) = ((r.x + tx) * scale, (r.y + ty) * scale, r.w * scale, r.h * scale);
         let x0 = match h {
@@ -385,7 +700,7 @@ impl<'a> Painter<'a> {
             let Some(f) = fonts.font_for(font, ch) else { continue };
             let (m, bmp) = f.rasterize(ch, size);
             glyphs.push((pen.floor() as i32 + m.xmin, baseline as i32 - m.height as i32 - m.ymin, m.width, m.height, bmp));
-            pen += m.advance_width;
+            pen += m.advance_width + gap;
         }
         let data = self.pm.pixels_mut();
         for (gx, gy, gw, gh, bmp) in glyphs {

@@ -16,9 +16,20 @@ fn skins(dir: &Path, out: &mut Vec<String>, base: &Path) {
     }
 }
 
+/// The UI folder, or `None` (test skipped) without an app's UI assets.
+fn ui_dir() -> Option<std::path::PathBuf> {
+    let dir = Skin::resources_dir();
+    if dir.join("Skin").is_dir() {
+        Some(dir)
+    } else {
+        eprintln!("skipped: no UI assets at {}", dir.display());
+        None
+    }
+}
+
 #[test]
 fn all_skins_render() {
-    let dir = Skin::resources_dir();
+    let Some(dir) = ui_dir() else { return };
     let mut skin = Skin::load(&dir, dreist_gui::skin::default_theme()).expect("skin");
     let mut list = Vec::new();
     skins(&dir, &mut list, &dir);
@@ -37,7 +48,8 @@ fn all_skins_render() {
 
 #[test]
 fn styles_resolve_through_parents() {
-    let skin = Skin::load(&Skin::resources_dir(), dreist_gui::skin::default_theme()).expect("skin");
+    let Some(dir) = ui_dir() else { return };
+    let skin = Skin::load(&dir, dreist_gui::skin::default_theme()).expect("skin");
     let s = &skin.styles;
     // MuteButtonStyle → DefaultButtonStyle → CornerRoundingStyle (4).
     assert_eq!(s.float("MuteButtonStyle", "realCornerRounding", 0.0), 4.0);
@@ -51,7 +63,8 @@ fn styles_resolve_through_parents() {
 /// tree changes under it.
 #[test]
 fn path_cache_follows_tree_changes() {
-    let skin = Skin::load(&Skin::resources_dir(), dreist_gui::skin::default_theme()).expect("skin");
+    let Some(dir) = ui_dir() else { return };
+    let skin = Skin::load(&dir, dreist_gui::skin::default_theme()).expect("skin");
     let b = dreist_gui::Ctrl { name: "B".into(), ..Default::default() };
     let a = dreist_gui::Ctrl { name: "A".into(), children: vec![b], ..Default::default() };
     let root = dreist_gui::Ctrl { children: vec![a], ..Default::default() };

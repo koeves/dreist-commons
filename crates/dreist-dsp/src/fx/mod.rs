@@ -19,7 +19,7 @@ pub struct Ctx {
     /// Song position in quarter notes at the start of the block.
     pub ppq: f64,
     pub playing: bool,
-    /// [re:c912bd] (`SetTune`, 440 Hz).
+    /// [re:c912bd] (tuning, 440 Hz).
     pub tune: f32,
 }
 
@@ -58,7 +58,7 @@ impl Port {
         Port::new(v(def), v(lo), v(hi))
     }
 
-    /// `SetValue01` [re:6bb8cb].
+    /// Normalized value set [re:6bb8cb].
     pub fn set01(&mut self, v: f32) {
         let v = v.clamp(0.0, 1.0) as f64;
         self.value = ((self.max - self.min) * v + self.min) as f32;
@@ -82,8 +82,8 @@ pub trait Node: Send {
     /// One block of at most [`NODE_BLOCK`] frames (longer ones work but may
     /// grow the work buffers); no allocation once `prepare_rate` ran.
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]);
-    /// The voice's `Reset` ([re:b33786] calls it on every voice, from
-    /// [re:404233] and `CreateVoice`): whatever running state the
+    /// The voice's reset ([re:b33786] calls it on every voice, from
+    /// [re:404233] and voice creation): whatever running state the
     /// original class clears, without allocating. The base
     /// [re:0363ae] is empty, so tails survive a panic in
     /// nodes that do not override it.
@@ -94,6 +94,11 @@ pub trait Node: Send {
     /// A control port's value without `&mut` ([re:875910]
     /// [re:294c79]), for the nodes whose tail length depends on their ports.
     fn port_value(&self, _index: usize) -> Option<f32> {
+        None
+    }
+    /// A control output ([re:414b35]: the effect's out
+    /// parameter, e.g. a compressor's gain-reduction meter, 1 = none).
+    fn output(&self, _index: usize) -> Option<f32> {
         None
     }
 }
@@ -131,13 +136,32 @@ pub struct Effect {
     trim: Trim,
     /// Trimmed input of the current sub-block.
     buf: [[f32; NODE_BLOCK]; 2],
-    /// Values for this block (`Effect + 0x1c0..0x1cc`).
+    /// Values for this block.
     pub active: bool,
     pub mix: f32,
     pub level: f32,
     pub trim_target: f32,
-    /// Last pushed front-panel values (`Effect + 0x1d4`, stride 0x74).
+    /// Last pushed front-panel values.
     pub params: [f32; 12],
+}
+
+/// The 2^x the effect nodes and the voice filter cores use for their
+/// parameter conversions (cutoffs, pitch, times, gains): `f32::exp2` unless the app installs another one
+/// ([`install_exp2`]; Einst's is the original v1's fast approximation).
+#[inline]
+pub fn exp2(x: f32) -> f32 {
+    match EXP2.get() {
+        Some(f) => f(x),
+        None => x.exp2(),
+    }
+}
+
+static EXP2: std::sync::OnceLock<fn(f32) -> f32> = std::sync::OnceLock::new();
+
+/// Install the app's 2^x for [`exp2`] (once, at start-up; later calls are
+/// ignored and return `false`).
+pub fn install_exp2(f: fn(f32) -> f32) -> bool {
+    EXP2.set(f).is_ok()
 }
 
 /// An app's own effect nodes: `create(kind)` returns the node for an
@@ -184,7 +208,7 @@ impl Effect {
     }
 
     /// [re:967f49] → [re:330ad9] →
-    /// [re:572a93]: each voice's own `Reset` ([`Node::reset`]),
+    /// [re:572a93]: each voice's own reset ([`Node::reset`]),
     /// in place on the audio thread.
     pub fn panic(&mut self) {
         if let Some(n) = self.node.as_mut() {
@@ -192,7 +216,7 @@ impl Effect {
         }
     }
 
-    /// `PushParameterValue`: front-panel parameter → node port(s).
+    /// Front-panel parameter → node port(s).
     pub fn push_parameter(&mut self, index: usize, v01: f32) {
         if let Some(p) = self.params.get_mut(index) {
             *p = v01;
@@ -245,6 +269,11 @@ impl Effect {
         }
     }
 
+    /// The node's control output `index` ([`Node::output`]).
+    pub fn output(&self, index: usize) -> Option<f32> {
+        self.node.as_deref().and_then(|n| n.output(index))
+    }
+
     pub fn tail(&self, ctx: &Ctx) -> usize {
         if !self.active {
             return 0;
@@ -277,7 +306,7 @@ impl EffectChain {
         }
     }
 
-    /// `NeedsToProcess` [re:b32927].
+    /// Whether processing is needed [re:b32927].
     pub fn needs_to_process(&self) -> bool {
         self.active && self.mix.abs() >= 1e-6 && self.slots.iter().flatten().any(|e| e.kind != 0 && e.active)
     }

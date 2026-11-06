@@ -4,7 +4,7 @@
 //! recorded samples to the editor, which builds audio files; the port keeps
 //! the takes in memory. See the dreist-re sampler notes.
 
-/// Pre-roll ring length (+0x20c / +[re:6f3900], 0x4b00 frames).
+/// Pre-roll ring length ([re:6f3900], 0x4b00 frames).
 const PREROLL: usize = 0x4b00;
 
 /// Finished takes held for the editor; later ones are dropped (their
@@ -19,7 +19,7 @@ pub enum State {
     Recording,
 }
 
-/// [re:5ce144] (+0x1c8).
+/// [re:5ce144].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StartMode {
     #[default]
@@ -30,7 +30,7 @@ pub enum StartMode {
     MidiAny,
 }
 
-/// `TimedMode` (+0x1cc): off, stop after the length, or keep cutting takes.
+/// Timed mode: off, stop after the length, or keep cutting takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimedMode {
     #[default]
@@ -39,7 +39,7 @@ pub enum TimedMode {
     Retake,
 }
 
-/// `SamplerChannelMode` (+0x1f8).
+/// Sampler channel mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Channels {
     #[default]
@@ -71,6 +71,10 @@ impl Take {
     }
 }
 
+/// The original v1's `startmode` / `timedmode` names (by message value).
+pub const V1_START_MODES: [&str; 4] = ["Immediate", "MIDI", "Host", "Threshold"];
+pub const V1_TIMED_MODES: [&str; 3] = ["Free", "Timed", "Loop"];
+
 /// `recordsource` values: the host input and the master output.
 pub const SOURCE_EXTERNAL: i32 = 38;
 pub const SOURCE_MASTER: i32 = 1;
@@ -94,7 +98,7 @@ pub fn source_from_name(name: &str) -> i32 {
 #[derive(Debug, Clone)]
 pub struct Sampler {
     pub state: State,
-    /// Engine of the auto-allocation target (`GetAutoSamplerTarget` +[re:6c4598]),
+    /// Engine of the auto-allocation target ([re:6c4598]),
     /// set when arming.
     pub target_engine: Option<usize>,
     pub start_mode: StartMode,
@@ -113,9 +117,9 @@ pub struct Sampler {
     pub start_threshold: f32,
     pub stop_threshold: f32,
     pub sample_rate: f32,
-    /// Peak meters (+0x1fc / +0x200).
+    /// Peak meters.
     pub meters: (f32, f32),
-    /// Takes kept (`StartTake` stops at 1023); their audio goes to the
+    /// Takes kept (a take start stops at 1023); their audio goes to the
     /// editor through `finished`.
     pub takes: usize,
     /// Takes finished since the editor last collected them (the original
@@ -125,18 +129,18 @@ pub struct Sampler {
     /// A reserved buffer for the next take, handed in off the audio thread
     /// so recording does not allocate.
     spare: Option<Take>,
-    /// `recordsource` (+0x1f4, `GetRecordSourceType` [re:c88950]): 38 = the
+    /// `recordsource` ([re:c88950]): 38 = the
     /// host input ("External"), below that an output location (1 Master,
     /// 2..33 Sub output 1–32), above it MITM (out of scope). The
     /// constructor ([re:33d1f3]) starts at 1, Master.
     pub source: i32,
     /// Auto-export mode (+[re:ef5002], message 0x100; export itself not ported).
     pub auto_mode: usize,
-    /// Timed length in samples (+0x1c0, 0 = untimed).
+    /// Timed length in samples (0 = untimed).
     length: u32,
-    /// Samples until a pending start (+0x1c4, −1 = none).
+    /// Samples until a pending start (−1 = none).
     countdown: i64,
-    /// Current take length (+0x1d8) and trailing silence (+0x1f0).
+    /// Current take length and trailing silence.
     take_len: u32,
     silence: u32,
     current: Option<Take>,
@@ -188,7 +192,7 @@ impl Default for Sampler {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SamplerClock {
     pub playing: bool,
-    /// [re:c10d76] just stopped this block.
+    /// Transport just stopped this block.
     pub stopped: bool,
     pub samples_per_beat: f64,
     pub samples_per_bar: f64,
@@ -227,7 +231,7 @@ impl Sampler {
         self.current.as_ref()
     }
 
-    /// `ArmRecord` [re:df1a89].
+    /// Arm [re:df1a89].
     pub fn arm(&mut self) {
         if self.state == State::Idle {
             self.state = State::Armed;
@@ -235,7 +239,7 @@ impl Sampler {
         }
     }
 
-    /// `DisarmRecord` [re:c36352].
+    /// Disarm [re:c36352].
     pub fn disarm(&mut self) {
         match self.state {
             State::Recording => self.stop_recording(),
@@ -244,7 +248,7 @@ impl Sampler {
         }
     }
 
-    /// `ProcessMIDI` [re:157b1c]: a note-on starts an armed MIDI-mode sampler
+    /// MIDI input [re:157b1c]: a note-on starts an armed MIDI-mode sampler
     /// `delta` samples into the block.
     pub fn midi(&mut self, status: u8, delta: u32) {
         if self.state == State::Armed && status == 0x90 && matches!(self.start_mode, StartMode::Midi | StartMode::MidiAny) {
@@ -252,7 +256,7 @@ impl Sampler {
         }
     }
 
-    /// `StartRecording` [re:d8f427]: timed length, new take, and (with
+    /// Start recording [re:d8f427]: timed length, new take, and (with
     /// `fade`) the last ≤ 1 ms of input faded in ahead of the take.
     fn start_recording(&mut self, clock: &SamplerClock, fade: bool) {
         self.length = match self.timed {
@@ -282,7 +286,7 @@ impl Sampler {
         }
     }
 
-    /// `StartTake` [re:822ac7] (at most 1023 takes).
+    /// Start a take [re:822ac7] (at most 1023 takes).
     fn start_take(&mut self) {
         if self.takes >= 0x3ff {
             self.state = State::Idle;
@@ -293,7 +297,7 @@ impl Sampler {
         self.current = Some(self.spare.take().unwrap_or_default());
     }
 
-    /// `StopTake` [re:0f92f1]: keep the take, cut to `len` recorded samples
+    /// Stop the take [re:0f92f1]: keep the take, cut to `len` recorded samples
     /// (after any pre-roll).
     fn stop_take(&mut self, len: u32) {
         if let Some(mut t) = self.current.take() {
@@ -311,7 +315,7 @@ impl Sampler {
         }
     }
 
-    /// `StopRecording` [re:26cdcb]: untimed takes lose their trailing silence.
+    /// Stop recording [re:26cdcb]: untimed takes lose their trailing silence.
     pub fn stop_recording(&mut self) {
         if self.state != State::Recording {
             return;
@@ -333,28 +337,28 @@ impl Sampler {
     }
 
     /// Armed → record now with fade (message 0xef/0xf0 on an armed
-    /// sampler, `StartRecording(true)`).
+    /// sampler, recording with fade).
     pub fn start_armed(&mut self, clock: &SamplerClock) {
         if self.state == State::Armed {
             self.start_recording(clock, true);
         }
     }
 
-    /// `ClearTake` (0xfb): drop one take (not while recording).
+    /// Clear a take (0xfb): drop one take (not while recording).
     pub fn clear_take(&mut self, n: usize) {
         if self.state != State::Recording && n < self.takes {
             self.takes -= 1;
         }
     }
 
-    /// `ClearTakes` (0xfc).
+    /// Clear the takes (0xfc).
     pub fn clear_takes(&mut self) {
         if self.state != State::Recording {
             self.takes = 0;
         }
     }
 
-    /// `HandleMessage` 0xfe: channel mode change clears takes and idles.
+    /// Message 0xfe: channel mode change clears takes and idles.
     pub fn set_channels(&mut self, mode: i32) {
         if let Some(t) = self.current.take() {
             self.recycle(t);
@@ -369,7 +373,7 @@ impl Sampler {
         };
     }
 
-    /// `SetStartMode` [re:b66a15] (0xf2): immediate is timed-stop, MIDI and
+    /// Start mode [re:b66a15] (0xf2): immediate is timed-stop, MIDI and
     /// threshold untimed, host and timed MIDI take the auto mode's timing
     /// (table [re:6b0523] = [stop, stop, retake, retake, retake, stop]).
     pub fn set_start_mode(&mut self, mode: i32) {
@@ -409,7 +413,7 @@ impl Sampler {
         }
     }
 
-    /// `ProcessSamples` [re:08bdb0] for one block of `input`; adds the thru
+    /// [re:08bdb0] for one block of `input`; adds the thru
     /// signal into `out`.
     pub fn process(&mut self, input: [&[f32]; 2], out: [&mut [f32]; 2], clock: &SamplerClock) {
         let n = input[0].len();
@@ -436,7 +440,7 @@ impl Sampler {
         }
         self.meters = (self.meters.0.max(pl), self.meters.1.max(pr));
         // Thru goes to the main outputs, except when recording the master
-        // itself (`ProcessSamples`: +0x208 = source != 1).
+        // itself (source != 1).
         if self.thru && self.source != SOURCE_MASTER {
             let og = self.output_gain;
             let [ol, or] = out;
@@ -503,14 +507,15 @@ impl Sampler {
                         self.stop_recording();
                     }
                 }
-                // Auto-stop after 0.25 s below the stop threshold.
+                // Auto-stop after 0.25 s below the stop threshold (the
+                // app's rules may set another time).
                 if self.state == State::Recording && self.start_mode == StartMode::Threshold && self.stop_threshold > 0.0 {
                     let last = (0..chunk).rev().find(|&k| self.loud(at + k, self.stop_threshold));
                     self.silence = match last {
                         Some(j) => (chunk - 1 - j) as u32,
                         None => self.silence + n as u32,
                     };
-                    if self.silence as f32 > self.sample_rate * 0.25 {
+                    if self.silence as f32 > self.sample_rate * dreist_dsp::rules::get().sampler_auto_stop_seconds {
                         self.stop_recording();
                         self.arm();
                     }

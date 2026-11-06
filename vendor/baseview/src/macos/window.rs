@@ -4,7 +4,8 @@ use std::ptr;
 use std::rc::Rc;
 
 use cocoa::appkit::{
-    NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSBackingStoreBuffered,
+    NSApp, NSApplication, NSApplicationActivationPolicyAccessory,
+    NSApplicationActivationPolicyRegular, NSBackingStoreBuffered,
     NSPasteboard, NSView, NSWindow, NSWindowStyleMask,
 };
 use cocoa::base::{id, nil, BOOL, NO, YES};
@@ -30,6 +31,18 @@ use super::view::{create_view, BASEVIEW_STATE_IVAR};
 
 #[cfg(feature = "opengl")]
 use crate::gl::{GlConfig, GlContext};
+
+/// The environment variable that turns on background mode.
+pub const BACKGROUND_GUI_ENV: &str = "DREIST_BACKGROUND_GUI";
+
+/// Background mode, for tests and harnesses on a desktop someone is using:
+/// `DREIST_BACKGROUND_GUI=1` keeps every window this crate opens from coming
+/// to the front or taking focus. A standalone window then belongs to an
+/// accessory app (no Dock icon, no activation), sits off screen and is
+/// ordered to the back without being made key.
+pub fn background_gui() -> bool {
+    std::env::var_os(BACKGROUND_GUI_ENV).is_some_and(|v| !v.is_empty() && v != "0")
+}
 
 pub struct WindowHandle {
     state: Rc<WindowState>,
@@ -188,9 +201,14 @@ impl<'a> Window<'a> {
         // function of a cocoa app according to:
         // https://developer.apple.com/documentation/appkit/nsapplication
         let app = unsafe { NSApp() };
+        let background = background_gui();
 
         unsafe {
-            app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+            app.setActivationPolicy_(if background {
+                NSApplicationActivationPolicyAccessory
+            } else {
+                NSApplicationActivationPolicyRegular
+            });
         }
 
         let scaling = match options.scale {
@@ -214,12 +232,20 @@ impl<'a> Window<'a> {
                 NSBackingStoreBuffered,
                 NO,
             );
-            ns_window.center();
+            if background {
+                ns_window.setFrameOrigin_(NSPoint::new(-30000.0, -30000.0));
+            } else {
+                ns_window.center();
+            }
 
             let title = NSString::alloc(nil).init_str(&options.title).autorelease();
             ns_window.setTitle_(title);
 
-            ns_window.makeKeyAndOrderFront_(nil);
+            if background {
+                let () = msg_send![ns_window, orderBack: nil];
+            } else {
+                ns_window.makeKeyAndOrderFront_(nil);
+            }
 
             ns_window
         };
