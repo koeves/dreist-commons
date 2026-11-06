@@ -42,6 +42,10 @@ pub struct BufferManager {
     aux_input_storage: Vec<Vec<Vec<f32>>>,
 
     aux_output_buffers: Vec<Buffer<'static>>,
+    /// Scratch data for auxiliary outputs the host did not provide buffers for (a VST3 host
+    /// passes null channel buffers for inactive busses). The plugin still gets full-length
+    /// slices, so the block stays valid and is processed; what it writes there is discarded.
+    aux_output_storage: Vec<Vec<Vec<f32>>>,
 }
 
 // SAFETY: The raw pointers in the `ChannelPointers` fields/vectors are only used as scratch storage
@@ -120,7 +124,12 @@ impl BufferManager {
         }
 
         let mut aux_output_buffers = Vec::with_capacity(audio_io_layout.aux_output_ports.len());
+        let mut aux_output_storage = Vec::with_capacity(audio_io_layout.aux_output_ports.len());
         for num_channels in audio_io_layout.aux_output_ports {
+            aux_output_storage.push(vec![
+                vec![0.0; max_buffer_size];
+                num_channels.get() as usize
+            ]);
             let mut buffer = Buffer::default();
             unsafe {
                 buffer.set_slices(0, |slices| {
@@ -143,6 +152,7 @@ impl BufferManager {
             aux_input_storage,
 
             aux_output_buffers,
+            aux_output_storage,
         }
     }
 
@@ -318,10 +328,11 @@ impl BufferManager {
 
         // The auxiliary output buffers can point directly to the host's buffers. This logic is the
         // same as the main outputs, minus the copying of input cdata
-        for (output_channel_pointers, output_buffer) in self
+        for ((output_channel_pointers, output_buffer), output_storage) in self
             .aux_output_channel_pointers
             .iter()
             .zip(self.aux_output_buffers.iter_mut())
+            .zip(self.aux_output_storage.iter_mut())
         {
             output_buffer.set_slices(num_samples, |output_slices| {
                 match output_channel_pointers {
@@ -352,12 +363,18 @@ impl BufferManager {
                         // we must get rid of any dangling slices
                         output_slices[output_channel_pointers.num_channels..].fill_with(|| &mut [])
                     }
-                    None => {
-                        nih_debug_assert_eq!(output_slices.len(), 0);
-
-                        // Same as above
-                        output_slices.fill_with(|| &mut [])
+                    // No host buffers (an inactive bus): scratch storage, so the plugin is
+                    // still called with valid buffers.
+                    None if output_storage.iter().all(|c| c.len() >= num_samples) => {
+                        for (output_slice, storage) in
+                            output_slices.iter_mut().zip(output_storage.iter_mut())
+                        {
+                            let scratch = &mut storage[..num_samples];
+                            scratch.fill(0.0);
+                            *output_slice = &mut *(scratch as *mut [f32]);
+                        }
                     }
+                    None => output_slices.fill_with(|| &mut []),
                 }
             });
         }
@@ -392,6 +409,53 @@ mod miri {
         aux_output_ports: &[new_nonzero_u32(NUM_AUX_CHANNELS as u32); NUM_AUX_PORTS],
         names: PortNames::const_default(),
     };
+
+    /// A host that passes no buffers for an auxiliary output (an inactive VST3 bus) still gets
+    /// full-length scratch slices there, so the block is processed.
+    #[test]
+    fn missing_aux_output_gets_scratch() {
+        let mut main_io_storage = vec![vec![0.0f32; BUFFER_SIZE]; NUM_MAIN_OUTPUT_CHANNELS];
+        let mut main_io_pointers: Vec<*mut f32> =
+            main_io_storage.iter_mut().map(|c| c.as_mut_ptr()).collect();
+        let mut aux_input_storage =
+            vec![vec![vec![0.0f32; BUFFER_SIZE]; NUM_AUX_CHANNELS]; NUM_AUX_PORTS];
+        let mut aux_input_pointers: Vec<Vec<*mut f32>> = aux_input_storage
+            .iter_mut()
+            .map(|port| port.iter_mut().map(|c| c.as_mut_ptr()).collect())
+            .collect();
+        let mut manager = BufferManager::for_audio_io_layout(BUFFER_SIZE, AUDIO_IO_LAYOUT);
+        let buffers = unsafe {
+            manager.create_buffers(0, BUFFER_SIZE, |source| {
+                *source.main_input_channel_pointers = Some(ChannelPointers {
+                    ptrs: NonNull::new(main_io_pointers.as_mut_ptr()).unwrap(),
+                    num_channels: NUM_MAIN_INPUT_CHANNELS,
+                });
+                *source.main_output_channel_pointers = Some(ChannelPointers {
+                    ptrs: NonNull::new(main_io_pointers.as_mut_ptr()).unwrap(),
+                    num_channels: NUM_MAIN_OUTPUT_CHANNELS,
+                });
+                for (input, pointers) in source
+                    .aux_input_channel_pointers
+                    .iter_mut()
+                    .zip(aux_input_pointers.iter_mut())
+                {
+                    *input = Some(ChannelPointers {
+                        ptrs: NonNull::new(pointers.as_mut_ptr()).unwrap(),
+                        num_channels: NUM_AUX_CHANNELS,
+                    });
+                }
+                // No auxiliary output pointers: the host left those busses inactive.
+            })
+        };
+        assert_eq!(buffers.aux_outputs.len(), NUM_AUX_PORTS);
+        for aux in buffers.aux_outputs.iter_mut() {
+            for channel in aux.as_slice() {
+                assert_eq!(channel.len(), BUFFER_SIZE);
+                channel.fill(1.0);
+            }
+        }
+        assert_eq!(buffers.main_buffer.samples(), BUFFER_SIZE);
+    }
 
     #[test]
     fn buffer_io() {
