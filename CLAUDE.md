@@ -13,7 +13,8 @@ resources, IDs, menus, readers) in the apps, not here.
   reference.
 - Tests that need UI graphics or factory data use a Dreist checkout at `../dreist` and skip
   without one.
-- Git: Conventional Commits, changelog and releases as in `.agents/git.md`.
+- Git: Conventional Commits, changelog, releases and branches as in `CONTRIBUTING.md`; agent
+  workflow notes are in the private `dreist-re` repository (`agents.md`).
 
 ## Build
 
