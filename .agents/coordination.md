@@ -65,5 +65,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   action** only if Dreist builds a `Rules` literal: add `scene_snapshot_v1: false`.
 - 7db4810: `App::ctrl_click_right` (off by default; Einst on). Dreist unchanged.
 - fb3406d: dreist-gui value boxes drag when the control or its style sets `dragable` (v1's flag; up = more, 200 px per range, shift 2000 px). Opt-in; Dreist's skins never set it, so Dreist is unchanged.
+- ccf9715: dreist-gui `menu::BLOCK` item prefix (v1's block icon in the icon column). Opt-in; Dreist never uses it, so Dreist is unchanged.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
