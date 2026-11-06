@@ -1262,6 +1262,12 @@ impl<'s> Renderer<'s> {
     /// inset by `realPlotInset` (default 0). The curve is the `points`
     /// attribute, `x,y` pairs (0..1, y up) separated by spaces; without
     /// it a flat line across the middle.
+    ///
+    /// Opt-in, several curves ([re:b732af]: one polyline per Y vector, in
+    /// the order added, each in its own colour): a `curves` attribute holds
+    /// them separated by `;`, each `colour|points` with the colour a
+    /// registered name or literal and the points as above. With `curves`
+    /// set (even empty) `points` and the flat line are not drawn.
     fn plot(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
@@ -1269,19 +1275,29 @@ impl<'s> Renderer<'s> {
         let area = Self::bounds(c).inset(opt_f32(s, st, c, "realPlotInset", 0.0).max(0.0));
         let line = s.colour(st, "colLine", self.colour_attr(st, "colText"));
         let lw = opt_f32(s, st, c, "realLineWidth", 1.5);
-        let mut pts: Vec<(f32, f32)> = c
-            .attr("points")
-            .unwrap_or("")
-            .split_whitespace()
-            .filter_map(|pt| {
-                let (x, y) = pt.split_once(',')?;
-                Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
-            })
-            .collect();
-        if pts.len() < 2 {
-            pts = vec![(0.0, 0.5), (1.0, 0.5)];
+        let parse = |v: &str| -> Vec<(f32, f32)> {
+            v.split_whitespace()
+                .filter_map(|pt| {
+                    let (x, y) = pt.split_once(',')?;
+                    Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
+                })
+                .map(|(x, y)| (area.x + x * area.w, area.y + (1.0 - y) * area.h))
+                .collect()
+        };
+        if let Some(curves) = c.attr("curves") {
+            for curve in curves.split(';') {
+                let Some((col, pts)) = curve.split_once('|') else { continue };
+                let pts = parse(pts);
+                if pts.len() >= 2 {
+                    p.polyline(&pts, s.parse_colour(col), lw);
+                }
+            }
+            return;
         }
-        let pts: Vec<(f32, f32)> = pts.iter().map(|(x, y)| (area.x + x * area.w, area.y + (1.0 - y) * area.h)).collect();
+        let mut pts = parse(c.attr("points").unwrap_or(""));
+        if pts.len() < 2 {
+            pts = parse("0,0.5 1,0.5");
+        }
         p.polyline(&pts, line, lw);
     }
 
@@ -1641,6 +1657,20 @@ mod tests {
         // The curve's peak (x 0.5, y 0.9 of the inset area) is on it.
         let at = |px: &[u8], x: usize, y: usize| px[(y * 107 + x) * 4];
         assert!(at(&curve, 53, 6) > 128 && at(&flat, 53, 6) < 128);
+    }
+
+    #[test]
+    fn plots_draw_coloured_curves_when_asked() {
+        let s = sheet(&[("Plot", "CtrlStyle", &[COLOURS, &[("colLine", "255, 0, 255, 255")]].concat())]);
+        let at = |px: &[u8], x: usize, y: usize| px[(y * 107 + x) * 4..(y * 107 + x) * 4 + 3].to_vec();
+        // Two curves in their own colours; no flat line in colLine.
+        let two = draw(&s, &ctrl("CtrlPlot", "Plot", 107, 50, &[("curves", "0, 255, 0, 255|0,0.9 1,0.9;0, 0, 255, 255|0,0.1 1,0.1")]));
+        assert!(at(&two, 53, 5)[1] > 128 && at(&two, 53, 5)[2] < 64);
+        assert!(at(&two, 53, 45)[2] > 128 && at(&two, 53, 45)[1] < 64);
+        assert!(two.chunks(4).all(|p| !(p[0] > 128 && p[2] > 128 && p[1] < 64)));
+        // Empty: nothing but the fill.
+        let none = draw(&s, &ctrl("CtrlPlot", "Plot", 107, 50, &[("curves", "")]));
+        assert_eq!(at(&none, 53, 25), at(&none, 53, 5));
     }
 
     #[test]
