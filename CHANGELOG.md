@@ -2,7 +2,7 @@
 
 ## [0.1.1] - 2026-11-06
 
-Second release, for Dreist v0.1.1 and Einst's first release. Main's history was cleaned up:
+Second release, for Einst's first release (Dreist picks it up later). Main's history was cleaned up:
 `main` now holds the initial commit and one merge per release (`git log --first-parent main`);
 every change stays on `dev`, unchanged. The v0.1.0 tag and release are kept as they were.
 GitHub Actions now run only on release tags (and by hand), not on pushes to `main`.

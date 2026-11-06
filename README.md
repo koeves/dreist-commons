@@ -45,7 +45,6 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
   are generated from them ([CONTRIBUTING.md](CONTRIBUTING.md)).
 - Checks: the commands under Development.
 - Dreist and Einst include this repository as a submodule at `commons`.
-- Git conventions for contributors and agents: [`.agents/git.md`](.agents/git.md).
 
 ## Related projects
 
