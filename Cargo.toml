@@ -4,7 +4,7 @@ members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine",
 
 [workspace.package]
 edition = "2024"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT OR Apache-2.0"
 
 # The DSP follows the original closely: constants as the original
