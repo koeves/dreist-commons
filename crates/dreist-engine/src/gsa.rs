@@ -83,6 +83,7 @@ impl SliceFile {
                         strength: n.f32("Strength").unwrap_or(-50.0),
                         dyn_sense: n.f32("DynSense").unwrap_or(-50.0),
                         mean: n.f32("Mean").unwrap_or(-50.0),
+                        kind: 0,
                     });
                 }
                 "AudioFileMetaData" => {
