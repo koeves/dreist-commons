@@ -61,5 +61,7 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
 - e2482ba: `CtrlPlot` `curves` attribute (several coloured curves). Opt-in; Dreist never sets it, goldens unchanged.
 - 0e592d8: v1 timestretch amount curve under `Rules::timestretch_v1`, plus
   `params::set_stretch_v1` for the knob units (off by default). Dreist unchanged.
+- 86445a9: `Rules::scene_snapshot_v1` (off by default; Einst on). Dreist unchanged. **Dreist
+  action** only if Dreist builds a `Rules` literal: add `scene_snapshot_v1: false`.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
