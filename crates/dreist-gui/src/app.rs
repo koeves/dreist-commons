@@ -550,6 +550,9 @@ impl App {
             let dir = if flip { -1.0 } else { 1.0 };
             let mut range_moved = false;
             let value = match c.class.as_str() {
+                // [re:4ee9e7]: up raises value01 by 1 per 200 px (2000 px
+                // with shift).
+                "CtrlValueBox" => Some((v0 + (y0 - y) / if m.shift { 2000.0 } else { 200.0 }).clamp(0.0, 1.0)),
                 "CtrlKnob" | "CtrlTransmodKnob" => {
                     let fine = self_fine;
                     Some((v0 + (y0 - y) / if fine { DRAG_RANGE * 10.0 } else { DRAG_RANGE }).clamp(0.0, 1.0))
@@ -828,12 +831,31 @@ impl App {
                 return committed;
             }
         }
+        // `dragable` value boxes (control attribute, else style; [re:4ad8c8]):
+        // a single press starts a drag that changes the value.
+        if button == MouseButton::Left {
+            if let Some((p, v0)) = deferred.as_ref().and_then(|p| self.ctrl(p).filter(|c| c.class == "CtrlValueBox" && self.opt_bool(c, "dragable")).map(|c| (p.clone(), c.value))) {
+                self.press_at = (x, y);
+                self.dragging = false;
+                self.drag_left = false;
+                self.pressed = Some((p.clone(), x, y, v0));
+                self.last_press = Some((p, std::time::Instant::now()));
+                self.dirty = true;
+                return committed;
+            }
+        }
         let more = self.mouse_down_inner(button);
         committed.extend(more);
         if let Some(p) = deferred {
             self.last_press = Some((p, std::time::Instant::now()));
         }
         committed
+    }
+
+    /// A control option: the control's attribute, else its style's.
+    fn opt_bool(&self, c: &Ctrl, k: &str) -> bool {
+        let st = if self.skin.styles.styles.contains_key(&c.style) { c.style.as_str() } else { "ApplicationStyle" };
+        crate::render::opt_bool(&self.skin.styles, st, c, k, false)
     }
 
     fn mouse_down_inner(&mut self, button: MouseButton) -> Vec<UiEvent> {
@@ -1470,6 +1492,30 @@ mod tests {
         app.mouse_down(MouseButton::Left);
         app.mouse_move(110.0, 19.0);
         assert!((get(&app, "valueHigh") - 0.9).abs() < 1e-4);
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn dragable_value_boxes_drag_their_value() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let mut vb = Ctrl { class: "CtrlValueBox".into(), name: "Num".into(), rect: crate::ctrl::Rect::new(10, 50, 30, 17), visible: true, enabled: true, ..Ctrl::default() };
+        vb.set_attr("optSingleClickEdit", "false".into());
+        let mut plain = vb.clone();
+        plain.name = "Plain".into();
+        plain.rect = crate::ctrl::Rect::new(60, 50, 30, 17);
+        vb.set_attr("dragable", "true".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 300), visible: true, enabled: true, children: vec![vb, plain], ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        app.mouse_move(20.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(20.0, 8.0);
+        assert!(ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { name, value, .. } if name == "Num" && (*value - 0.25).abs() < 1e-4)));
+        app.mouse_up(MouseButton::Left);
+        // Without `dragable` the press passes through: no value change.
+        app.mouse_move(70.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        let ev = app.mouse_move(70.0, 8.0);
+        assert!(!ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { .. })));
         app.mouse_up(MouseButton::Left);
     }
 }
