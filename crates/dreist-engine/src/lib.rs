@@ -29,7 +29,7 @@ pub mod songrec;
 pub mod tap;
 pub mod velsplit;
 
-pub use engine::{Dreist, Meters, RenderOptions, Route, SUB_OUTPUTS, StepWrite};
+pub use engine::{Dreist, FxOut, Meters, RenderOptions, Route, SUB_OUTPUTS, StepWrite};
 
 /// Write a 32-bit float stereo WAV.
 pub fn write_wav(path: &std::path::Path, sr: u32, left: &[f32], right: &[f32]) -> std::io::Result<()> {
