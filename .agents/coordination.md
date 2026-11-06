@@ -51,5 +51,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
 - 957bd35: `SlicePoint::kind` (slice type) and `slice::extract_pattern_full` (v1's
   slice type allocation). Existing extract functions unchanged; Dreist unchanged. **Dreist
   action** only if Dreist builds a `SlicePoint` literal: add `kind: 0` (none found).
+- 70c996b: analysis files read / write a slice's `Type` (only when typed). Dreist unchanged.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
