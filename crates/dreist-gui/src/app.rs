@@ -159,6 +159,9 @@ pub struct App {
     menu_slider: Option<usize>,
     /// The UI scale changed: the window should resize to size × scale.
     pub resize_request: bool,
+    /// Shift alone turns knobs ten times slower while dragging (the
+    /// original v1's fine mode: 2000 px a turn, [re:427435]). Off by default.
+    pub fine_drag: bool,
     /// Running collapse panel folds.
     folds: Vec<crate::collapse::Anim>,
     /// The cursor the window should show ([re:752b0e]); reset to
@@ -225,6 +228,7 @@ impl App {
             menu_slider: None,
             folds: Vec::new(),
             resize_request: false,
+            fine_drag: false,
             cursor: crate::cursor::Cursor::Arrow,
             split_drag: None,
             splits: Vec::new(),
@@ -533,11 +537,16 @@ impl App {
                     (flip, crate::render::opt_f32(&self.skin.styles, st, c, "realCentreDetent", 0.03))
                 })
                 .unwrap_or((false, 0.0));
+            let m = self.mods;
+            let self_fine = self.fine_drag && m.shift && !m.cmd && !m.alt && !m.ctrl;
             let Some(c) = self.ctrl_mut(&path) else { return out };
             let dir = if flip { -1.0 } else { 1.0 };
             let mut range_moved = false;
             let value = match c.class.as_str() {
-                "CtrlKnob" | "CtrlTransmodKnob" => Some((v0 + (y0 - y) / DRAG_RANGE).clamp(0.0, 1.0)),
+                "CtrlKnob" | "CtrlTransmodKnob" => {
+                    let fine = self_fine;
+                    Some((v0 + (y0 - y) / if fine { DRAG_RANGE * 10.0 } else { DRAG_RANGE }).clamp(0.0, 1.0))
+                }
                 "CtrlSlider" | "CtrlTransmodSlider" if !flip => Some(if c.rect.w < c.rect.h {
                     (v0 + (y0 - y) / (c.rect.h - c.rect.w).max(1) as f32).clamp(0.0, 1.0)
                 } else {
