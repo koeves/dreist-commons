@@ -59,5 +59,7 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
 - 0a772ea: `dreist_engine::FxOut` exported. No behaviour change.
 - e717364: `Meters::merge` takes the merged-in block's effect outputs. No change for Dreist.
 - e2482ba: `CtrlPlot` `curves` attribute (several coloured curves). Opt-in; Dreist never sets it, goldens unchanged.
+- 0e592d8: v1 timestretch amount curve under `Rules::timestretch_v1`, plus
+  `params::set_stretch_v1` for the knob units (off by default). Dreist unchanged.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
