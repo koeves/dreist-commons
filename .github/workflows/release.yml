@@ -11,7 +11,7 @@ on:
       tag:
         description: "Release tag"
         required: true
-        default: "v0.1.1"
+        default: "v0.1.0"
       upload:
         description: "Publish the release"
         type: boolean
