@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use dreist_dsp::slice::SlicePoint;
+use dreist_dsp::slice::{SLICE_TYPE_NAMES, SlicePoint};
 use dreist_formats::Node;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,7 +83,8 @@ impl SliceFile {
                         strength: n.f32("Strength").unwrap_or(-50.0),
                         dyn_sense: n.f32("DynSense").unwrap_or(-50.0),
                         mean: n.f32("Mean").unwrap_or(-50.0),
-                        kind: 0,
+                        // [re:3c3875]: the type by name.
+                        kind: n.attr("Type").and_then(|t| SLICE_TYPE_NAMES.iter().position(|k| *k == t)).unwrap_or(0) as u8,
                     });
                 }
                 "AudioFileMetaData" => {
@@ -125,6 +126,11 @@ impl SliceFile {
                 p.set("Deleted", "true");
             }
             p.set("DynSense", s.dyn_sense).set("Mean", s.mean).set("Pos", s.pos).set("Start", s.start).set("Strength", s.strength);
+            // v1 writes every slice's type; "No type" is left out here, so
+            // untyped analyses save as before.
+            if let Some(t) = SLICE_TYPE_NAMES.get(s.kind as usize).filter(|_| s.kind != 0) {
+                p.set("Type", *t);
+            }
             slices.children.push(p);
         }
         sa.children.push(slices);
@@ -180,5 +186,15 @@ mod tests {
         let back = SliceFile::from_node(&Node::parse(&f.to_node().to_xml()).unwrap());
         assert_eq!(back, f);
         assert_eq!(back.master.as_ref().and_then(|m| m.child("AudioFileMetaData", "Meta")).and_then(|m| m.f32("BPM")), Some(100.0));
+    }
+
+    #[test]
+    fn slice_types_round_trip_by_name() {
+        let xml = r#"<root><SliceAnalysis name="Master" version="3000"><Slices><SlicePoint name="SlicePoint0" Start="10" Type="Snare"/><SlicePoint name="SlicePoint1" Start="20" Type="No type"/></Slices></SliceAnalysis></root>"#;
+        let f = SliceFile::from_node(&Node::parse(xml).unwrap());
+        assert_eq!(f.slices.iter().map(|s| s.kind).collect::<Vec<_>>(), vec![2, 0]);
+        let x = f.to_node().to_xml();
+        assert!(x.contains("Type=\"Snare\"") && !x.contains("No type"), "{x}");
+        assert_eq!(SliceFile::from_node(&Node::parse(&x).unwrap()), f);
     }
 }
