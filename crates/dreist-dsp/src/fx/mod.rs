@@ -96,6 +96,11 @@ pub trait Node: Send {
     fn port_value(&self, _index: usize) -> Option<f32> {
         None
     }
+    /// A control output ([re:414b35]: the effect's out
+    /// parameter, e.g. a compressor's gain-reduction meter, 1 = none).
+    fn output(&self, _index: usize) -> Option<f32> {
+        None
+    }
 }
 
 /// `Gain` [re:d073e0] used for the effect trim: linear target ramped per sample.
@@ -262,6 +267,11 @@ impl Effect {
             ol.iter_mut().for_each(|x| *x *= self.level);
             or.iter_mut().for_each(|x| *x *= self.level);
         }
+    }
+
+    /// The node's control output `index` ([`Node::output`]).
+    pub fn output(&self, index: usize) -> Option<f32> {
+        self.node.as_deref().and_then(|n| n.output(index))
     }
 
     pub fn tail(&self, ctx: &Ctx) -> usize {

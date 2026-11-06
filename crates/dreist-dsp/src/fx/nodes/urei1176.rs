@@ -281,6 +281,11 @@ impl Node for Urei1176 {
         &mut self.ports
     }
 
+    /// The gain-reduction meter (control output 0).
+    fn output(&self, index: usize) -> Option<f32> {
+        (index == 0).then(|| self.meter())
+    }
+
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         let p = |i: usize| self.ports[i].value;
         let c = &mut self.comp;

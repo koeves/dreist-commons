@@ -602,6 +602,19 @@ pub struct StepWrite {
     pub data: crate::pattern::StepData,
 }
 
+/// An effect's control output after a block ([re:414b35]): the chain at
+/// `at` (`[engine, pad, layer]`, −1 unused; global aux `[−4, aux, −1]`,
+/// master `[−3, −1, −1]`), its slot and the value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FxOut {
+    pub at: [i8; 3],
+    pub slot: u8,
+    pub value: f32,
+}
+
+/// Room for this many [`FxOut`]s without allocating on the audio thread.
+const FX_OUTS: usize = 64;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Meters {
     /// Master channel ([re:8805c2]/[re:5327eb]).
@@ -620,6 +633,8 @@ pub struct Meters {
     /// [re:6395b3] had to steal a voice (posts
     /// `e_updateVoiceStolen` 0x18a for the header's VoiceIndi).
     pub voice_stolen: bool,
+    /// The effects' control outputs (gain-reduction meters), the latest per slot.
+    pub fx_out: Vec<FxOut>,
 }
 
 impl Default for Meters {
@@ -632,6 +647,7 @@ impl Default for Meters {
             layer: vec![[0.0; 2]; ENGINES * TRACKS * LAYERS],
             midi_received: false,
             voice_stolen: false,
+            fx_out: Vec::with_capacity(FX_OUTS),
         }
     }
 }
@@ -645,6 +661,7 @@ impl Meters {
         self.layer.fill([0.0; 2]);
         self.midi_received = false;
         self.voice_stolen = false;
+        self.fx_out.clear();
     }
 
     /// Fold `o` into these levels (running max).
@@ -660,6 +677,17 @@ impl Meters {
         self.layer.iter_mut().zip(&o.layer).for_each(|(a, b)| mx(a, b));
         self.midi_received |= o.midi_received;
         self.voice_stolen |= o.voice_stolen;
+        // These are newer: only the slots they lack.
+        for f in &o.fx_out {
+            if self.fx_out.len() < FX_OUTS && !self.fx_out.iter().any(|g| g.at == f.at && g.slot == f.slot) {
+                self.fx_out.push(*f);
+            }
+        }
+    }
+
+    /// The latest control output of slot `slot` of the chain at `at`.
+    pub fn fx_output(&self, at: [i8; 3], slot: usize) -> Option<f32> {
+        self.fx_out.iter().find(|f| f.at == at && f.slot as usize == slot).map(|f| f.value)
     }
 
     pub fn pad_level(&self, e: usize, p: usize) -> [f32; 2] {
@@ -668,6 +696,18 @@ impl Meters {
 
     pub fn layer_level(&self, e: usize, p: usize, l: usize) -> [f32; 2] {
         self.layer.get((e * TRACKS + p) * LAYERS + l).copied().unwrap_or_default()
+    }
+}
+
+/// Record the control outputs of `fx`'s running effects ([re:414b35]).
+fn fx_outs(acc: &mut Vec<FxOut>, at: [i8; 3], fx: &FxChain) {
+    for (slot, e) in fx.chain.slots.iter().enumerate() {
+        let Some(value) = e.as_ref().filter(|e| e.active && e.kind != 0).and_then(|e| e.output(0)) else { continue };
+        if let Some(f) = acc.iter_mut().find(|f| f.at == at && f.slot as usize == slot) {
+            f.value = value;
+        } else if acc.len() < FX_OUTS {
+            acc.push(FxOut { at, slot: slot as u8, value });
+        }
     }
 }
 
@@ -2216,6 +2256,7 @@ impl Dreist {
                 let [l, r] = &mut aux[i];
                 a.fx.update(&hm, None);
                 a.fx.process(&self.ctx, l, r);
+                fx_outs(&mut self.meters.fx_out, [-4, i as i8, -1], &a.fx);
                 if a.muted {
                     continue;
                 }
@@ -2230,6 +2271,7 @@ impl Dreist {
         // Master channel [re:3e19f6].
         self.master_fx.update(&hm, None);
         self.master_fx.process(&self.ctx, out_l, out_r);
+        fx_outs(&mut self.meters.fx_out, [-3, -1, -1], &self.master_fx);
         self.master.process(out_l, out_r);
         let po = self.preview_output;
         if po > 1 && po - 2 < self.buf.sub.len() {
@@ -2375,6 +2417,7 @@ impl Dreist {
         let strip = Strip { fx: &mut layer.fx, sends: &mut layer.sends, aux_rows: &layer.aux, gain: &layer.gain, pan: &layer.pan, mix: &mut layer.mix, route: layer.route, silence, pan_lane };
         let acc = &mut self.meters.layer[(s.engine as usize * TRACKS + s.pad as usize) * LAYERS + s.layer as usize];
         mix_strip(strip, &ctx, m, None, pre, [l, r], Some([pl, pr]), aux, sub, [out_l, out_r], acc);
+        fx_outs(&mut self.meters.fx_out, [s.engine as i8, s.pad as i8, s.layer as i8], &layer.fx);
         self.end_stage(vi, 0);
     }
 
@@ -2388,6 +2431,7 @@ impl Dreist {
         let strip = Strip { fx: &mut pad.fx, sends: &mut pad.sends, aux_rows: &pad.aux, gain: &pad.gain, pan: &pad.pan, mix: &mut pad.mix, route: pad.route, silence, pan_lane: None };
         let acc = &mut self.meters.pad[s.engine as usize * TRACKS + s.pad as usize];
         mix_strip(strip, &ctx, m, lanes.as_ref().map(|l| &l[..]), pre, [l, r], Some([el, er]), aux, sub, [out_l, out_r], acc);
+        fx_outs(&mut self.meters.fx_out, [s.engine as i8, s.pad as i8, -1], &pad.fx);
         self.end_stage(vi, 1);
     }
 
@@ -2399,6 +2443,7 @@ impl Dreist {
         let silence = eng.muted.then_some(Silence::InsteadOfGain);
         let strip = Strip { fx: &mut eng.fx, sends: &mut eng.sends, aux_rows: &eng.aux, gain: &eng.gain, pan: &eng.pan, mix: &mut eng.mix, route: eng.route, silence, pan_lane: None };
         mix_strip(strip, &ctx, m, None, pre, [l, r], None, aux, sub, [out_l, out_r], &mut self.meters.engine[s.engine as usize]);
+        fx_outs(&mut self.meters.fx_out, [s.engine as i8, -1, -1], &eng.fx);
         self.end_stage(vi, 2);
     }
 
@@ -2809,6 +2854,20 @@ mod tests {
         g.restore_steps([&w, &beyond]);
         assert!(g.engines[2].patterns[5].tracks[7].steps[3].on);
         assert!(g.step_writes.is_empty() && g.retro_events.is_empty());
+    }
+
+    #[test]
+    fn fx_outputs_keep_the_latest_per_slot() {
+        use super::{FX_OUTS, FxOut, Meters};
+        let mut m = Meters::default();
+        m.fx_out.push(FxOut { at: [0, -1, -1], slot: 2, value: 0.4 });
+        let mut old = Meters::default();
+        old.fx_out.push(FxOut { at: [0, -1, -1], slot: 2, value: 0.9 });
+        old.fx_out.push(FxOut { at: [-3, -1, -1], slot: 0, value: 0.7 });
+        m.merge(&old);
+        assert_eq!((m.fx_output([0, -1, -1], 2), m.fx_output([-3, -1, -1], 0), m.fx_output([1, -1, -1], 2)), (Some(0.4), Some(0.7), None));
+        m.clear();
+        assert!(m.fx_out.is_empty() && m.fx_out.capacity() >= FX_OUTS);
     }
 
     /// Output the old engine produced but nobody collected survives a
