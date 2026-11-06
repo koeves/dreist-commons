@@ -48,5 +48,8 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   **Dreist action** only if Dreist builds a `Rules` literal: add `midi_map_v1: false`.
 - 63dafdb: `Rules::slice_pads` (64 by default; Einst 16). Dreist unchanged.
 - 6a909e4: `App::fine_drag` (off by default; Einst on). Dreist unchanged.
+- 957bd35: `SlicePoint::kind` (slice type) and `slice::extract_pattern_full` (v1's
+  slice type allocation). Existing extract functions unchanged; Dreist unchanged. **Dreist
+  action** only if Dreist builds a `SlicePoint` literal: add `kind: 0` (none found).
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
