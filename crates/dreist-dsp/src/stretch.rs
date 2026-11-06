@@ -9,7 +9,22 @@ use signalsmith_stretch::Stretch;
 /// Stretch factor (output duration / input duration) from the normalized
 /// `TimestretchAmount`: `2v` below 0.5, `14v − 6` above (×1 at 0.5, ×8 at 1).
 pub fn amount_factor(v: f32) -> f32 {
+    if crate::rules::get().timestretch_v1 {
+        return amount_factor_v1(v);
+    }
     if v < 0.5 { v + v } else { v * 14.0 - 6.0 }
+}
+
+/// The original v1's amount ([re:dd87f2]): cubic about the centre,
+/// `3f³ + 1` above (×1..×4), `(1 − f³)·0.9 + 0.1` below (×0.1..×1).
+pub fn amount_factor_v1(v: f32) -> f32 {
+    if v > 0.5 {
+        let f = v + v - 1.0;
+        f * f * f * 3.0 + 1.0
+    } else {
+        let f = 1.0 - (v + v);
+        (1.0 - f * f * f) * 0.9 + 0.1
+    }
 }
 
 pub struct Stretcher {
@@ -99,6 +114,8 @@ mod tests {
         assert_eq!(amount_factor(0.5), 1.0);
         assert_eq!(amount_factor(1.0), 8.0);
         assert_eq!(amount_factor(0.25), 0.5);
+        assert_eq!((amount_factor_v1(0.5), amount_factor_v1(1.0), amount_factor_v1(0.0)), (1.0, 4.0, 0.1));
+        assert!((amount_factor_v1(0.75) - 1.375).abs() < 1e-6);
     }
 
     #[test]

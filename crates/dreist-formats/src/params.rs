@@ -51,6 +51,7 @@ impl Curve {
             Curve::Decibels => (-100.0, 6.0),
             Curve::Linear(lo, hi) => (lo, hi),
             Curve::Cutoff => (6.875, 28160.0),
+            Curve::Stretch if stretch_v1() => (10.0, 400.0),
             Curve::Stretch => (0.0, 800.0),
         }
     }
@@ -60,6 +61,15 @@ impl Curve {
             Curve::Decibels => value01_to_db(x).max(-100.0),
             Curve::Linear(lo, hi) => (hi - lo) * x + lo,
             Curve::Cutoff => (x * 12.0 - 6.0).exp2() * 440.0,
+            Curve::Stretch if stretch_v1() => {
+                if x > 0.5 {
+                    let f = x + x - 1.0;
+                    (f * f * f * 3.0 + 1.0) * 100.0
+                } else {
+                    let f = 1.0 - (x + x);
+                    ((1.0 - f * f * f) * 0.9 + 0.1) * 100.0
+                }
+            }
             Curve::Stretch if x < 0.5 => x * 200.0,
             Curve::Stretch => x * 1400.0 - 600.0,
         }
@@ -70,10 +80,26 @@ impl Curve {
             Curve::Decibels => db_to_value01(v),
             Curve::Linear(lo, hi) => (lo - v) / (lo - hi),
             Curve::Cutoff => ((v.clamp(6.0, 28160.0) / 440.0).log2() + 6.0) / 12.0,
+            Curve::Stretch if stretch_v1() => {
+                let r = (v / 100.0).clamp(0.1, 4.0);
+                if r > 1.0 { (((r - 1.0) / 3.0).cbrt() + 1.0) * 0.5 } else { (1.0 - (1.0 - (r - 0.1) / 0.9).cbrt()) * 0.5 }
+            }
             Curve::Stretch if v > 100.0 => (v - 100.0) / 1400.0 + 0.5,
             Curve::Stretch => v * 0.005,
         }
     }
+}
+
+static STRETCH_V1: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Use the original v1's timestretch amount curve for [`Curve::Stretch`]
+/// (10 %..400 %, cubic about 100 % at the centre, [re:dd87f2]).
+pub fn set_stretch_v1(on: bool) {
+    STRETCH_V1.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn stretch_v1() -> bool {
+    STRETCH_V1.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 const UNIT: Curve = Curve::Linear(0.0, 1.0);
