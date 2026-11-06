@@ -48,6 +48,10 @@ pub struct Rules {
     /// 0.1 QN before the note (a note at 0 moves 0.007 QN later) and only
     /// v1's graph lanes.
     pub midi_export_v1: bool,
+    /// The original v1's default MIDI map: 16 pads per engine channel
+    /// (notes 36–51), note repeat / erase on notes 54 / 56, scenes 0–71 on
+    /// the scene channel.
+    pub midi_map_v1: bool,
 }
 
 /// The reference behaviour.
@@ -62,6 +66,7 @@ pub const REFERENCE: Rules = Rules {
     sends_v1: false,
     timestretch_v1: false,
     midi_export_v1: false,
+    midi_map_v1: false,
 };
 
 static RULES: OnceLock<Rules> = OnceLock::new();

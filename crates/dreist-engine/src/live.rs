@@ -39,21 +39,25 @@ impl Default for MidiMap {
     /// Default map [re:c3e2ba] + the extra scene channel 15 [re:f1f4ad].
     fn default() -> Self {
         let mut m = MidiMap { items: vec![MapItem::None; 16 * 128] };
+        // The original v1's map (`midi_map_v1`, [re:7ac22b]): 16 pads, functions on
+        // notes 54 / 56, 72 scenes.
+        let v1 = dreist_dsp::rules::get().midi_map_v1;
+        let (pads, repeat, erase, scenes) = if v1 { (16, 54, 56, 72) } else { (64, 102, 104, 96) };
         for c in 0..9 {
             let engine = if c == 8 { SELECTED } else { c };
             for n in 12..36 {
                 m.set(c as usize, n, MapItem::Pattern { engine, pattern: n - 12 });
             }
-            for n in 36..100 {
+            for n in 36..36 + pads {
                 m.set(c as usize, n, MapItem::Pad { engine, pad: n - 36 });
             }
-            m.set(c as usize, 102, MapItem::Function { engine, function: 3 });
-            m.set(c as usize, 104, MapItem::Function { engine, function: 4 });
+            m.set(c as usize, repeat, MapItem::Function { engine, function: 3 });
+            m.set(c as usize, erase, MapItem::Function { engine, function: 4 });
         }
         for n in 0..128 {
             m.set(9, n, MapItem::Pad { engine: (n / 16) as i32, pad: n % 16 });
         }
-        for n in 0..96 {
+        for n in 0..scenes {
             m.set(10, n, MapItem::Scene { scene: n });
         }
         for n in 12..36 {
