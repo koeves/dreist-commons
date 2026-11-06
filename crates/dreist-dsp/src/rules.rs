@@ -52,6 +52,9 @@ pub struct Rules {
     /// (notes 36–51), note repeat / erase on notes 54 / 56, scenes 0–71 on
     /// the scene channel.
     pub midi_map_v1: bool,
+    /// Pads per engine the slicer allocates slices to (the original v1:
+    /// 16, at most 16 slices, 128 with layers).
+    pub slice_pads: usize,
 }
 
 /// The reference behaviour.
@@ -67,6 +70,7 @@ pub const REFERENCE: Rules = Rules {
     timestretch_v1: false,
     midi_export_v1: false,
     midi_map_v1: false,
+    slice_pads: 64,
 };
 
 static RULES: OnceLock<Rules> = OnceLock::new();

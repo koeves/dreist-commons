@@ -265,7 +265,7 @@ pub fn extract_pattern(slices: &[SlicePoint], start: u32, end: u32, bars: f32, b
 /// [`extract_pattern`] skipping pads whose pad, layer or track is locked
 /// (`blocked(pad, layer)`, `AssignSampleToPadNotUsingSliceType{Single,
 /// Multiple}Layers` [re:505fcb] / [re:49bc92]: the next free pad; with multiple
-/// layers, after pad 63 the next layer restarts at pad 0 unchecked).
+/// layers, after the last pad the next layer restarts at pad 0 unchecked).
 #[allow(clippy::too_many_arguments)]
 pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, bars: f32, beats: f32, multi_layer: bool, quantize: bool, blocked: &dyn Fn(usize, usize) -> bool) -> SlicedPattern {
     let len = end.saturating_sub(start).max(1);
@@ -274,7 +274,9 @@ pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, b
     let loop_bars = (bars as f64).max(1.0);
     let g = 0.0625 / loop_bars;
     let usable = |s: &SlicePoint| !s.deleted && start <= s.start && s.start < end;
-    let allocatable = slices.iter().filter(|s| !s.deleted && start <= s.start && s.start <= end).count().min(if multi_layer { 512 } else { 64 });
+    // [re:5f0bcb]: the app's pad count (v1 16: 16 slices, 128 with layers).
+    let pads = crate::rules::get().slice_pads.max(1);
+    let allocatable = slices.iter().filter(|s| !s.deleted && start <= s.start && s.start <= end).count().min(if multi_layer { pads * 8 } else { pads });
     // Nearest grid index and shift for a loop position d (0..1).
     let place = |d: f64| -> Option<(i64, f32)> {
         let k = loop_bars * 16.0;
@@ -343,11 +345,11 @@ pub fn extract_pattern_with_locks(slices: &[SlicePoint], start: u32, end: u32, b
         // AssignSampleToPadNotUsingSliceType{Single,Multiple}Layers.
         pad += 1;
         let check_layer = if multi_layer { layer.max(0) as usize } else { 0 };
-        while pad < 64 && blocked(pad as usize, check_layer) {
+        while pad < pads as i64 && blocked(pad as usize, check_layer) {
             pad += 1;
         }
         let force;
-        if pad >= 64 {
+        if pad >= pads as i64 {
             if !multi_layer {
                 continue;
             }
