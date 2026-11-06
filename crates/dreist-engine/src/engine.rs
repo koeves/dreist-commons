@@ -677,9 +677,12 @@ impl Meters {
         self.layer.iter_mut().zip(&o.layer).for_each(|(a, b)| mx(a, b));
         self.midi_received |= o.midi_received;
         self.voice_stolen |= o.voice_stolen;
-        // These are newer: only the slots they lack.
+        // `o` is the later block (the hosts fold each block into what the
+        // editor has not collected yet): its readings win.
         for f in &o.fx_out {
-            if self.fx_out.len() < FX_OUTS && !self.fx_out.iter().any(|g| g.at == f.at && g.slot == f.slot) {
+            if let Some(g) = self.fx_out.iter_mut().find(|g| g.at == f.at && g.slot == f.slot) {
+                g.value = f.value;
+            } else if self.fx_out.len() < FX_OUTS {
                 self.fx_out.push(*f);
             }
         }
@@ -2857,7 +2860,7 @@ mod tests {
     }
 
     #[test]
-    fn fx_outputs_keep_the_latest_per_slot() {
+    fn fx_outputs_take_the_later_reading() {
         use super::{FX_OUTS, FxOut, Meters};
         let mut m = Meters::default();
         m.fx_out.push(FxOut { at: [0, -1, -1], slot: 2, value: 0.4 });
@@ -2865,7 +2868,7 @@ mod tests {
         old.fx_out.push(FxOut { at: [0, -1, -1], slot: 2, value: 0.9 });
         old.fx_out.push(FxOut { at: [-3, -1, -1], slot: 0, value: 0.7 });
         m.merge(&old);
-        assert_eq!((m.fx_output([0, -1, -1], 2), m.fx_output([-3, -1, -1], 0), m.fx_output([1, -1, -1], 2)), (Some(0.4), Some(0.7), None));
+        assert_eq!((m.fx_output([0, -1, -1], 2), m.fx_output([-3, -1, -1], 0), m.fx_output([1, -1, -1], 2)), (Some(0.9), Some(0.7), None));
         m.clear();
         assert!(m.fx_out.is_empty() && m.fx_out.capacity() >= FX_OUTS);
     }
