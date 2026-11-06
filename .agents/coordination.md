@@ -63,5 +63,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   `params::set_stretch_v1` for the knob units (off by default). Dreist unchanged.
 - 86445a9: `Rules::scene_snapshot_v1` (off by default; Einst on). Dreist unchanged. **Dreist
   action** only if Dreist builds a `Rules` literal: add `scene_snapshot_v1: false`.
+- 7db4810: `App::ctrl_click_right` (off by default; Einst on). Dreist unchanged.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
