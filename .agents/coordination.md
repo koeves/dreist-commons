@@ -69,3 +69,18 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
 - 8000b85: `Rules::sampler_modes_v1` (off by default; Einst on): the project `Sampler` node keeps `startmode` / `timedmode` by v1 name and the engine reads them; `sampler::V1_START_MODES` / `V1_TIMED_MODES`. Dreist unchanged. **Dreist action** only if Dreist builds a `Rules` literal: add `sampler_modes_v1: false`.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
+
+## 2026-11-06 (commons and Einst release v0.1.1; Dreist not part of it)
+
+- commons v0.1.1: `main` now holds the initial commit (88468af) plus one `--no-ff` merge of
+  `dev` per release (`git log --first-parent main`). commons `dev` was not rewritten: every
+  commit stays where it was, so Dreist's pointers (`dev` 5462f7c, `main` fcf90a4) stay reachable.
+- GitHub Actions now run only on release tags (`vX.Y.Z`: commit-subject check, CI, release) and
+  by hand (`workflow_dispatch`); no workflow runs on a push to `main` or any branch.
+- Einst v0.1.1 (its first release) points at the commons v0.1.1 merge. Einst's `dev` was
+  reworded to Conventional Commits and force-pushed.
+- **Dreist action, whenever Dreist is ready (left out of this release at the owner's request):**
+  bump the submodule to commons v0.1.1 (`build: dreist-commons v0.1.1`); apply the same CI rule
+  (drop `push: branches` from ci.yml and commits.yml, call commits.yml from release.yml; see
+  commons `.agents/git.md`, "Branches and CI"); `cliff.toml` may skip `^docs: coordination log`
+  as commons does now.
