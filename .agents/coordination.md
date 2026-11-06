@@ -66,5 +66,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
 - 7db4810: `App::ctrl_click_right` (off by default; Einst on). Dreist unchanged.
 - fb3406d: dreist-gui value boxes drag when the control or its style sets `dragable` (v1's flag; up = more, 200 px per range, shift 2000 px). Opt-in; Dreist's skins never set it, so Dreist is unchanged.
 - ccf9715: dreist-gui `menu::BLOCK` item prefix (v1's block icon in the icon column). Opt-in; Dreist never uses it, so Dreist is unchanged.
+- 8000b85: `Rules::sampler_modes_v1` (off by default; Einst on): the project `Sampler` node keeps `startmode` / `timedmode` by v1 name and the engine reads them; `sampler::V1_START_MODES` / `V1_TIMED_MODES`. Dreist unchanged. **Dreist action** only if Dreist builds a `Rules` literal: add `sampler_modes_v1: false`.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
