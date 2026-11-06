@@ -46,5 +46,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   unaffected, nothing to do.
 - 522fc8c: `Rules::midi_map_v1` (v1's default MIDI map). Off by default; Dreist unchanged.
   **Dreist action** only if Dreist builds a `Rules` literal: add `midi_map_v1: false`.
+- 63dafdb: `Rules::slice_pads` (64 by default; Einst 16). Dreist unchanged.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
