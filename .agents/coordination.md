@@ -57,5 +57,6 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   unchanged; Dreist can ignore them. **Dreist action** only if Dreist builds a `Meters` literal
   without `..Default::default()` (none found).
 - 0a772ea: `dreist_engine::FxOut` exported. No behaviour change.
+- e717364: `Meters::merge` takes the merged-in block's effect outputs. No change for Dreist.
 - Not yet picked up: Dreist `dev` is at 5462f7c (only docs commits after it); Dreist `main` is at
   230f34e (everything from cdd0f5e on reaches it at the next release merge).
