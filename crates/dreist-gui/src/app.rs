@@ -162,6 +162,11 @@ pub struct App {
     /// Shift alone turns knobs ten times slower while dragging (the
     /// original v1's fine mode: 2000 px a turn, [re:427435]). Off by default.
     pub fine_drag: bool,
+    /// Ctrl + left button acts as the right button (the original v1's
+    /// one-button-mouse remap, [re:ac4dad]). Off by default.
+    pub ctrl_click_right: bool,
+    /// The current press is a remapped ctrl-click.
+    ctrl_press: bool,
     /// Running collapse panel folds.
     folds: Vec<crate::collapse::Anim>,
     /// The cursor the window should show ([re:752b0e]); reset to
@@ -229,6 +234,8 @@ impl App {
             folds: Vec::new(),
             resize_request: false,
             fine_drag: false,
+            ctrl_click_right: false,
+            ctrl_press: false,
             cursor: crate::cursor::Cursor::Arrow,
             split_drag: None,
             splits: Vec::new(),
@@ -774,6 +781,8 @@ impl App {
     }
 
     pub fn mouse_down(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        self.ctrl_press = self.ctrl_click_right && button == MouseButton::Left && self.mods.ctrl;
+        let button = if self.ctrl_press { MouseButton::Right } else { button };
         let (x, y) = self.mouse;
         // A click anywhere commits a pending text edit.
         let mut committed = self.commit_edit();
@@ -1195,6 +1204,7 @@ impl App {
     }
 
     pub fn mouse_up(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        let button = if std::mem::take(&mut self.ctrl_press) && button == MouseButton::Left { MouseButton::Right } else { button };
         if self.menu_slider.take().is_some() {
             return Vec::new();
         }
