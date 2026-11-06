@@ -67,6 +67,9 @@ const CHECK_W: f32 = 20.0;
 const SUB_W: f32 = 20.0;
 /// Check mark prefix the editors put on checked items.
 pub const CHECK: &str = "✓ ";
+/// Block icon prefix (v1's `MenuBlock.png` in the icon column, e.g. graph
+/// lanes that hold data; [re:822910]).
+pub const BLOCK: &str = "■ ";
 /// Prefix of a disabled item (drawn at alpha 0x80, not selectable).
 pub const DISABLED: char = '\u{2}';
 
@@ -85,10 +88,15 @@ fn is_sub(item: &str) -> bool {
     item.trim_end().ends_with('▸')
 }
 
-/// The item's label without the check prefix or sub menu marker.
+/// Whether the item carries the block icon.
+fn has_block(item: &str) -> bool {
+    item.strip_prefix(DISABLED).unwrap_or(item).starts_with(BLOCK)
+}
+
+/// The item's label without the check / block prefix or sub menu marker.
 fn label(item: &str) -> &str {
     let item = item.strip_prefix(DISABLED).unwrap_or(item);
-    let t = item.strip_prefix(CHECK).unwrap_or(item);
+    let t = item.strip_prefix(CHECK).or_else(|| item.strip_prefix(BLOCK)).unwrap_or(item);
     t.trim_end().strip_suffix('▸').map(str::trim_end).unwrap_or(t)
 }
 
@@ -128,7 +136,7 @@ impl Menu {
 
     /// Whether any row is a check item (they share a 20 px icon column).
     fn has_checks(&self) -> bool {
-        self.checked.is_some() || self.items.iter().any(|i| i.starts_with(CHECK))
+        self.checked.is_some() || self.items.iter().any(|i| i.starts_with(CHECK) || has_block(i))
     }
 
     /// Left of the text column ([re:9f38a4]: icon at x = 2,
@@ -241,6 +249,10 @@ impl Menu {
                 let (ix, iy) = (self.x + 2.0 + ((CHECK_W - 12.0) / 2.0).floor(), y + ((ITEM_H - 12.0) / 2.0).floor());
                 p.line(ix + 1.0, iy + 5.0, ix + 5.0, iy + 10.0, text, 3.0);
                 p.line(ix + 4.0, iy + 10.0, ix + 11.0, iy + 1.0, text, 3.0);
+            } else if has_block(item) {
+                // An 8 × 8 block in the text colour, centred in the icon column.
+                let (ix, iy) = (self.x + 2.0 + ((CHECK_W - 8.0) / 2.0).floor(), y + ((ITEM_H - 8.0) / 2.0).floor());
+                p.fill_rect(RectF::new(ix, iy, 8.0, 8.0), text);
             }
             let tw = (sub_x - tx - 2.0).max(0.0);
             // Text colour: alpha 0x80 when disabled.
@@ -265,7 +277,7 @@ pub fn menu_width(styles: &StyleSheet, fonts: &mut crate::text::Fonts, items: &[
         return (g.cols as f32 * PITCH + 6.0 + 4.0).max(min.min(g.cols as f32 * PITCH + 10.0));
     }
     let font = styles.font(MENU_STYLE);
-    let checks = items.iter().any(|i| i.starts_with(CHECK));
+    let checks = items.iter().any(|i| i.starts_with(CHECK) || has_block(i));
     let text = items
         .iter()
         .map(|s| {
