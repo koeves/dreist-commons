@@ -1010,6 +1010,15 @@ impl Dreist {
                     if let Some(rs) = n.attr("recordsource") {
                         sm.source = crate::sampler::source_from_name(rs.trim());
                     }
+                    if dreist_dsp::rules::get().sampler_modes_v1 {
+                        let pos = |names: &[&str], key: &str| n.attr(key).and_then(|v| names.iter().position(|x| *x == v.trim()));
+                        if let Some(i) = pos(&crate::sampler::V1_START_MODES, "startmode") {
+                            sm.set_start_mode(i as i32);
+                        }
+                        if let Some(i) = pos(&crate::sampler::V1_TIMED_MODES, "timedmode") {
+                            sm.timed = [crate::sampler::TimedMode::Off, crate::sampler::TimedMode::Stop, crate::sampler::TimedMode::Retake][i];
+                        }
+                    }
                 }
                 sm
             },

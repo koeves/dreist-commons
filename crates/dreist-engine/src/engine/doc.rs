@@ -129,6 +129,19 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                     _ => sm.set("inputthru", bool_str(v(0) >= 0.5)),
                 };
             }
+            // `Rules::sampler_modes_v1`: the modes by name.
+            id::SAMPLER_START_MODE | id::SAMPLER_TIMED_MODE if dreist_dsp::rules::get().sampler_modes_v1 => {
+                let sm = doc.child_mut_or_insert("Sampler", "Sampler");
+                if sm.version.is_none() {
+                    sm.version = Some(2);
+                }
+                let i = vi(0).max(0) as usize;
+                if m.kind == id::SAMPLER_START_MODE {
+                    sm.set("startmode", crate::sampler::V1_START_MODES[i.min(3)]);
+                } else {
+                    sm.set("timedmode", crate::sampler::V1_TIMED_MODES[i.min(2)]);
+                }
+            }
             id::SET_TEMPO => {
                 let t = doc.child_mut_or_insert("TimeInfo", "TimeInfo");
                 t.set("Tempo", (v(0) as f64).clamp(20.0, 999.0));

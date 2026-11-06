@@ -58,6 +58,10 @@ pub struct Rules {
     /// The original v1's scene snapshot: an engine whose current pattern
     /// holds no step is stored with pattern power off.
     pub scene_snapshot_v1: bool,
+    /// The original v1's project `Sampler` node also keeps the trigger and
+    /// record modes (`startmode` Immediate / MIDI / Host / Threshold,
+    /// `timedmode` Free / Timed / Loop).
+    pub sampler_modes_v1: bool,
 }
 
 /// The reference behaviour.
@@ -75,6 +79,7 @@ pub const REFERENCE: Rules = Rules {
     midi_map_v1: false,
     slice_pads: 64,
     scene_snapshot_v1: false,
+    sampler_modes_v1: false,
 };
 
 static RULES: OnceLock<Rules> = OnceLock::new();

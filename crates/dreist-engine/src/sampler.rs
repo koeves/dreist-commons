@@ -71,6 +71,10 @@ impl Take {
     }
 }
 
+/// The original v1's `startmode` / `timedmode` names (by message value).
+pub const V1_START_MODES: [&str; 4] = ["Immediate", "MIDI", "Host", "Threshold"];
+pub const V1_TIMED_MODES: [&str; 3] = ["Free", "Timed", "Loop"];
+
 /// `recordsource` values: the host input and the master output.
 pub const SOURCE_EXTERNAL: i32 = 38;
 pub const SOURCE_MASTER: i32 = 1;
