@@ -43,8 +43,10 @@ GitHub Actions minutes are limited, so:
 
 - All work goes to the `dev` branch; `main` only moves when the owner says a release is ready
   (merge `dev` into `main`, then tag).
-- CI runs on pushes to `main`, on tags and by hand (`workflow_dispatch`), never on `dev` and
-  no pull requests (they would run it). So run the checks locally before every push: tests,
+- GitHub Actions run only when a release is made: pushing a `vX.Y.Z` tag runs the release
+  workflow (the commit-subject check and CI, then the release), and any workflow can be run by
+  hand (`workflow_dispatch`). No workflow runs on a push to any branch (`main` included) or on
+  pull requests (none are opened). So run the checks locally before every push: tests,
   clippy (with the standalone feature in the apps, with `dreist-gui/window` in commons) and
   `cargo fmt --check`.
 - Until a release, the apps' `commons` submodule may point at dreist-commons `dev` commits. At

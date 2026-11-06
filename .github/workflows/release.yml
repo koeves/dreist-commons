@@ -24,13 +24,16 @@ env:
   TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
+  commits:
+    uses: ./.github/workflows/commits.yml
+
   ci:
     uses: ./.github/workflows/ci.yml
 
   release:
     # The tag's CHANGELOG.md section is the release notes; without one,
     # git-cliff generates them from the commits since the previous tag.
-    needs: ci
+    needs: [commits, ci]
     if: github.event_name == 'push' || inputs.upload
     runs-on: ubuntu-24.04
     steps:

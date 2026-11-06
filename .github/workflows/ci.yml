@@ -1,8 +1,7 @@
 name: CI
 
+# Runs only as part of the tag-triggered release (release.yml) and by hand.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
   workflow_call:
 

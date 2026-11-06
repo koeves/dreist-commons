@@ -1,11 +1,11 @@
 name: Commits
 
 # Commit subjects follow Conventional Commits (see CONTRIBUTING.md): the
-# changelog and release notes are generated from them.
+# changelog and release notes are generated from them. Runs inside the
+# tag-triggered release (release.yml) and by hand.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   conventional:
@@ -15,15 +15,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check commit subjects
-        env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          # A new branch or a force push has no usable base: check the head only.
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
-            range="$HEAD -1"
+          # The commits since the previous release tag (all of them before the first).
+          if prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null); then
+            range="$prev..HEAD"
           else
-            range="$BASE..$HEAD"
+            range="HEAD"
           fi
           re='^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\([a-z0-9._/-]+\))?!?: [^ ].*'
           bad=0
