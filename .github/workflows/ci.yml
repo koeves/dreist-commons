@@ -36,7 +36,7 @@ jobs:
 
   macos:
     # The full suite, effect fingerprints included, and the AppKit window code.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
