@@ -84,3 +84,21 @@ Submodule pointers when this log started (2026-11-05): Dreist `main` → 230f34e
   (drop `push: branches` from ci.yml and commits.yml, call commits.yml from release.yml; see
   commons `.agents/git.md`, "Branches and CI"); `cliff.toml` may skip `^docs: coordination log`
   as commons does now.
+
+## 2026-11-06 (Dreist release v0.1.1)
+
+- Dreist v0.1.1 is released. Its submodule points at the commons v0.1.1 merge on `main`
+  (76cc631, `build: dreist-commons v0.1.1`). No commons code changed; commons goldens are
+  unchanged. Dreist's only golden change is its own `modal-about` (the About dialog shows the
+  version).
+- Dreist applies the same CI rule: workflows run only on `vX.Y.Z` tags and by hand. The release
+  workflow calls commits.yml and ci.yml, and macOS jobs use `macos-15`.
+- Dreist `main` was cleaned up the same way as commons: the beta 1 commit (c39869f) plus one
+  `--no-ff` merge of `dev` per release (6d67210 for v0.1.1, tag v0.1.1). The v0.1.0 tag and
+  release are kept.
+- Dreist `dev` was force-pushed once, at the owner's request, to fix one commit author: bcc192b
+  and the 29 commits after it were re-authored to koeves; trees, messages and dates are
+  unchanged (dev e0ac1c7, was f63b59f). Commits up to 8815db6 keep their SHAs. Any Dreist
+  checkout or worktree based on the old `dev` should reset to `origin/dev`.
+- No action needed in Einst or commons. Dreist's next submodule bumps go to commons `dev`
+  commits again until the next release.
