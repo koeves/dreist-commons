@@ -295,7 +295,16 @@ pub fn mirror_message(doc: &mut Node, m: &Message) {
                         let st =
                             doc.children.iter().find(|c| c.class == "Engine" && c.name.as_deref() == Some(&format!("Engine{k}"))).and_then(|n| n.children.iter().find(|c| c.class == "EngineState"));
                         let pat = st.and_then(|s| s.attr("CurrentPattern")).unwrap_or("0").to_string();
-                        let pow = st.and_then(|s| s.attr("PatternPower")).unwrap_or("true").to_string();
+                        let mut pow = st.and_then(|s| s.attr("PatternPower")).unwrap_or("true").to_string();
+                        // [re:90cf43]: v1 stores an empty pattern with its power off.
+                        if dreist_dsp::rules::get().scene_snapshot_v1 {
+                            let eng = doc.children.iter().find(|c| c.class == "Engine" && c.name.as_deref() == Some(&format!("Engine{k}")));
+                            let sp = eng.and_then(|n| n.child("StepPattern", &format!("StepPattern{pat}")));
+                            let any = sp.is_some_and(|sp| sp.children.iter().filter(|t| t.class == "Track").any(|t| t.children.iter().any(|s| s.class == "Step" && s.truthy("State"))));
+                            if !any {
+                                pow = "false".into();
+                            }
+                        }
                         (pat, pow)
                     })
                     .collect();

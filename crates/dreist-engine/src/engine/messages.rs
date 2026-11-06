@@ -445,7 +445,16 @@ impl Dreist {
             id::SCENE_PASTE => self.scenes.paste(vi(0).clamp(0, 95) as usize),
             id::SCENE_SNAPSHOT | id::SCENE_CLEAR | id::SCENE_SET_START_MODE => {
                 let sc = vi(0).clamp(0, 95) as usize;
-                let states: [(usize, bool); ENGINES] = std::array::from_fn(|k| self.engines.get(k).map_or((0, true), |x| (x.state.current_pattern, x.state.pattern_power)));
+                // [re:90cf43]: v1 stores an engine on an empty pattern with
+                // its pattern power off.
+                let v1 = dreist_dsp::rules::get().scene_snapshot_v1;
+                let states: [(usize, bool); ENGINES] = std::array::from_fn(|k| {
+                    self.engines.get(k).map_or((0, true), |x| {
+                        let pat = x.state.current_pattern;
+                        let empty = v1 && x.patterns.get(pat).is_none_or(|p| p.tracks.iter().all(|t| t.steps.iter().all(|s| !s.on)));
+                        (pat, x.state.pattern_power && !empty)
+                    })
+                });
                 let Some(scene) = self.scenes.scenes.get_mut(sc) else { return };
                 match m.kind {
                     id::SCENE_SNAPSHOT => {
