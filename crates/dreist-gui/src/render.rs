@@ -31,6 +31,9 @@ pub struct Renderer<'s> {
     pub custom_drawn: Option<&'s std::cell::RefCell<Vec<crate::ctrl::Rect>>>,
     /// Inside a translucent layer (painter coordinates are the layer's).
     in_layer: std::cell::Cell<u32>,
+    /// The control whose children are being drawn is on (see
+    /// `colParentOnFill`).
+    parent_on: std::cell::Cell<bool>,
 }
 
 fn std_col(name: &str) -> Colour {
@@ -114,7 +117,7 @@ enum Handle {
 
 impl<'s> Renderer<'s> {
     pub fn new(styles: &'s StyleSheet) -> Renderer<'s> {
-        Renderer { styles, custom: None, custom_drawn: None, in_layer: std::cell::Cell::new(0) }
+        Renderer { styles, custom: None, custom_drawn: None, in_layer: std::cell::Cell::new(0), parent_on: std::cell::Cell::new(false) }
     }
 
     pub fn style<'c>(&self, c: &'c Ctrl) -> &'c str {
@@ -220,6 +223,7 @@ impl<'s> Renderer<'s> {
                 p.fill_rect(crate::paint::RectF::new(ch.rect.x as f32, ch.rect.y as f32, ch.rect.w as f32, ch.rect.h as f32), Colour::rgba(200, 200, 200, 120));
             }
             // Children by z-order (stable); usually already in order.
+            let parent_on = self.parent_on.replace(c.on);
             if self.native_table(c) {
                 // The table draws its label children as rows.
                 let mut order: Vec<&Ctrl> = c.children.iter().filter(|k| k.class != "CtrlLabel").collect();
@@ -238,6 +242,7 @@ impl<'s> Renderer<'s> {
                     self.draw(p, ch);
                 }
             }
+            self.parent_on.set(parent_on);
             if c.class == "CtrlLabeller" {
                 self.labeller_labels(p, c);
             }
@@ -310,17 +315,39 @@ impl<'s> Renderer<'s> {
                 let track = self.styles.colour(st, "colFill", std_col("StandardControlBackground"));
                 let thumb = self.styles.colour(st, "colAltFill", std_col("StandardControlHighlight"));
                 p.fill_rect(RectF::new(0.0, 0.0, w, h), track);
+                // Opt-in: a frame in `colTrackBorder`, the thumb inset
+                // `realThumbInset` all round (rounded to its short side),
+                // and the thumb drawn full length when the whole content
+                // fits (`optThumbWhenFull`).
+                let s = self.styles;
+                if let Some(b) = opt_colour(s, st, c, "colTrackBorder") {
+                    for r in [RectF::new(0.0, 0.0, w, 1.0), RectF::new(0.0, h - 1.0, w, 1.0), RectF::new(0.0, 1.0, 1.0, h - 2.0), RectF::new(w - 1.0, 1.0, 1.0, h - 2.0)] {
+                        p.fill_rect(r, b);
+                    }
+                }
                 let page = c.attr_f32("realPage", 1.0).clamp(0.0, 1.0);
-                if page < 1.0 {
+                if page < 1.0 || opt_bool(s, st, c, "optThumbWhenFull", false) {
                     let v = c.value.clamp(0.0, 1.0);
-                    let r = if h > w {
-                        let th = (h * page).max(8.0);
-                        RectF::new(1.0, v * (h - th), w - 2.0, th)
+                    if let Some(i) = opt_raw(s, st, c, "realThumbInset").and_then(|v| v.trim().parse::<f32>().ok()) {
+                        let (iw, ih) = ((w - 2.0 * i).max(0.0), (h - 2.0 * i).max(0.0));
+                        let r = if h > w {
+                            let th = (ih * page).max(8.0).min(ih);
+                            RectF::new(i, i + v * (ih - th), iw, th)
+                        } else {
+                            let tw = (iw * page).max(8.0).min(iw);
+                            RectF::new(i + v * (iw - tw), i, tw, ih)
+                        };
+                        p.fill_rounded(r, r.w.min(r.h) / 2.0, [true; 4], thumb);
                     } else {
-                        let tw = (w * page).max(8.0);
-                        RectF::new(v * (w - tw), 1.0, tw, h - 2.0)
-                    };
-                    p.fill_rounded(r, (w.min(h) / 2.0 - 1.0).max(0.0), [true; 4], thumb);
+                        let r = if h > w {
+                            let th = (h * page).max(8.0);
+                            RectF::new(1.0, v * (h - th), w - 2.0, th)
+                        } else {
+                            let tw = (w * page).max(8.0);
+                            RectF::new(v * (w - tw), 1.0, tw, h - 2.0)
+                        };
+                        p.fill_rounded(r, (w.min(h) / 2.0 - 1.0).max(0.0), [true; 4], thumb);
+                    }
                 }
             }
             "CtrlValueStepper" => {
@@ -341,6 +368,12 @@ impl<'s> Renderer<'s> {
             "CtrlMeter" if self.style_class(c) == Some("CtrlMeterStyle") => self.needle_meter(p, c),
             "CtrlTableView" | "CtrlListBox" if self.native_table(c) => self.table(p, c),
             "root" => {}
+            // Opt-in: panels inside an on control (icon parts drawn on a
+            // button) use `colParentOnFill` / `colParentOnBorder`.
+            _ if self.parent_on.get() && self.styles.raw(self.style(c), "colParentOnFill").is_some() => {
+                let border = if self.styles.raw(self.style(c), "colParentOnBorder").is_some() { "colParentOnBorder" } else { "colBorder" };
+                self.default_fill(p, c, "colParentOnFill", border, false)
+            }
             _ => self.default_fill(p, c, "colFill", "colBorder", false),
         }
     }
@@ -681,8 +714,9 @@ impl<'s> Renderer<'s> {
     /// [re:b7a6d1] + text [re:26c463]. Opt-in: the fill's gradient
     /// (`colFillGradientTo` / `colAltFillGradientTo`), and a strip along the
     /// bottom `realStripHeight` high, inset `realStripInset` (default the
-    /// border width) from the sides and bottom, in `colStripOn` when on and
-    /// `colStripOff` when off.
+    /// border width) from the bottom and `realStripSideInset` (default
+    /// `realStripInset`) from the sides, rounded `realStripRounding`
+    /// (default 1), in `colStripOn` when on and `colStripOff` when off.
     fn button(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let fill_attr = if c.on { "colAltFill" } else { "colFill" };
@@ -704,8 +738,10 @@ impl<'s> Renderer<'s> {
             if let Some(col) = opt_colour(s, st, c, if c.on { "colStripOn" } else { "colStripOff" }) {
                 let bw = if s.bool(st, "optDrawBorder", true) { s.float(st, "realBorderWidth", 1.0).max(0.0) } else { 0.0 };
                 let i = opt_f32(s, st, c, "realStripInset", bw).max(0.0);
+                let si = opt_f32(s, st, c, "realStripSideInset", i).max(0.0);
+                let rounding = opt_f32(s, st, c, "realStripRounding", 1.0).max(0.0);
                 let (w, h) = (c.rect.w as f32, c.rect.h as f32);
-                p.fill_rounded(RectF::new(i, h - i - sh, w - 2.0 * i, sh), 1.0, [true; 4], col);
+                p.fill_rounded(RectF::new(si, h - i - sh, w - 2.0 * si, sh), rounding, [true; 4], col);
             }
         }
         self.button_glyph(p, c);
@@ -2104,6 +2140,53 @@ mod tests {
         assert_eq!(px(&on, 20, 10, 28), [40, 40, 40], "inset from the bottom");
         assert_eq!(px(&on, 20, 10, 20), [40, 40, 40]);
         assert_eq!(px(&draw(&s, &ctrl("CtrlButton", "Plain", 20, 30, &[])), 20, 10, 26), [40, 40, 40]);
+        // Opt-in side inset: narrower than the bottom inset says.
+        assert_eq!(px(&off, 20, 3, 26), [0, 0, 255]);
+        let side = draw(&s, &ctrl("CtrlButton", "Key", 20, 30, &[("realStripSideInset", "5"), ("realStripRounding", "0")]));
+        assert_eq!(px(&side, 20, 3, 26), [40, 40, 40], "inset from the sides");
+        assert_eq!(px(&side, 20, 5, 25), [0, 0, 255]);
+    }
+
+    #[test]
+    fn icon_panels_follow_their_buttons_on_state() {
+        let btn = [("colFill", "255, 255, 255, 255"), ("colAltFill", "0, 0, 0, 255"), ("optDrawBorder", "false")];
+        let mark = [("colFill", "0, 0, 255, 255"), ("colParentOnFill", "255, 0, 0, 255"), ("optDrawBorder", "false")];
+        let s = sheet(&[("Btn", "CtrlStyle", &btn), ("Mark", "CtrlStyle", &mark), ("Plain", "CtrlStyle", &mark[..1])]);
+        let mut b = ctrl("CtrlButton", "Btn", 20, 20, &[]);
+        let mut m = ctrl("CtrlPanel", "Mark", 4, 4, &[]);
+        m.rect = crate::ctrl::Rect::new(8, 8, 4, 4);
+        let mut plain = ctrl("CtrlPanel", "Plain", 4, 4, &[]);
+        plain.rect = crate::ctrl::Rect::new(0, 0, 4, 4);
+        b.children = vec![m, plain];
+        assert_eq!(px(&draw(&s, &b), 20, 9, 9), [0, 0, 255]);
+        b.on = true;
+        let on = draw(&s, &b);
+        assert_eq!(px(&on, 20, 9, 9), [255, 0, 0], "the on colour inside an on button");
+        assert_eq!(px(&on, 20, 1, 1), [0, 0, 255], "panels without it unchanged");
+    }
+
+    #[test]
+    fn scroll_bars_can_frame_the_track_and_show_a_full_thumb() {
+        let st = [("colFill", "255, 255, 255, 255"), ("colAltFill", "0, 0, 255, 255")];
+        let opt = [st[0], st[1], ("colTrackBorder", "255, 0, 0, 255"), ("realThumbInset", "2"), ("optThumbWhenFull", "true")];
+        let s = sheet(&[("Bar", "CtrlStyle", &st), ("Framed", "CtrlStyle", &opt)]);
+        let plain = draw(&s, &ctrl("CtrlScrollBar", "Bar", 10, 60, &[("realPage", "1")]));
+        assert_eq!(px(&plain, 10, 5, 30), [255, 255, 255], "no thumb when it all fits");
+        assert_eq!(px(&plain, 10, 0, 30), [255, 255, 255], "no frame");
+        let framed = draw(&s, &ctrl("CtrlScrollBar", "Framed", 10, 60, &[("realPage", "1")]));
+        assert_eq!(px(&framed, 10, 0, 30), [255, 0, 0], "the frame");
+        assert_eq!(px(&framed, 10, 1, 30), [255, 255, 255], "the inset");
+        assert_eq!(px(&framed, 10, 5, 30), [0, 0, 255], "a full-length thumb");
+        assert_eq!(px(&framed, 10, 5, 4), [0, 0, 255]);
+        assert_eq!(px(&framed, 10, 5, 56), [0, 0, 255]);
+        // A half page sits at the end for value 1.
+        let half = draw(&s, &ctrl("CtrlScrollBar", "Framed", 60, 10, &[("realPage", "0.5")]));
+        let mut half_end = ctrl("CtrlScrollBar", "Framed", 60, 10, &[("realPage", "0.5")]);
+        half_end.value = 1.0;
+        let end = draw(&s, &half_end);
+        assert_eq!(px(&half, 60, 10, 5), [0, 0, 255]);
+        assert_eq!(px(&half, 60, 50, 5), [255, 255, 255]);
+        assert_eq!(px(&end, 60, 50, 5), [0, 0, 255]);
     }
 
     #[test]
