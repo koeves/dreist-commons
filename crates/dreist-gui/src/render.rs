@@ -809,7 +809,11 @@ impl<'s> Renderer<'s> {
             self.default_fill(p, c, "colFill", "colBorder", false);
         }
         let text_col = if editing { Colour::BLACK } else { self.styles.colour(st, "colText", std_col("StandardControlText")) };
-        let tr = RectF::new(h, 0.0, (b.w - h - 2.0 - h).max(0.0), h);
+        // `optSearchIcon` false (opt-in): no magnifier; the text starts at
+        // the left edge (an app drawing the icon beside the box).
+        let icon = self.styles.bool(st, "optSearchIcon", true);
+        let x0 = if icon { h } else { 3.0 };
+        let tr = RectF::new(x0, 0.0, (b.w - x0 - 2.0 - h).max(0.0), h);
         if editing {
             let font = self.styles.font(st);
             p.text(tr, &format!("{}|", c.text), Colour::BLACK, &font, crate::style::HAlign::Left, crate::style::VAlign::Center);
@@ -818,15 +822,17 @@ impl<'s> Renderer<'s> {
             self.draw_text(p, c, tr, &text, "colText");
         }
         // Magnifier.
-        let d = ((h - 4.0) * 0.5).max(1.0);
-        let (x, y) = (4.0f32.floor() + 0.5, 4.0f32.floor() + 0.5);
-        p.stroke_ellipse(RectF::new(x, y, d, d), text_col, 2.0);
-        let a = x + d * 0.5 + d * 0.5 * std::f32::consts::FRAC_1_SQRT_2;
-        let e = x + d * 0.5 + d * 1.5 * std::f32::consts::FRAC_1_SQRT_2;
-        p.line(a, a, e, e, text_col, 2.0);
-        let q = (h - 4.0) * 0.25;
-        let ty = 2.0 + (h - 4.0) * 0.5 + q;
-        p.fill_polygon(&[(x, ty), (x + q, ty), (x + q * 0.5, ty + q)], text_col);
+        if icon {
+            let d = ((h - 4.0) * 0.5).max(1.0);
+            let (x, y) = (4.0f32.floor() + 0.5, 4.0f32.floor() + 0.5);
+            p.stroke_ellipse(RectF::new(x, y, d, d), text_col, 2.0);
+            let a = x + d * 0.5 + d * 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+            let e = x + d * 0.5 + d * 1.5 * std::f32::consts::FRAC_1_SQRT_2;
+            p.line(a, a, e, e, text_col, 2.0);
+            let q = (h - 4.0) * 0.25;
+            let ty = 2.0 + (h - 4.0) * 0.5 + q;
+            p.fill_polygon(&[(x, ty), (x + q, ty), (x + q * 0.5, ty + q)], text_col);
+        }
         if !c.text.is_empty() {
             let hi = h as i32;
             let i6 = ((hi / 5).max(1) as f32 + 0.5) as i32 as f32;
@@ -919,7 +925,13 @@ impl<'s> Renderer<'s> {
         }
         if c.on {
             let (x, y, w, h) = (b.x + inset, b.y + inset, b.w - 2.0 * inset, b.h - 2.0 * inset);
-            p.polyline(&[(w * 0.125 + x, h * 0.6 + y), (lw * 0.5 + w * 0.3 + x, lw * 0.5 + h * 0.8 + y), (w * 0.9 + x, h * 0.1 + y)], tick, lw);
+            let pts = [(w * 0.125 + x, h * 0.6 + y), (lw * 0.5 + w * 0.3 + x, lw * 0.5 + h * 0.8 + y), (w * 0.9 + x, h * 0.1 + y)];
+            // `colTickOutline` (opt-in): the tick drawn over a wider stroke
+            // in that colour, 1 px each side.
+            if let Some(o) = opt_colour(s, st, c, "colTickOutline") {
+                p.polyline(&pts, o, lw + 2.0);
+            }
+            p.polyline(&pts, tick, lw);
         }
     }
 
@@ -2081,6 +2093,28 @@ mod tests {
         let dash = draw(&s, &ctrl("CtrlTableView", "TD", 50, 30, &rows));
         assert!(px(&plain, 50, 4, 9)[0] > 128 && px(&plain, 50, 6, 9)[0] > 128);
         assert!(px(&dash, 50, 1, 9)[0] > 128 && px(&dash, 50, 3, 9)[0] < 128, "row divider dashed");
+    }
+
+    #[test]
+    fn check_box_tick_outline_is_opt_in() {
+        let base: &[(&str, &str)] =
+            &[("colFill", "0, 0, 0, 255"), ("colAltFill", "0, 0, 0, 255"), ("colBorder", "0, 0, 0, 0"), ("colAltBorder", "0, 0, 0, 0"), ("colTick", "200, 200, 200, 255"), ("realTickLineWidth", "3")];
+        let s = sheet(&[("Plain", "CheckBoxButtonRendererStyle", base), ("Outlined", "CheckBoxButtonRendererStyle", &[base, &[("colTickOutline", "0, 0, 255, 255")]].concat())]);
+        let blue = |px: &[u8]| px.chunks(4).filter(|p| p[2] > 120 && p[0] < 100).count();
+        let mut c = ctrl("CtrlButton", "Plain", 16, 16, &[("renderer", "CheckBoxButtonRenderer")]);
+        c.on = true;
+        assert_eq!(blue(&draw(&s, &c)), 0, "no outline by default");
+        c.style = "Outlined".into();
+        assert!(blue(&draw(&s, &c)) > 0, "the outline round the tick");
+    }
+
+    #[test]
+    fn search_box_magnifier_is_opt_out() {
+        let clear: &[(&str, &str)] = &[("colFill", "0, 0, 0, 0"), ("colBorder", "0, 0, 0, 0"), ("colText", "200, 200, 0, 255")];
+        let s = sheet(&[("Box", "CtrlStyle", clear), ("Bare", "CtrlStyle", &[clear, &[("optSearchIcon", "false")]].concat())]);
+        let yellow = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 40).count();
+        assert!(yellow(&draw(&s, &ctrl("CtrlSearchBox", "Box", 80, 18, &[]))) > 0, "the magnifier by default");
+        assert_eq!(yellow(&draw(&s, &ctrl("CtrlSearchBox", "Bare", 80, 18, &[]))), 0, "none with optSearchIcon false");
     }
 
     #[test]
