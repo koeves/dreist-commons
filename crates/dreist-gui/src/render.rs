@@ -800,15 +800,22 @@ impl<'s> Renderer<'s> {
         let st = self.style(c);
         self.default_fill(p, c, "colFill", "colBorder", true);
         let b = Self::bounds(c);
-        let arrow_x = b.w - b.h;
-        let tr = RectF::new(b.x + 2.0, b.y, arrow_x - b.x - 2.0, b.h);
+        // Opt-in: `realPopupArrowSize` (× the height, default 0.4),
+        // `realPopupArrowBoxWidth` (pixels; default the height: a square
+        // box at the right) and `optPopupDivider` (default true: the line
+        // left of the arrow).
+        // With an explicit box width the text runs from the left edge up to
+        // the arrow itself (v1's bitmap menu buttons: the text offset is
+        // from the edge and the arrow has no box of its own).
+        let explicit = opt_raw(self.styles, st, c, "realPopupArrowBoxWidth").is_some();
+        let box_w = opt_f32(self.styles, st, c, "realPopupArrowBoxWidth", b.h);
+        let arrow_x = b.w - box_w;
+        let aw = b.h * opt_f32(self.styles, st, c, "realPopupArrowSize", 0.4);
+        let ax = arrow_x + box_w * 0.5 - aw * 0.5;
+        let tr = if explicit { RectF::new(b.x, b.y, ax - 1.0 - b.x, b.h) } else { RectF::new(b.x + 2.0, b.y, arrow_x - b.x - 2.0, b.h) };
         self.draw_text(p, c, tr, &c.text, "colText");
         let text = self.styles.colour(st, "colText", std_col("StandardControlText"));
         let border = self.styles.colour(st, "colBorder", std_col("StandardControlBorder"));
-        // Opt-in: `realPopupArrowSize` (× the height, default 0.4) and
-        // `optPopupDivider` (default true: the line left of the arrow).
-        let aw = b.h * opt_f32(self.styles, st, c, "realPopupArrowSize", 0.4);
-        let ax = arrow_x + b.h * 0.5 - aw * 0.5;
         let ay = b.y + b.h * 0.5 - aw * 0.5;
         p.fill_polygon(&[(ax, ay), (ax + aw, ay), (ax + aw * 0.5, ay + aw)], text);
         if opt_bool(self.styles, st, c, "optPopupDivider", true) {
@@ -2076,6 +2083,19 @@ mod tests {
         assert_eq!(px(&b, 60, 40, 10), [0, 0, 0], "no divider");
         let green = |px: &[u8]| px.chunks(4).filter(|p| p[1] > 128 && p[0] < 64).count();
         assert!(green(&b) > 0 && green(&b) < green(&a), "smaller arrow");
+        // `realPopupArrowBoxWidth`: the arrow sits in a narrower box at the
+        // right edge.
+        let s = sheet(&[("N", "CtrlStyle", &[&st[..], &[("optPopupDivider", "false"), ("realPopupArrowBoxWidth", "10")]].concat())]);
+        let c = draw(&s, &ctrl("CtrlPopupButton", "N", 60, 20, &[]));
+        let first_green = |img: &[u8]| {
+            (0..60).find(|&x| {
+                (0..20).any(|y| {
+                    let p = px(img, 60, x, y);
+                    p[1] > 128 && p[0] < 64
+                })
+            })
+        };
+        assert!(first_green(&c).unwrap() > first_green(&b).unwrap(), "arrow moved right");
     }
 
     #[test]
