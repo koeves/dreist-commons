@@ -330,6 +330,9 @@ impl Ctrl {
         let old = self.rect;
         self.rect = r;
         if self.class == "CtrlSplitterPanel" {
+            if old.w > 0 && old.h > 0 && (old.w, old.h) != (r.w, r.h) {
+                crate::splitter::follow_resize(self, old);
+            }
             self.layout_splitter();
         } else if (old.w, old.h) != (r.w, r.h) {
             self.auto_resize_children(old, r);

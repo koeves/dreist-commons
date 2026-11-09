@@ -24,6 +24,10 @@
 //! - [re:9e9841]: the bar's style background,
 //!   then (thin side > 3 px) seven 4×4 dots 6 px apart, centred, in the
 //!   style's colAltBorder (default white).
+//! - Resizing ([re:1edcc1], [re:ed7bab]; flags as loaded by [re:7b5e65]): with
+//!   `optSplitterIsLocked` or `optDbClkCollapse1` the bar moves with the far
+//!   edge (panel 1 keeps its size), else it stays (panel 0 keeps its size);
+//!   then the position is clamped as above.
 //! - Opening the editor [re:468d3b] → reading the saved state [re:a605da]: a saved
 //!   position ≥ 0 is clamped and applied.
 
@@ -83,6 +87,16 @@ pub fn clamp(c: &Ctrl, p: i32) -> i32 {
         v = max0;
     }
     v
+}
+
+/// The panel was resized from `old` (its rect is already the new one): the
+/// bar keeps panel 1's size when locked or `optDbClkCollapse1`, else panel
+/// 0's, clamped.
+pub fn follow_resize(c: &mut Ctrl, old: Rect) {
+    let keep1 = locked(c) || c.attr_bool("optDbClkCollapse1", true);
+    let grow = if vertical(c) { c.rect.h - old.h } else { c.rect.w - old.w };
+    let p = clamp(c, position(c) + if keep1 { grow } else { 0 });
+    c.set_attr("intSplitPosition", p.to_string());
 }
 
 /// Move the bar to `p` (unclamped) and lay the panels out.
@@ -149,5 +163,30 @@ mod tests {
         // total = 746 − 8 = 738.
         assert_eq!(clamp(&c, 600), 518);
         assert_eq!(clamp(&c, 700), 738);
+    }
+
+    #[test]
+    fn resizing_keeps_the_far_panel_and_clamps() {
+        // RootSkin's pad splitter (panel 1 = the pads, min 220) in a
+        // 674 px column: the bar moves up with the bottom edge, so the pads
+        // keep their size.
+        let mut c = split(&[("intMinSize0", "66"), ("intMinSize1", "220"), ("intSplitPosition", "518"), ("intSplitterDim", "8")]);
+        c.rect = Rect::new(0, 0, 300, 746);
+        let old = c.rect;
+        c.rect.h = 674;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 446);
+        // Without double-click collapse panel 0 keeps its size, clamped:
+        // the pads still get their minimum.
+        let mut c = split(&[("intMinSize1", "220"), ("intSplitPosition", "518"), ("intSplitterDim", "8"), ("optDbClkCollapse1", "false")]);
+        let old = c.rect;
+        c.rect.h = 674;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 446);
+        // Growing: panel 0 stays.
+        let old = c.rect;
+        c.rect.h = 900;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 446);
     }
 }
