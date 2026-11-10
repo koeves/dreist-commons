@@ -1186,7 +1186,8 @@ impl<'s> Renderer<'s> {
             p.fill_rect(r, g);
         }
         if let Some(b) = opt_colour(s, st, c, "colTrackBorder") {
-            p.stroke_rounded(track.inset(0.5), (radius - 0.5).max(0.0), [true; 4], b, 1.0);
+            let bw = opt_f32(s, st, c, "realTrackBorderWidth", 1.0).max(0.0);
+            p.stroke_rounded(track.inset(bw / 2.0), (radius - bw / 2.0).max(0.0), [true; 4], b, bw);
         }
     }
 
@@ -1373,7 +1374,10 @@ impl<'s> Renderer<'s> {
     /// fills the rect, the range lit inset 4 px across, and the handles are
     /// markers `realHandleLength` (default 11) wide and about half the
     /// height, the high one ▼ from the top, the low one ▲ from the bottom,
-    /// colAltFill outlined in colAltBorder.
+    /// colAltFill outlined in colAltBorder. Opt-in (with `Triangles`): the
+    /// lit range a bar `realRangeHeight` high across the middle, drawn over
+    /// the groove and outlined 1 px in `colRangeBorder`; `realTrackBorderWidth`
+    /// (default 1) for the track's colTrackBorder.
     fn range_slider(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
@@ -1431,8 +1435,20 @@ impl<'s> Renderer<'s> {
         let track = RectF::new(0.0, 0.0, w, h);
         p.fill_rounded(track, radius, [true; 4], back);
         let (a, b) = if at(lo) < at(hi) { (at(lo), at(hi)) } else { (at(hi), at(lo)) };
-        p.fill_rect(RectF::new(a, 4.0, b - a, h - 8.0), hl);
-        self.track_decor(p, c, track, radius, false);
+        match opt_raw(s, st, c, "realRangeHeight").and_then(|v| v.trim().parse::<f32>().ok()) {
+            Some(rh) => {
+                self.track_decor(p, c, track, radius, false);
+                let bar = RectF::new(a.round(), ((h - rh) / 2.0).round(), (b - a).round(), rh);
+                p.fill_rect(bar, hl);
+                if let Some(e) = opt_colour(s, st, c, "colRangeBorder") {
+                    p.stroke_rect(bar.inset(0.5), e, 1.0);
+                }
+            }
+            None => {
+                p.fill_rect(RectF::new(a, 4.0, b - a, h - 8.0), hl);
+                self.track_decor(p, c, track, radius, false);
+            }
+        }
         let fill = s.colour(st, "colAltFill", Colour::WHITE);
         let edge = s.colour(st, "colAltBorder", Colour::BLACK);
         for (v, down) in [(hi, true), (lo, false)] {
@@ -1454,10 +1470,17 @@ impl<'s> Renderer<'s> {
     /// them separated by `;`, each `colour|points` with the colour a
     /// registered name or literal and the points as above. With `curves`
     /// set (even empty) `points` and the flat line are not drawn.
+    ///
+    /// Opt-in background, inside the border (`realBorderWidth`): the lower
+    /// half in `colLowerFill`, lines `realStripeWidth` (default 2) high
+    /// every `intStripeStep` (default 6) px down from the top in
+    /// `colStripe`, and a line `realMidLineWidth` (default 2) high across
+    /// the middle in `colMidLine`.
     fn plot(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
         self.default_fill(p, c, "colFill", "colBorder", false);
+        self.plot_back(p, c);
         let area = Self::bounds(c).inset(opt_f32(s, st, c, "realPlotInset", 0.0).max(0.0));
         let line = s.colour(st, "colLine", self.colour_attr(st, "colText"));
         let lw = opt_f32(s, st, c, "realLineWidth", 1.5);
@@ -1485,6 +1508,38 @@ impl<'s> Renderer<'s> {
             pts = parse("0,0.5 1,0.5");
         }
         p.polyline(&pts, line, lw);
+    }
+
+    /// [`Renderer::plot`]'s opt-in background.
+    fn plot_back(&self, p: &mut Painter, c: &Ctrl) {
+        let st = self.style(c);
+        let s = self.styles;
+        let (lower, stripe, mid) = (opt_colour(s, st, c, "colLowerFill"), opt_colour(s, st, c, "colStripe"), opt_colour(s, st, c, "colMidLine"));
+        if lower.is_none() && stripe.is_none() && mid.is_none() {
+            return;
+        }
+        let bw = if s.bool(st, "optDrawBorder", true) { s.float(st, "realBorderWidth", 1.0).max(0.0) } else { 0.0 };
+        let r = Self::bounds(c).inset(bw);
+        let radius = (s.float(st, "realCornerRounding", 0.0) - bw).max(0.0);
+        let half = (r.h / 2.0).round();
+        if let Some(col) = lower {
+            p.fill_rounded(RectF::new(r.x, r.y + half, r.w, r.h - half), radius, [false, false, true, true], col);
+        }
+        if let Some(col) = stripe {
+            let step = opt_f32(s, st, c, "intStripeStep", 6.0).round().max(2.0);
+            let sw = opt_f32(s, st, c, "realStripeWidth", 2.0).max(0.0);
+            let mut y = step;
+            while y + sw <= r.y + r.h {
+                if y >= r.y {
+                    p.fill_rect(RectF::new(r.x, y, r.w, sw), col);
+                }
+                y += step;
+            }
+        }
+        if let Some(col) = mid {
+            let mw = opt_f32(s, st, c, "realMidLineWidth", 2.0).max(0.0);
+            p.fill_rect(RectF::new(r.x, (r.y + half - mw / 2.0).round(), r.w, mw), col);
+        }
     }
 
     /// A needle meter (`CtrlMeter` with a `CtrlMeterStyle`): the default
@@ -1910,6 +1965,39 @@ mod tests {
         // Empty: nothing but the fill.
         let none = draw(&s, &ctrl("CtrlPlot", "Plot", 107, 50, &[("curves", "")]));
         assert_eq!(at(&none, 53, 25), at(&none, 53, 5));
+    }
+
+    #[test]
+    fn plot_backgrounds_are_opt_in() {
+        let base = [COLOURS, &[("realBorderWidth", "2")]].concat();
+        let back = [base.as_slice(), &[("colLowerFill", "0, 0, 255, 255"), ("colStripe", "0, 255, 0, 255"), ("colMidLine", "255, 0, 0, 255")]].concat();
+        let s = sheet(&[("Plain", "CtrlStyle", &base), ("Back", "CtrlStyle", &back)]);
+        let at = |px: &[u8], x: usize, y: usize| px[(y * 107 + x) * 4..(y * 107 + x) * 4 + 3].to_vec();
+        let plain = draw(&s, &ctrl("CtrlPlot", "Plain", 107, 50, &[("curves", "")]));
+        assert_eq!(at(&plain, 53, 40), at(&plain, 53, 10), "no background without the attributes");
+        let d = draw(&s, &ctrl("CtrlPlot", "Back", 107, 50, &[("curves", "")]));
+        assert_eq!(at(&d, 53, 24), [255, 0, 0], "the middle line");
+        assert_eq!(at(&d, 53, 6), [0, 255, 0], "a stripe every 6 px");
+        assert_eq!(at(&d, 53, 40), [0, 0, 255], "the lower half");
+        assert_eq!(at(&d, 53, 10), at(&plain, 53, 10), "the upper half keeps the fill");
+    }
+
+    #[test]
+    fn range_marker_bar_is_opt_in() {
+        let tri = [COLOURS, &[("enumHandleShape", "Triangles"), ("colGroove", "0, 0, 255, 255"), ("realGrooveWidth", "3")]].concat();
+        let bar = [tri.as_slice(), &[("realRangeHeight", "6"), ("colRangeBorder", "0, 255, 255, 255"), ("realTrackBorderWidth", "2"), ("colTrackBorder", "0, 0, 0, 255")]].concat();
+        let s = sheet(&[("Tri", "CtrlStyle", &tri), ("Bar", "CtrlStyle", &bar)]);
+        let v = [("valueLow", "0.25"), ("valueHigh", "0.75")];
+        let d = draw(&s, &ctrl("CtrlRangeSlider", "Tri", 107, 19, &v));
+        // (without: the groove over a tall lit range)
+        assert_eq!(px(&d, 107, 53, 9), [0, 0, 255]);
+        assert_eq!(px(&d, 107, 53, 5), [255, 0, 0]);
+        let b = draw(&s, &ctrl("CtrlRangeSlider", "Bar", 107, 19, &v));
+        assert_eq!(px(&b, 107, 53, 9), [255, 0, 0], "the bar over the groove");
+        assert_eq!(px(&b, 107, 53, 7), [0, 255, 255], "outlined");
+        assert_eq!(px(&b, 107, 53, 5), [40, 40, 40], "only 6 px high");
+        assert_eq!(px(&b, 107, 15, 9), [0, 0, 255], "the groove outside it");
+        assert_eq!(px(&b, 107, 30, 1), [0, 0, 0], "a 2 px track border");
     }
 
     #[test]
