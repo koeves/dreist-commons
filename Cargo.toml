@@ -24,7 +24,7 @@ type_complexity = "allow"
 manual_range_contains = "allow"
 
 [workspace.dependencies]
-roxmltree = "0.20"
+roxmltree = "0.21"
 thiserror = "2"
 
 [profile.release]
