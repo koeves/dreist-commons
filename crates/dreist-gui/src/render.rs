@@ -982,6 +982,11 @@ impl<'s> Renderer<'s> {
         if opt_bool(s, st, c, "optSpinner", false) {
             return self.spinner(p, c, b, thick);
         }
+        // Opt-in: a disc the dial's size in `colDialShadow` under it,
+        // `realDialShadowOffset` (default 2) px lower.
+        if let Some(sh) = opt_colour(s, st, c, "colDialShadow") {
+            p.fill_ellipse(RectF::new(b.x, b.y + opt_f32(s, st, c, "realDialShadowOffset", 2.0), b.w, b.h), sh);
+        }
         // Opt-in arc geometry: `realArcStart` (degrees clockwise from 3
         // o'clock) and `realArcSweep`.
         let start = opt_f32(s, st, c, "realArcStart", ARC_START);
@@ -2679,6 +2684,8 @@ mod tests {
         let plain = draw(&s, &ctrl("CtrlKnob", "F", 40, 40, &[]));
         let edged = draw(&s, &ctrl("CtrlKnob", "E", 40, 40, &[]));
         assert_eq!(px(&plain, 40, 20, 0), [0, 0, 255], "the face's border");
+        let sh = sheet(&[("S", "CtrlStyle", &[&f[..], &[("enumDialAlign", "Top"), ("colDialShadow", "0, 255, 0, 255")]].concat())]);
+        assert_eq!(px(&draw(&sh, &ctrl("CtrlKnob", "S", 40, 44, &[])), 40, 20, 41), [0, 255, 0], "the shadow under the dial");
         let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) < 32);
         assert!(near(px(&edged, 40, 20, 0), [255, 0, 255]), "its outer edge");
         assert!(near(px(&edged, 40, 20, 4), [0, 255, 255]), "its inner edge");
