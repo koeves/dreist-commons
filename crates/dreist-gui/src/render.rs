@@ -1034,6 +1034,14 @@ impl<'s> Renderer<'s> {
         let editing_depth = c.attr("editingDepth") == Some("true");
         let base = if editing_depth { c.attr_f32("baseValue", 0.0) } else { c.value };
         let depth = c.attr_f32("modDepth", 0.0);
+        // Opt-in `optDrawModTrack` ([re:acc5e5]): the outer mod track under
+        // everything, the full sweep in colModTrackFill, (thickness +
+        // realModDim)·w/2 wide at the rim.
+        if opt_bool(s, st, c, "optDrawModTrack", false) {
+            let rw = (thick + b.w * mod_dim) * 0.5;
+            let col = s.colour(st, "colModTrackFill", std_col("Grey"));
+            p.stroke_arc(b.inset(rw * 0.5), ARC_START, ARC_SWEEP, true, col, rw);
+        }
         p.stroke_arc(track, ARC_START, ARC_SWEEP, true, fill, thick);
         if depth.abs() > 1e-4 {
             let ring = b.inset((b.w * mod_dim * 0.25).max(1.0));
