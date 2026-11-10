@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.2.1] - 2026-11-10
+
+Shared work for Dreist's UI pass. Everything new is opt-in (an app marks a container
+scrollable or sets a style / App flag), so Einst looks and behaves as before.
+
+### Summary
+
+- **dreist-gui**: scroll containers (wheel, shift + wheel, trackpad, skin scroll bars,
+  thumb drag and paging) that keep their offset through resizes; the original's stock
+  control input (relative knob drags, slider jumps, depth snapping, wheel steps, tempo box,
+  menus picked on release, option-drags keeping the modulation end); transmod modulation
+  layers, framed scroll thumbs, stepper and disclosure arrows, knob position marks,
+  gain-reduction meters and EQ plot curves.
+- **dreist-dsp**: response curves for the EQ and filter displays; the limiter and VCA
+  compressor report gain reduction.
+
+### Features
+
+- **gui:** Opt-in scroll containers
+- **gui:** Opt-in transmod layers, framed scroll thumbs, stepper and disclosure arrows
+- **gui:** Opt-in second-generation stock control input
+- **dsp:** Effect display curves and the limiter / VCA meters
+- **gui:** Opt-in poly plot curves, grid and curve fills
+- **gui:** Opt-in effect panel drawing from the original
+- **gui:** Menu items picked on release, option-drags keep the modulation end
+
+### Fixes
+
+- **gui:** Transmod slider hit test defaults realModDim to 0.25
+- **gui:** Scrolled content keeps its offset through resizes
+
 ## [0.2.0] - 2026-11-10
 
 Shared work for Einst's v1 look and parity pass and Dreist's video parity pass. All new
