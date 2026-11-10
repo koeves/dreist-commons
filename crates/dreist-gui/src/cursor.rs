@@ -43,7 +43,8 @@ impl Cursor {
 /// TransmodBoth (2) (editor open [re:468d3b]). Not modulated (no source
 /// selected) the drag mode is 3 → Primary. Modulated: knob inside its
 /// centre circle (square knobs only, [re:db47c7]) / slider over
-/// its main track (drag mode [re:654080]: x < w − round(w·realModDim))
+/// its main track (drag mode [re:654080]: x < w − round(w·realModDim),
+/// `realModDim` 0.25 when the skin leaves it out, [re:c41e95])
 /// → alt ? 1 (Primary) : 3 (Both); elsewhere 2 (Secondary).
 pub fn transmod(c: &crate::ctrl::Ctrl, x: f32, y: f32, alt: bool) -> Option<Cursor> {
     let modulated = c.attr("editingDepth") == Some("true");
@@ -59,7 +60,7 @@ pub fn transmod(c: &crate::ctrl::Ctrl, x: f32, y: f32, alt: bool) -> Option<Curs
             }
         }
         "CtrlTransmodSlider" => {
-            let strip = (w as f32 * c.attr_f32("realModDim", 0.3)).round() as i32;
+            let strip = (w as f32 * c.attr_f32("realModDim", 0.25)).round() as i32;
             (x as i32) < (w - strip).max(0) && (y as i32) < h && x >= 0.0 && y >= 0.0
         }
         _ => return None,
