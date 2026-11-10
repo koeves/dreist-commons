@@ -15,6 +15,8 @@ resources, IDs, menus, readers) in the apps, not here.
   without one.
 - Git: Conventional Commits, changelog, releases and branches as in `CONTRIBUTING.md`; agent
   workflow notes are in the private `dreist-re` repository (`agents.md`).
+- After any change here, rebuild and reinstall both apps' VST3s (Dreist and Einst) and say which
+  commits are installed.
 
 ## Build
 
