@@ -536,7 +536,8 @@ impl<'s> Renderer<'s> {
     /// are lines and draw their fill as dashes along their length);
     /// `realNoiseAmount` (a brushed texture over the fill, see
     /// [`Painter::fill_path_noise`]: streaks `realNoiseStreak` px long,
-    /// default 24, pattern `intNoiseSeed`, default 1).
+    /// default 24, pattern `intNoiseSeed`, default 1); `colFoot` /
+    /// `colFootShade` (a darker bottom row and a line above it).
     pub fn default_fill_gradient(&self, p: &mut Painter, c: &Ctrl, fill: Colour, grad: Option<Gradient>, border: Colour, _shadow: bool) {
         let st = self.style(c);
         let s = self.styles;
@@ -625,6 +626,19 @@ impl<'s> Renderer<'s> {
             p.dash = dash;
             edge.stroke(p, border, bw);
             p.dash = None;
+        }
+        // Opt-in foot (off controls only): the bottom row in `colFoot`
+        // between the corners, and a 1 px line in `colFootShade` above it
+        // inside the border.
+        if !c.on {
+            let r = radius.min(w / 2.0).min(h / 2.0).floor();
+            if let Some(f) = opt_colour(s, st, c, "colFoot") {
+                p.fill_rect(RectF::new(r, h - 1.0, w - 2.0 * r, 1.0), f);
+            }
+            if let Some(f) = opt_colour(s, st, c, "colFootShade") {
+                let i = if stroke { bw } else { 0.0 };
+                p.fill_rect(RectF::new(i, h - 2.0, w - 2.0 * i, 1.0), f);
+            }
         }
     }
 
@@ -895,7 +909,8 @@ impl<'s> Renderer<'s> {
         let ax = arrow_x + box_w * 0.5 - aw * 0.5;
         let tr = if explicit { RectF::new(b.x, b.y, ax - 1.0 - b.x, b.h) } else { RectF::new(b.x + 2.0, b.y, arrow_x - b.x - 2.0, b.h) };
         self.draw_text(p, c, tr, &c.text, "colText");
-        let text = self.styles.colour(st, "colText", std_col("StandardControlText"));
+        // (opt-in `colPopupArrow`: the arrow's own colour)
+        let text = opt_colour(self.styles, st, c, "colPopupArrow").unwrap_or_else(|| self.styles.colour(st, "colText", std_col("StandardControlText")));
         let border = self.styles.colour(st, "colBorder", std_col("StandardControlBorder"));
         let ay = b.y + b.h * 0.5 - aw * 0.5;
         p.fill_polygon(&[(ax, ay), (ax + aw, ay), (ax + aw * 0.5, ay + aw)], text);
@@ -938,8 +953,9 @@ impl<'s> Renderer<'s> {
 
     /// [re:7d8258]. `enumDialAlign` (`Top` / `Center`) draws a square dial
     /// of the rect's smaller side, centred across and at the top or in the
-    /// middle along (rects taller or wider than the dial); without it the
-    /// dial fills the rect.
+    /// middle along (rects taller or wider than the dial), `Width` one of
+    /// the rect's width from its top left; without it the dial fills the
+    /// rect.
     fn knob(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
@@ -951,17 +967,36 @@ impl<'s> Renderer<'s> {
                 let y = if a.eq_ignore_ascii_case("top") { 0.0 } else { ((b.h - side) * 0.5).floor() };
                 RectF::new(x, y, side, side)
             }
+            // (a dial the rect's width across, from its top: the arc's
+            // open foot may run past the rect's bottom)
+            Some("Width" | "width") => RectF::new(0.0, 0.0, b.w, b.w),
             _ => b,
         };
         let thick = c.attr_f32("realDialThickness", 0.2) * b.w;
-        let ring = b.inset(thick * 0.5);
+        // Opt-in: the value arc `realArcInset` px inside the dial's edge.
+        let ring = b.inset(thick * 0.5 + opt_f32(s, st, c, "realArcInset", 0.0));
         let back = s.colour(st, "colFill", std_col("StandardControlBackground"));
         let hl = s.colour(st, "colFillHighlight", back.darken(0.7));
         let dot_in = s.colour(st, "colAltFill", Colour::BLACK);
         let dot_out = s.colour(st, "colAltBorder", Colour::WHITE);
-        let v = c.value.clamp(0.0, 1.0) * ARC_SWEEP;
-        let angle = v + ARC_START;
-        p.stroke_arc(ring, ARC_START, ARC_SWEEP, true, back, thick);
+        if opt_bool(s, st, c, "optSpinner", false) {
+            return self.spinner(p, c, b, thick);
+        }
+        // Opt-in arc geometry: `realArcStart` (degrees clockwise from 3
+        // o'clock) and `realArcSweep`.
+        let start = opt_f32(s, st, c, "realArcStart", ARC_START);
+        let sweep = opt_f32(s, st, c, "realArcSweep", ARC_SWEEP);
+        let v = c.value.clamp(0.0, 1.0) * sweep;
+        let angle = v + start;
+        // Opt-in: the arc outlined in `colArcBorder`, `realArcBorderWidth`
+        // (default 1) px round its sides and ends.
+        if let Some(ab) = opt_colour(s, st, c, "colArcBorder") {
+            let bw = opt_f32(s, st, c, "realArcBorderWidth", 1.0);
+            let rad = (ring.w * 0.5).max(1.0);
+            let ext = (bw / rad).to_degrees();
+            p.stroke_arc(ring, start - ext, sweep + 2.0 * ext, true, ab, thick + 2.0 * bw);
+        }
+        p.stroke_arc(ring, start, sweep, true, back, thick);
         if c.attr_bool("optCentered", false) {
             if angle >= 270.0 {
                 p.stroke_arc(ring, 270.0, angle - 270.0, true, hl, thick);
@@ -969,7 +1004,7 @@ impl<'s> Renderer<'s> {
                 p.stroke_arc(ring, 270.0, 270.0 - angle, false, hl, thick);
             }
         } else {
-            p.stroke_arc(ring, ARC_START, v, true, hl, thick);
+            p.stroke_arc(ring, start, v, true, hl, thick);
         }
         let (cx, cy) = (b.x + b.w * 0.5, b.y + b.h * 0.5);
         // Opt-in face: a disc inside the ring (`realFaceInset` from its inner
@@ -982,9 +1017,17 @@ impl<'s> Renderer<'s> {
                 if let Some(path) = tiny_skia::Rect::from_xywh(r.x, r.y, r.w, r.h).and_then(tiny_skia::PathBuilder::from_oval) {
                     p.fill_path_opt(&path, face, self.gradient(c, "colFace", face, None));
                 }
+                let fw = opt_f32(s, st, c, "realFaceBorderWidth", 1.0).max(0.0);
                 if let Some(fb) = opt_colour(s, st, c, "colFaceBorder") {
-                    let fw = opt_f32(s, st, c, "realFaceBorderWidth", 1.0).max(0.0);
                     p.stroke_ellipse(r.inset(fw / 2.0), fb, fw);
+                }
+                // Opt-in: 1 px lines in `colFaceEdge` round the outside of
+                // the face's border and, in `colFaceInnerEdge` (default
+                // the same), inside it.
+                if let Some(e) = opt_colour(s, st, c, "colFaceEdge") {
+                    p.stroke_ellipse(r.inset(0.5), e, 1.0);
+                    let ie = opt_colour(s, st, c, "colFaceInnerEdge").unwrap_or(e);
+                    p.stroke_ellipse(r.inset(fw + 0.5), ie, 1.0);
                 }
             }
         }
@@ -1010,6 +1053,28 @@ impl<'s> Renderer<'s> {
             p.fill_ellipse(r, dot_out);
             let i = (half * 0.4).max(1.0).round();
             p.fill_ellipse(r.inset(i), dot_in);
+        }
+    }
+
+    /// Opt-in `optSpinner`: a busy spinner, a ring in `colFill` (`thick`
+    /// wide, `realSpinnerInset` px in) with two arrowheads in `colPointer`
+    /// chasing round it clockwise, half a turn apart, `realSpinnerArrow` ×
+    /// the dial long; the value turns them (one turn over 0..1).
+    fn spinner(&self, p: &mut Painter, c: &Ctrl, b: RectF, thick: f32) {
+        let st = self.style(c);
+        let s = self.styles;
+        let ring = b.inset(thick * 0.5 + opt_f32(s, st, c, "realSpinnerInset", 0.0));
+        p.stroke_ellipse(ring, s.colour(st, "colFill", std_col("StandardControlBackground")), thick);
+        let col = opt_colour(s, st, c, "colPointer").unwrap_or(Colour::BLACK);
+        let len = opt_f32(s, st, c, "realSpinnerArrow", 0.25) * b.w;
+        let (cx, cy, rad) = (ring.x + ring.w * 0.5, ring.y + ring.h * 0.5, ring.w * 0.5);
+        for k in 0..2 {
+            let a = (-90.0 + c.value * 360.0 + k as f32 * 180.0).to_radians();
+            let (ux, uy) = (a.cos(), a.sin());
+            let (tx, ty) = (-uy, ux);
+            let (bx, by) = (cx + ux * rad - tx * len * 0.5, cy + uy * rad - ty * len * 0.5);
+            let half = len * 0.5;
+            p.fill_polygon(&[(bx + ux * half, by + uy * half), (bx + tx * len, by + ty * len), (bx - ux * half, by - uy * half)], col);
         }
     }
 
@@ -1185,6 +1250,19 @@ impl<'s> Renderer<'s> {
             };
             p.fill_rect(r, g);
         }
+        // Opt-in: a 1 px mark across the track in `colTrackMark`,
+        // `realTrackMark` of the way along it from its top (vertical) or
+        // left end, `realTrackMarkInset` (default 2) px off its sides.
+        if let Some(m) = opt_colour(s, st, c, "colTrackMark") {
+            let f = opt_f32(s, st, c, "realTrackMark", 0.5);
+            let mi = opt_f32(s, st, c, "realTrackMarkInset", 2.0);
+            let r = if vertical {
+                RectF::new(track.x + mi, (track.y + track.h * f).floor(), track.w - 2.0 * mi, 1.0)
+            } else {
+                RectF::new((track.x + track.w * f).floor(), track.y + mi, 1.0, track.h - 2.0 * mi)
+            };
+            p.fill_rect(r, m);
+        }
         if let Some(b) = opt_colour(s, st, c, "colTrackBorder") {
             let bw = opt_f32(s, st, c, "realTrackBorderWidth", 1.0).max(0.0);
             p.stroke_rounded(track.inset(bw / 2.0), (radius - bw / 2.0).max(0.0), [true; 4], b, bw);
@@ -1239,6 +1317,39 @@ impl<'s> Renderer<'s> {
                 let grip = opt_colour(s, st, c, "colGrip").unwrap_or(handle_ring);
                 let n = opt_f32(s, st, c, "intGripLines", 1.0).round().max(0.0) as i32;
                 match opt_raw(s, st, c, "enumGripShape").map(str::trim) {
+                    // `Arrows`: the cap's lower half in `colHandleLow`
+                    // under a 1 px line in `colGripLine` (default colGrip;
+                    // a 2 px upright one on horizontal caps), and two
+                    // triangles in colGrip, `realGripSize` (default 6) px
+                    // wide (0.9 of that deep on vertical caps, 0.6 on
+                    // horizontal ones), pointing at the cap's middle along
+                    // the travel.
+                    Some(v) if v.eq_ignore_ascii_case("arrows") => {
+                        let half = (r.h / 2.0).round();
+                        if let Some(low) = opt_colour(s, st, c, "colHandleLow") {
+                            p.fill_rounded(RectF::new(r.x, r.y + half, r.w, r.h - half), rounding, [false, false, true, true], low);
+                            p.stroke_rounded(r.inset(0.5), rounding, [true; 4], handle_ring, 1.0);
+                        }
+                        let line = opt_colour(s, st, c, "colGripLine").unwrap_or(grip);
+                        let g = opt_f32(s, st, c, "realGripSize", 6.0).max(0.0);
+                        let th = (g * if vertical { 0.9 } else { 0.6 }).round();
+                        if vertical {
+                            p.fill_rect(RectF::new(r.x + 1.0, r.y + half - 1.0, r.w - 2.0, 1.0), line);
+                            let cx = r.x + r.w / 2.0;
+                            let t = r.y + ((half - 1.0 - th) / 2.0).round();
+                            p.fill_polygon(&[(cx - g / 2.0, t), (cx + g / 2.0, t), (cx, t + th)], grip);
+                            let b = r.y + half + ((r.h - half - th) / 2.0).round() + th;
+                            p.fill_polygon(&[(cx - g / 2.0, b), (cx + g / 2.0, b), (cx, b - th)], grip);
+                        } else {
+                            let cx = (r.x + r.w / 2.0).round();
+                            p.fill_rect(RectF::new(cx - 1.0, r.y + 1.0, 2.0, r.h - 2.0), line);
+                            let cy = r.y + r.h / 2.0;
+                            let (l, rr) = (r.x + 1.0, r.x + r.w - 1.0);
+                            p.fill_polygon(&[(l, cy - g / 2.0), (l, cy + g / 2.0), (l + th, cy)], grip);
+                            p.fill_polygon(&[(rr, cy - g / 2.0), (rr, cy + g / 2.0), (rr - th, cy)], grip);
+                        }
+                        return;
+                    }
                     // `Squares`: n squares `realGripSize` (default 2) px
                     // centred across the cap, spread evenly along it.
                     Some(v) if v.eq_ignore_ascii_case("squares") => {
@@ -2548,5 +2659,94 @@ mod tests {
         c.style = "KD".into();
         let b = draw(&s, &c);
         assert_ne!(a, b, "the dot is drawn too");
+    }
+
+    #[test]
+    fn knob_arc_geometry_outline_and_face_edges() {
+        let k = [COLOURS, &[("optPointer", "true")]].concat();
+        let v1 = [&k[..], &[("realArcStart", "135"), ("realArcSweep", "270"), ("colArcBorder", "0, 0, 255, 255"), ("realArcInset", "1")]].concat();
+        let s = sheet(&[("K", "CtrlStyle", &k), ("V", "CtrlStyle", &v1)]);
+        let a = draw(&s, &ctrl("CtrlKnob", "K", 40, 40, &[]));
+        let b = draw(&s, &ctrl("CtrlKnob", "V", 40, 40, &[]));
+        // 120 degrees (below left): on the stock arc, in the gap of a
+        // 270-degree one.
+        assert_eq!(px(&a, 40, 12, 34), [40, 40, 40], "stock arc");
+        assert_eq!(px(&b, 40, 12, 34), [0, 0, 0], "gap");
+        assert_eq!(px(&b, 40, 20, 0)[2], 255, "the outline round the arc");
+        let f = [COLOURS, &[("colFace", "200, 200, 200, 255"), ("realFaceInset", "-8"), ("colFaceBorder", "0, 0, 255, 255"), ("realFaceBorderWidth", "4")]].concat();
+        let e = [&f[..], &[("colFaceEdge", "255, 0, 255, 255"), ("colFaceInnerEdge", "0, 255, 255, 255")]].concat();
+        let s = sheet(&[("F", "CtrlStyle", &f), ("E", "CtrlStyle", &e)]);
+        let plain = draw(&s, &ctrl("CtrlKnob", "F", 40, 40, &[]));
+        let edged = draw(&s, &ctrl("CtrlKnob", "E", 40, 40, &[]));
+        assert_eq!(px(&plain, 40, 20, 0), [0, 0, 255], "the face's border");
+        let near = |a: [u8; 3], b: [u8; 3]| a.iter().zip(b).all(|(x, y)| x.abs_diff(y) < 32);
+        assert!(near(px(&edged, 40, 20, 0), [255, 0, 255]), "its outer edge");
+        assert!(near(px(&edged, 40, 20, 4), [0, 255, 255]), "its inner edge");
+        assert_eq!(px(&edged, 40, 20, 2), [0, 0, 255], "the border between");
+    }
+
+    #[test]
+    fn knob_dials_the_rects_width_across() {
+        let s = sheet(&[("W", "CtrlStyle", &[COLOURS, &[("enumDialAlign", "Width")]].concat())]);
+        let (a, _) = check(&s, ctrl("CtrlKnob", "W", 50, 46, &[]), 0.2, 0.8);
+        // The dial's top at the rect's top, its left at the rect's left.
+        assert_ne!(px(&a, 50, 25, 1), [0, 0, 0]);
+        assert_ne!(px(&a, 50, 1, 25), [0, 0, 0]);
+    }
+
+    #[test]
+    fn spinners_turn_their_arrowheads() {
+        let st = [COLOURS, &[("optSpinner", "true"), ("colPointer", "255, 0, 255, 255"), ("realSpinnerArrow", "0.3")]].concat();
+        let s = sheet(&[("S", "CtrlStyle", &st)]);
+        let (a, b) = check(&s, ctrl("CtrlKnob", "S", 40, 40, &[]), 0.0, 0.25);
+        let magenta = |img: &[u8], x: usize, y: usize| px(img, 40, x, y) == [255, 0, 255];
+        // An arrowhead at the top at 0, at the right a quarter turn on.
+        assert!(magenta(&a, 20, 4) && !magenta(&a, 36, 20));
+        assert!(magenta(&b, 36, 20) && !magenta(&b, 20, 4));
+        assert_eq!(px(&a, 40, 4, 20), [40, 40, 40], "the ring");
+    }
+
+    #[test]
+    fn slider_caps_with_arrows_and_track_marks() {
+        let st = [
+            COLOURS,
+            &[
+                ("enumHandleShape", "Rect"),
+                ("realHandleLength", "20"),
+                ("enumGripShape", "Arrows"),
+                ("colHandleLow", "0, 0, 255, 255"),
+                ("colGrip", "255, 0, 255, 255"),
+                ("colTrackMark", "0, 255, 255, 255"),
+                ("realTrackMark", "0.25"),
+            ],
+        ]
+        .concat();
+        let s = sheet(&[("F", "CtrlStyle", &st)]);
+        let mut c = ctrl("CtrlSlider", "F", 18, 100, &[("realTrackInset", "0")]);
+        c.value = 1.0;
+        let a = draw(&s, &c);
+        assert_eq!(px(&a, 18, 2, 3), [0, 255, 0], "the cap's upper half");
+        assert_eq!(px(&a, 18, 2, 16), [0, 0, 255], "its lower half");
+        assert_eq!(px(&a, 18, 9, 4), [255, 0, 255], "the upper triangle");
+        c.value = 0.0;
+        let b = draw(&s, &c);
+        assert_eq!(px(&b, 18, 4, 25), [0, 255, 255], "the mark across the track");
+    }
+
+    #[test]
+    fn button_feet_and_popup_arrow_colours() {
+        let st = [COLOURS, &[("colFoot", "0, 0, 255, 255"), ("colFootShade", "255, 0, 255, 255")]].concat();
+        let s = sheet(&[("B", "CtrlStyle", &st)]);
+        let mut c = ctrl("CtrlButton", "B", 30, 17, &[]);
+        let off = draw(&s, &c);
+        assert_eq!(px(&off, 30, 15, 16), [0, 0, 255], "the foot");
+        assert_eq!(px(&off, 30, 15, 15), [255, 0, 255], "the line above it");
+        c.on = true;
+        let on = draw(&s, &c);
+        assert_ne!(px(&on, 30, 15, 16), [0, 0, 255], "no foot while on");
+        let st = [("colFill", "0, 0, 0, 255"), ("colText", "0, 255, 0, 255"), ("colPopupArrow", "255, 0, 255, 255")];
+        let s = sheet(&[("P", "CtrlStyle", &st)]);
+        let a = draw(&s, &ctrl("CtrlPopupButton", "P", 60, 20, &[]));
+        assert_eq!(px(&a, 60, 50, 8), [255, 0, 255], "the arrow in its own colour");
     }
 }
