@@ -180,8 +180,9 @@ pub struct App {
     sizer_drag: Option<(f32, f32)>,
     /// The shown tooltip ([re:403a0f]).
     pub tooltip: Option<crate::tooltip::Tip>,
-    /// The open menu's hover changed: only the menu repaints.
-    menu_hover_damage: bool,
+    /// The menu the last frame shows: a change (opened, closed, hovered)
+    /// repaints only the menu's rectangles.
+    menu_drawn: Option<crate::menu::Menu>,
     /// The last frame's pixels under the open menu without it (scale,
     /// root-coordinate rectangle, pixels): a hover redraws the menu over
     /// them instead of the controls beneath.
@@ -247,7 +248,7 @@ impl App {
             splits: Vec::new(),
             sizer_drag: None,
             tooltip: None,
-            menu_hover_damage: false,
+            menu_drawn: None,
             menu_under: None,
         }
     }
@@ -489,27 +490,48 @@ impl App {
         }
         self.menu = Some(m);
         self.pressed = None;
-        self.dirty = true;
     }
 
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Vec<UiEvent> {
+        // Drags change controls: only those repaint.
+        if self.pressed.is_some() || self.split_drag.is_some() {
+            return self.damage_only(|a| a.mouse_move_events(x, y));
+        }
+        self.mouse_move_events(x, y)
+    }
+
+    /// Run an input handler; when it asks for a whole repaint, repaint only
+    /// the controls it changed instead (where they were and are). Events
+    /// for custom-drawn controls keep the whole repaint: the application
+    /// draws them from its own state.
+    fn damage_only(&mut self, f: impl FnOnce(&mut App) -> Vec<UiEvent>) -> Vec<UiEvent> {
+        if self.dirty {
+            return f(self);
+        }
+        let before = self.marks();
+        let out = f(self);
+        let custom = out.iter().any(|e| matches!(e, UiEvent::Mouse { .. } | UiEvent::Wheel { .. }));
+        if self.dirty && !custom {
+            self.dirty = false;
+            self.invalidate_tree_changes(&before);
+        }
+        out
+    }
+
+    fn mouse_move_events(&mut self, x: f32, y: f32) -> Vec<UiEvent> {
         self.mouse = (x, y);
         let mut out = Vec::new();
         if let (Some(i), Some(m)) = (self.menu_slider, self.menu.as_mut()) {
             if let Some(v) = m.slider_at(i, x) {
                 m.items[i] = crate::menu::slider_item(v);
-                self.dirty = true;
                 out.push(UiEvent::MenuSlider { anchor: m.anchor.clone(), index: i, value: v });
             }
             return out;
         }
         if let Some(m) = &mut self.menu {
             let h = m.item_at(x, y);
-            if h != m.hover {
-                m.hover = h;
-                // Only the menu repaints.
-                self.menu_hover_damage = true;
-            }
+            // Only the menu repaints (see `render_frame_with`).
+            m.hover = h;
             return out;
         }
         if let Some((path, start)) = self.split_drag.clone() {
@@ -688,6 +710,10 @@ impl App {
     }
 
     pub fn mouse_wheel(&mut self, dy: f32) -> Vec<UiEvent> {
+        self.damage_only(|a| a.mouse_wheel_events(dy))
+    }
+
+    fn mouse_wheel_events(&mut self, dy: f32) -> Vec<UiEvent> {
         let hit = self.hit(self.mouse.0, self.mouse.1);
         if let Some(p) = self.stepper_at(&hit) {
             return self.step(&p, dy.signum());
@@ -791,6 +817,10 @@ impl App {
     }
 
     pub fn mouse_down(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        self.damage_only(|a| a.mouse_down_events(button))
+    }
+
+    fn mouse_down_events(&mut self, button: MouseButton) -> Vec<UiEvent> {
         self.ctrl_press = self.ctrl_click_right && button == MouseButton::Left && self.mods.ctrl;
         let button = if self.ctrl_press { MouseButton::Right } else { button };
         let (x, y) = self.mouse;
@@ -873,7 +903,6 @@ impl App {
             self.drag_left = false;
         }
         if let Some(mut m) = self.menu.take() {
-            self.dirty = true;
             if let Some((i, v)) = m.item_at(x, y).and_then(|i| m.slider_at(i, x).map(|v| (i, v))) {
                 m.items[i] = crate::menu::slider_item(v);
                 let anchor = m.anchor.clone();
@@ -1233,6 +1262,10 @@ impl App {
     }
 
     pub fn mouse_up(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        self.damage_only(|a| a.mouse_up_events(button))
+    }
+
+    fn mouse_up_events(&mut self, button: MouseButton) -> Vec<UiEvent> {
         let button = if std::mem::take(&mut self.ctrl_press) && button == MouseButton::Left { MouseButton::Right } else { button };
         if self.menu_slider.take().is_some() {
             return Vec::new();
@@ -1371,10 +1404,20 @@ impl App {
     /// which draw from the application's model. A changed tree shape
     /// repaints everything.
     pub fn invalidate_changes(&mut self, before: &Marks) {
+        if self.invalidate_tree_changes(before) {
+            for r in self.custom_rects.clone() {
+                self.invalidate_rect(r);
+            }
+        }
+    }
+
+    /// The controls part of [`App::invalidate_changes`]; false when the
+    /// tree's shape changed (everything repaints).
+    fn invalidate_tree_changes(&mut self, before: &Marks) -> bool {
         let after = self.marks();
         if after.0.len() != before.0.len() {
             self.dirty = true;
-            return;
+            return false;
         }
         for (a, b) in after.0.iter().zip(&before.0) {
             if a.0 != b.0 {
@@ -1382,9 +1425,7 @@ impl App {
                 self.invalidate_rect(a.1);
             }
         }
-        for r in self.custom_rects.clone() {
-            self.invalidate_rect(r);
-        }
+        true
     }
 
     /// The rectangles waiting to be repainted (root coordinates).
@@ -1394,7 +1435,7 @@ impl App {
 
     /// Something needs drawing.
     pub fn needs_redraw(&self) -> bool {
-        self.dirty || !self.damage.is_empty() || self.menu_hover_damage
+        self.dirty || !self.damage.is_empty() || self.menu != self.menu_drawn
     }
 
     /// The frame for the window: redrawn completely when `dirty` (or the
@@ -1405,7 +1446,6 @@ impl App {
         let h = ((self.root.rect.h.max(1)) as f32 * scale).ceil() as u32;
         let reusable = matches!(&self.frame, Some((s, pm)) if *s == scale && pm.width() == w && pm.height() == h);
         let mut damage = std::mem::take(&mut self.damage);
-        let menu_hover = std::mem::take(&mut self.menu_hover_damage);
         let tip_shown = self.tooltip.as_ref().is_some_and(|t| t.visible());
         // Where the open menu goes, when it can be drawn over the pixels
         // beneath it (no tooltip on top, whole device pixels).
@@ -1437,39 +1477,62 @@ impl App {
                 }
             }
         } else if let Some((_, pm)) = self.frame.as_mut() {
+            let menu_changed = self.menu != self.menu_drawn;
+            let menu_rect = self.menu.as_ref().map(menu_damage_rect);
+            // A menu that cannot go over kept pixels repaints as damage.
+            if let (true, Some(r), None) = (menu_changed, menu_rect, menu_at) {
+                damage.push(r);
+            }
+            // The menu the frame shows went away or moved: its rectangle
+            // gets back the kept pixels beneath it, or repaints.
+            if let Some(old) = self.menu_drawn.as_ref().filter(|_| menu_changed).map(menu_damage_rect) {
+                if menu_rect != Some(old) {
+                    let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == old);
+                    let d = crate::device_rect(&self.root, scale, old);
+                    match (kept, d) {
+                        (Some((_, _, mut under)), Some(d)) if menu_rect.is_none_or(|r| !r.intersects(&old)) && !damage.iter().any(|r| r.intersects(&old)) => {
+                            crate::copy_device_rect(pm, &mut under, d, true);
+                        }
+                        _ => damage.push(old),
+                    }
+                }
+            }
             let damage_rects = merge_rects(std::mem::take(&mut damage));
             // Anything else repainted under the menu makes the kept pixels
             // stale.
             if self.menu_under.as_ref().is_some_and(|(_, u, _)| damage_rects.iter().any(|r| r.intersects(u))) {
                 self.menu_under = None;
             }
+            // The frame already shows what is beneath a new menu: nothing
+            // repaints there and no menu was drawn in that place.
+            let clean = menu_at.is_some_and(|(r, _)| !damage_rects.iter().any(|d| d.intersects(&r)) && self.menu_drawn.as_ref().is_none_or(|o| menu_damage_rect(o) != r));
             for r in damage_rects {
                 crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
             }
-            if menu_hover {
-                if let Some(((r, d), m)) = menu_at.zip(self.menu.as_ref()) {
-                    let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == r);
-                    let under = match kept {
-                        Some((_, _, under)) => Some(under),
-                        // The pixels beneath, drawn without the menu.
-                        None => {
-                            crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, None, None, pm, r);
-                            tiny_skia::Pixmap::new(d.2, d.3).map(|mut u| {
-                                crate::copy_device_rect(pm, &mut u, d, false);
-                                u
-                            })
-                        }
-                    };
-                    if let Some(under) = under {
-                        crate::render_menu_over(&self.skin, &mut self.fonts, scale, m, &under, pm, r, d);
-                        self.menu_under = Some((scale, r, under));
+            if let (true, Some((r, d)), Some(m)) = (menu_changed, menu_at, self.menu.as_ref()) {
+                let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == r);
+                let under = match kept {
+                    Some((_, _, under)) => Some(under),
+                    None if clean => tiny_skia::Pixmap::new(d.2, d.3).map(|mut u| {
+                        crate::copy_device_rect(pm, &mut u, d, false);
+                        u
+                    }),
+                    // The pixels beneath, drawn without the menu.
+                    None => {
+                        crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, None, None, pm, r);
+                        tiny_skia::Pixmap::new(d.2, d.3).map(|mut u| {
+                            crate::copy_device_rect(pm, &mut u, d, false);
+                            u
+                        })
                     }
-                } else if let Some(m) = self.menu.as_ref() {
-                    let r = menu_damage_rect(m);
-                    crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
+                };
+                if let Some(under) = under {
+                    crate::render_menu_over(&self.skin, &mut self.fonts, scale, m, &under, pm, r, d);
+                    self.menu_under = Some((scale, r, under));
                 }
             }
         }
+        self.menu_drawn = self.menu.clone();
         self.dirty = false;
         &self.frame.as_ref().expect("frame").1
     }
@@ -1593,6 +1656,75 @@ mod tests {
             // Off the items: no highlight.
             let _ = app.mouse_move(m.x - 5.0, m.y - 5.0);
             check(&mut app, "left");
+        }
+    }
+
+    /// Presses, releases and menus opening and closing repaint only what
+    /// they change: no whole-window repaint, the same frame as a full
+    /// render.
+    #[test]
+    fn clicks_repaint_only_what_they_change() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let mut back = Ctrl { class: "CtrlPanel".into(), name: "Back".into(), rect: crate::ctrl::Rect::new(0, 30, 200, 130), visible: true, enabled: true, ..Ctrl::default() };
+        back.set_attr("fillColour", "#335577".into());
+        let button = |name: &str, x: i32, momentary: bool| {
+            let mut b = Ctrl { class: "CtrlButton".into(), name: name.into(), rect: crate::ctrl::Rect::new(x, 6, 40, 18), visible: true, enabled: true, ..Ctrl::default() };
+            b.set_attr("optIsMomentary", momentary.to_string());
+            b
+        };
+        let root = Ctrl {
+            class: "root".into(),
+            rect: crate::ctrl::Rect::new(0, 0, 200, 160),
+            visible: true,
+            enabled: true,
+            children: vec![back, button("Toggle", 10, false), button("Opener", 60, true)],
+            ..Ctrl::default()
+        };
+        for scale in [1.0f32, 2.0] {
+            let mut app = App::new(skin.clone(), root.clone());
+            let _ = app.render_frame_with(scale, None);
+            let check = |app: &mut App, what: &str| {
+                assert!(!app.dirty, "scale {scale}: {what} repaints the whole window");
+                let partial = app.render_frame_with(scale, None).clone();
+                let full = crate::render_full(&app.skin, &mut app.fonts, &app.root, scale, None, app.menu.as_ref(), None, None);
+                let off: Vec<usize> = (0..partial.data().len() / 4).filter(|i| partial.data()[i * 4..i * 4 + 4] != full.data()[i * 4..i * 4 + 4]).collect();
+                assert!(
+                    off.is_empty(),
+                    "scale {scale}: {what}: {} differ, first {:?}",
+                    off.len(),
+                    off.iter().take(5).map(|i| (i % partial.width() as usize, i / partial.width() as usize, &partial.data()[i * 4..i * 4 + 4], &full.data()[i * 4..i * 4 + 4])).collect::<Vec<_>>()
+                );
+            };
+            let click = |app: &mut App, x: f32, y: f32, what: &str| {
+                let _ = app.mouse_move(x, y);
+                let mut ev = app.mouse_down(MouseButton::Left);
+                check(app, &format!("{what} press"));
+                ev.extend(app.mouse_up(MouseButton::Left));
+                check(app, &format!("{what} release"));
+                ev
+            };
+            for k in 0..2 {
+                let ev = click(&mut app, 30.0, 15.0, "toggle");
+                assert!(ev.iter().any(|e| matches!(e, UiEvent::Clicked { name, on, .. } if name == "Toggle" && *on == (k == 0))));
+            }
+            // Opened from the click, closed by a click beside it, then
+            // opened again and an item chosen.
+            for close_at in [(190.0, 150.0), (0.0, 0.0)] {
+                let ev = click(&mut app, 80.0, 15.0, "opener");
+                assert!(ev.iter().any(|e| matches!(e, UiEvent::Clicked { name, .. } if name == "Opener")));
+                app.open_menu(&[2], vec!["One".into(), "Two".into()], None);
+                check(&mut app, "menu opened");
+                let m = app.menu.clone().unwrap();
+                let at = if close_at.0 > 0.0 { close_at } else { (m.x + 5.0, m.y + 30.0) };
+                let _ = app.mouse_move(at.0, at.1);
+                check(&mut app, "menu hovered");
+                let ev = app.mouse_down(MouseButton::Left);
+                assert!(app.menu.is_none());
+                check(&mut app, "menu closed");
+                assert_eq!(close_at.0 == 0.0, ev.iter().any(|e| matches!(e, UiEvent::MenuSelected { index: 1, .. })));
+                let _ = app.mouse_up(MouseButton::Left);
+                check(&mut app, "release after the menu");
+            }
         }
     }
 
