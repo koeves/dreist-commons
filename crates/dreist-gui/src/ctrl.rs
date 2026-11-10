@@ -330,8 +330,17 @@ impl Ctrl {
         let old = self.rect;
         self.rect = r;
         if self.class == "CtrlSplitterPanel" {
-            if old.w > 0 && old.h > 0 && (old.w, old.h) != (r.w, r.h) {
+            // [re:1edcc1]: a resize keeps the far panel (or the bar), and
+            // the bar is clamped to the panels' minimum / maximum sizes
+            // whenever there is room (no room at all: left).
+            let len = if crate::splitter::vertical(self) { r.h } else { r.w };
+            if old.w > 0 && old.h > 0 && (old.w, old.h) != (r.w, r.h) && len > crate::splitter::dim(self) {
                 crate::splitter::follow_resize(self, old);
+            } else if len > crate::splitter::dim(self) {
+                let p = crate::splitter::clamp(self, crate::splitter::position(self));
+                if p != crate::splitter::position(self) {
+                    self.set_attr("intSplitPosition", p.to_string());
+                }
             }
             self.layout_splitter();
         } else if (old.w, old.h) != (r.w, r.h) {
