@@ -198,3 +198,51 @@ pub fn render_full_into(
         t.draw(&skin.styles, &mut p);
     }
 }
+
+/// The device-pixel rectangle of the root-coordinate rectangle `r` in a
+/// frame of `root` at `scale`, when it lies on whole device pixels (any
+/// integer scale): `(x, y, w, h)`.
+pub fn device_rect(root: &Ctrl, scale: f32, r: ctrl::Rect) -> Option<(u32, u32, u32, u32)> {
+    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let (x1, y1) = ((r.x + r.w).min(root.rect.w), (r.y + r.h).min(root.rect.h));
+    let (dx0, dy0, dx1, dy1) = (x0 as f32 * scale, y0 as f32 * scale, x1 as f32 * scale, y1 as f32 * scale);
+    let whole = |v: f32| v.fract() == 0.0;
+    (x1 > x0 && y1 > y0 && whole(dx0) && whole(dy0) && whole(dx1) && whole(dy1)).then_some((dx0 as u32, dy0 as u32, (dx1 - dx0) as u32, (dy1 - dy0) as u32))
+}
+
+/// Copy the device rectangle `d` of `src` (a whole frame) into `dst` (just
+/// that rectangle's size), or back with `to_frame`.
+pub fn copy_device_rect(frame: &mut tiny_skia::Pixmap, part: &mut tiny_skia::Pixmap, d: (u32, u32, u32, u32), to_frame: bool) {
+    let (x, y, w, h) = (d.0 as usize, d.1 as usize, d.2 as usize, d.3 as usize);
+    let fw = frame.width() as usize;
+    if part.width() as usize != w || part.height() as usize != h || x + w > fw || y + h > frame.height() as usize {
+        return;
+    }
+    for row in 0..h {
+        let f0 = ((y + row) * fw + x) * 4;
+        let p0 = row * w * 4;
+        if to_frame {
+            frame.data_mut()[f0..f0 + w * 4].copy_from_slice(&part.data()[p0..p0 + w * 4]);
+        } else {
+            part.data_mut()[p0..p0 + w * 4].copy_from_slice(&frame.data()[f0..f0 + w * 4]);
+        }
+    }
+}
+
+/// Draw the open menu over `under`, the pixels of root-coordinate
+/// rectangle `r` (device rectangle `d`, [`device_rect`]) without it, into
+/// that rectangle of `frame`: a menu's hover repaints the menu alone. The
+/// menu must lie inside `r`. Gives the pixels [`render_region`] gives.
+#[allow(clippy::too_many_arguments)]
+pub fn render_menu_over(skin: &Skin, fonts: &mut text::Fonts, scale: f32, menu: &menu::Menu, under: &tiny_skia::Pixmap, frame: &mut tiny_skia::Pixmap, r: ctrl::Rect, d: (u32, u32, u32, u32)) {
+    let mut tmp = under.clone();
+    {
+        let mut p = paint::Painter::new(&mut tmp, fonts, scale);
+        let (x0, y0) = (r.x.max(0), r.y.max(0));
+        p.tx = -x0 as f32;
+        p.ty = -y0 as f32;
+        p.clip = (0, 0, (d.2 as f32 / scale) as i32, (d.3 as f32 / scale) as i32);
+        menu.draw(&skin.styles, &mut p);
+    }
+    copy_device_rect(frame, &mut tmp, d, true);
+}

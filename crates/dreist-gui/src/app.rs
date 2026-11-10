@@ -180,6 +180,12 @@ pub struct App {
     sizer_drag: Option<(f32, f32)>,
     /// The shown tooltip ([re:403a0f]).
     pub tooltip: Option<crate::tooltip::Tip>,
+    /// The open menu's hover changed: only the menu repaints.
+    menu_hover_damage: bool,
+    /// The last frame's pixels under the open menu without it (scale,
+    /// root-coordinate rectangle, pixels): a hover redraws the menu over
+    /// them instead of the controls beneath.
+    menu_under: Option<(f32, crate::ctrl::Rect, tiny_skia::Pixmap)>,
 }
 
 /// Editor open → [re:680872].
@@ -241,6 +247,8 @@ impl App {
             splits: Vec::new(),
             sizer_drag: None,
             tooltip: None,
+            menu_hover_damage: false,
+            menu_under: None,
         }
     }
 
@@ -500,8 +508,7 @@ impl App {
             if h != m.hover {
                 m.hover = h;
                 // Only the menu repaints.
-                let r = crate::ctrl::Rect::new(m.x.floor() as i32 - 8, m.y.floor() as i32 - 8, m.w.ceil() as i32 + 16, m.height().ceil() as i32 + 16);
-                self.invalidate_rect(r);
+                self.menu_hover_damage = true;
             }
             return out;
         }
@@ -1387,7 +1394,7 @@ impl App {
 
     /// Something needs drawing.
     pub fn needs_redraw(&self) -> bool {
-        self.dirty || !self.damage.is_empty()
+        self.dirty || !self.damage.is_empty() || self.menu_hover_damage
     }
 
     /// The frame for the window: redrawn completely when `dirty` (or the
@@ -1397,28 +1404,80 @@ impl App {
         let w = ((self.root.rect.w.max(1)) as f32 * scale).ceil() as u32;
         let h = ((self.root.rect.h.max(1)) as f32 * scale).ceil() as u32;
         let reusable = matches!(&self.frame, Some((s, pm)) if *s == scale && pm.width() == w && pm.height() == h);
-        let damage = std::mem::take(&mut self.damage);
+        let mut damage = std::mem::take(&mut self.damage);
+        let menu_hover = std::mem::take(&mut self.menu_hover_damage);
+        let tip_shown = self.tooltip.as_ref().is_some_and(|t| t.visible());
+        // Where the open menu goes, when it can be drawn over the pixels
+        // beneath it (no tooltip on top, whole device pixels).
+        let menu_at = self.menu.as_ref().filter(|_| !tip_shown).and_then(|m| {
+            let r = menu_damage_rect(m);
+            crate::device_rect(&self.root, scale, r).map(|d| (r, d))
+        });
         if self.dirty || !reusable {
             let drawn = std::cell::RefCell::new(Vec::new());
             let tip = self.tooltip.as_ref().filter(|t| t.visible());
+            // The menu is drawn after the pixels beneath it are kept.
+            let menu = if menu_at.is_some() { None } else { self.menu.as_ref() };
             // The last frame's pixmap is redrawn when its size still fits.
             match self.frame.as_mut().filter(|_| reusable) {
-                Some((_, pm)) => crate::render_full_into(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), tip, Some(&drawn), pm),
+                Some((_, pm)) => crate::render_full_into(&self.skin, &mut self.fonts, &self.root, scale, custom, menu, tip, Some(&drawn), pm),
                 None => {
-                    let pm = crate::render_full(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), tip, Some(&drawn));
+                    let pm = crate::render_full(&self.skin, &mut self.fonts, &self.root, scale, custom, menu, tip, Some(&drawn));
                     self.frame = Some((scale, pm));
                 }
             }
             let (ox, oy) = (self.root.rect.x, self.root.rect.y);
             self.custom_rects = drawn.into_inner().into_iter().map(|r| crate::ctrl::Rect::new(r.x + ox, r.y + oy, r.w, r.h)).collect();
+            self.menu_under = None;
+            if let (Some((r, d)), Some(m), Some((_, pm))) = (menu_at, self.menu.as_ref(), self.frame.as_mut()) {
+                if let Some(mut under) = tiny_skia::Pixmap::new(d.2, d.3) {
+                    crate::copy_device_rect(pm, &mut under, d, false);
+                    crate::render_menu_over(&self.skin, &mut self.fonts, scale, m, &under, pm, r, d);
+                    self.menu_under = Some((scale, r, under));
+                }
+            }
         } else if let Some((_, pm)) = self.frame.as_mut() {
-            for r in merge_rects(damage) {
+            let damage_rects = merge_rects(std::mem::take(&mut damage));
+            // Anything else repainted under the menu makes the kept pixels
+            // stale.
+            if self.menu_under.as_ref().is_some_and(|(_, u, _)| damage_rects.iter().any(|r| r.intersects(u))) {
+                self.menu_under = None;
+            }
+            for r in damage_rects {
                 crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
+            }
+            if menu_hover {
+                if let Some(((r, d), m)) = menu_at.zip(self.menu.as_ref()) {
+                    let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == r);
+                    let under = match kept {
+                        Some((_, _, under)) => Some(under),
+                        // The pixels beneath, drawn without the menu.
+                        None => {
+                            crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, None, None, pm, r);
+                            tiny_skia::Pixmap::new(d.2, d.3).map(|mut u| {
+                                crate::copy_device_rect(pm, &mut u, d, false);
+                                u
+                            })
+                        }
+                    };
+                    if let Some(under) = under {
+                        crate::render_menu_over(&self.skin, &mut self.fonts, scale, m, &under, pm, r, d);
+                        self.menu_under = Some((scale, r, under));
+                    }
+                } else if let Some(m) = self.menu.as_ref() {
+                    let r = menu_damage_rect(m);
+                    crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
+                }
             }
         }
         self.dirty = false;
         &self.frame.as_ref().expect("frame").1
     }
+}
+
+/// What an open menu covers (its shadow included), root coordinates.
+fn menu_damage_rect(m: &crate::menu::Menu) -> crate::ctrl::Rect {
+    crate::ctrl::Rect::new(m.x.floor() as i32 - 8, m.y.floor() as i32 - 8, m.w.ceil() as i32 + 16, m.height().ceil() as i32 + 16)
 }
 
 /// The drawable state of a control tree ([`App::marks`]).
@@ -1493,6 +1552,48 @@ mod tests {
         app.mouse_move(110.0, 19.0);
         assert!((get(&app, "valueHigh") - 0.9).abs() < 1e-4);
         app.mouse_up(MouseButton::Left);
+    }
+
+    /// A menu's hover repaints the menu over the kept pixels beneath it:
+    /// the same frame as a full render, also after other repaints under
+    /// and beside the menu.
+    #[test]
+    fn menu_hover_frames_match_full_renders() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let panel = |name: &str, r: crate::ctrl::Rect, col: &str| {
+            let mut c = Ctrl { class: "CtrlPanel".into(), name: name.into(), rect: r, visible: true, enabled: true, ..Ctrl::default() };
+            c.set_attr("fillColour", col.into());
+            c
+        };
+        let button = Ctrl { class: "CtrlPanel".into(), name: "Opener".into(), rect: crate::ctrl::Rect::new(20, 10, 40, 16), visible: true, enabled: true, ..Ctrl::default() };
+        let kids = vec![panel("Under", crate::ctrl::Rect::new(10, 30, 120, 90), "#336699"), panel("Beside", crate::ctrl::Rect::new(160, 30, 30, 30), "#996633"), button];
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 160), visible: true, enabled: true, children: kids, ..Ctrl::default() };
+        for scale in [1.0f32, 2.0] {
+            let mut app = App::new(skin.clone(), root.clone());
+            let _ = app.render_frame_with(scale, None);
+            app.open_menu(&[2], vec!["One".into(), "Two".into(), String::new(), "Three".into()], None);
+            let m = app.menu.clone().unwrap();
+            let check = |app: &mut App, what: &str| {
+                let partial = app.render_frame_with(scale, None).clone();
+                let full = crate::render_full(&app.skin, &mut app.fonts, &app.root, scale, None, app.menu.as_ref(), None, None);
+                assert!(partial.data() == full.data(), "scale {scale}: {what}");
+            };
+            check(&mut app, "opened");
+            for (k, i) in [0, 1, 3, 0, 1].into_iter().enumerate() {
+                let _ = app.mouse_move(m.x + 5.0, m.y + 10.0 + i as f32 * 20.0);
+                assert!(!app.dirty && app.needs_redraw());
+                check(&mut app, &format!("hover {k}"));
+                // Something beneath the menu and something beside it change.
+                let (path, col) = if k % 2 == 0 { (0, "#00ff00") } else { (1, "#ff00ff") };
+                app.ctrl_mut(&[path]).unwrap().set_attr("fillColour", col.into());
+                let r = app.abs_rect(&[path]);
+                app.invalidate_rect(r);
+                check(&mut app, &format!("repaint {k}"));
+            }
+            // Off the items: no highlight.
+            let _ = app.mouse_move(m.x - 5.0, m.y - 5.0);
+            check(&mut app, "left");
+        }
     }
 
     #[test]

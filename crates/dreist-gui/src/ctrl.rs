@@ -35,6 +35,11 @@ impl Rect {
     pub fn bottom(&self) -> i32 {
         self.y + self.h
     }
+
+    /// The two share at least one pixel.
+    pub fn intersects(&self, o: &Rect) -> bool {
+        self.x < o.right() && o.x < self.right() && self.y < o.bottom() && o.y < self.bottom()
+    }
 }
 
 /// Axis resize mode ([re:f8e582]); the skins
