@@ -11,7 +11,11 @@ use crate::text::Fonts;
 pub enum UiEvent {
     /// A button was clicked (`on` is the new state for latching buttons).
     Clicked { path: Vec<usize>, name: String, id: i32, on: bool },
-    /// A knob or slider moved to `value` (0..1).
+    /// A knob or slider moved to `value` (0..1). A transmod control's
+    /// base edit has `dragPart="primary"` on the control; with `dragEnd`
+    /// as well (an option-drag, [`App::v2_controls`]) the modulation end
+    /// stayed, and the control's value holds the new depth as
+    /// `(depth + 1) / 2`: both changed in this one event.
     ValueChanged { path: Vec<usize>, name: String, id: i32, value: f32 },
     /// A text box edit was committed (Enter or focus loss).
     TextCommitted { path: Vec<usize>, name: String, text: String },
@@ -161,6 +165,15 @@ pub struct App {
     drag_left: bool,
     /// Menu slider item being dragged.
     menu_slider: Option<usize>,
+    /// The left button is down (after the ctrl-click remap).
+    left_held: bool,
+    /// [`App::v2_controls`]: the item of the open menu the held left
+    /// press went down on ([re:9c68e5]).
+    menu_press: Option<usize>,
+    /// [`App::v2_controls`]: the open menu appeared during the held left
+    /// press that started here (a popup button opens on the press,
+    /// [re:e72b4d]): releasing over an item after dragging picks it.
+    menu_drag_from: Option<(f32, f32)>,
     /// The UI scale changed: the window should resize to size × scale.
     pub resize_request: bool,
     /// Shift alone turns knobs ten times slower while dragging (the
@@ -174,9 +187,12 @@ pub struct App {
     /// The second-generation stock controls ([`crate::v2ctl`]): relative
     /// knob drags with shift for fine, sliders that jump to a press off
     /// their thumb, transmod knob wheel steps and depth snapping, value
-    /// boxes dragged unless `optCanBeDragged="false"`, and a double click
+    /// boxes dragged unless `optCanBeDragged="false"`, a double click
     /// on a knob or slider that does not start a drag ([re:9e4f27]: the
-    /// second press goes only to the double-click handler). Off by default.
+    /// second press goes only to the double-click handler), option-drags
+    /// of a modulated transmod control's base that keep the modulation
+    /// end ([re:081d3e]), and menu items picked on release
+    /// ([re:9c68e5]). Off by default.
     pub v2_controls: bool,
     /// Modifiers at the press (or the last re-anchoring) of a drag.
     press_mods: Mods,
@@ -257,6 +273,9 @@ impl App {
             drag_out: None,
             drag_left: false,
             menu_slider: None,
+            left_held: false,
+            menu_press: None,
+            menu_drag_from: None,
             folds: Vec::new(),
             resize_request: false,
             fine_drag: false,
@@ -513,6 +532,8 @@ impl App {
         }
         self.menu = Some(m);
         self.pressed = None;
+        self.menu_press = None;
+        self.menu_drag_from = (self.v2_controls && self.left_held).then_some(self.press_at);
     }
 
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Vec<UiEvent> {
@@ -761,6 +782,24 @@ impl App {
         self.dirty = true;
     }
 
+    /// Set a modulated transmod control's base to `base` keeping the
+    /// modulation end at `end`: the depth becomes `end − base` (shown as
+    /// the value `(depth + 1) / 2` and in `modDepth`). Reported as one
+    /// [`UiEvent::ValueChanged`] carrying the base, with `dragPart`
+    /// `primary` and `dragEnd` set on the control.
+    fn v2_set_base_keep_end(&mut self, path: &[usize], base: f32, end: f32, out: &mut Vec<UiEvent>) {
+        let Some(c) = self.ctrl_mut(path) else { return };
+        if (base - c.attr_f32("baseValue", 0.0)).abs() <= 1e-6 {
+            return;
+        }
+        let depth = end - base;
+        c.set_attr("baseValue", base.to_string());
+        c.set_attr("modDepth", depth.to_string());
+        c.value = (depth + 1.0) / 2.0;
+        out.push(UiEvent::ValueChanged { path: path.to_vec(), name: c.name.clone(), id: c.id, value: base });
+        self.dirty = true;
+    }
+
     /// A drag of a second-generation stock control ([`crate::v2ctl`]);
     /// `None` for other controls. `anchor` is the press (or last
     /// re-anchoring) point and value.
@@ -812,7 +851,12 @@ impl App {
                     let thumb = v2::transmod_slider_thumb(w, c.attr_f32("realModDim", 0.25), c.attr_f32("realSliderPortion", 1.0));
                     (y0 - y) / v2::slider_divisor(m, macro_px) / (h - thumb).max(1) as f32
                 };
-                if base_part || !depth {
+                if let (true, Some(end)) = (base_part, c.attr("dragEnd").and_then(|e| e.parse::<f32>().ok())) {
+                    // [re:081d3e] mode 1: the base alone moves (knobs snap
+                    // it onto the end); the end stays, the depth follows.
+                    let base = if class == "CtrlTransmodKnob" { v2::snap_to(v0, d, end, fine) } else { (v0 + d).clamp(0.0, 1.0) };
+                    self.v2_set_base_keep_end(path, base, end, &mut out);
+                } else if base_part || !depth {
                     self.v2_set(path, (v0 + d).clamp(0.0, 1.0), base_part, &mut out);
                 } else {
                     // The modulation end moves; knobs snap it onto the base.
@@ -894,12 +938,22 @@ impl App {
         let (dx, dy) = (r - (mx as i32 - ox), r - (my as i32 - oy));
         let centre = c.rect.w == c.rect.h && (dx * dx + dy * dy) as u32 <= (r * r) as u32;
         let base = c.attr_f32("baseValue", 0.0);
+        let end = base + c.value * 2.0 - 1.0;
+        let alt = self.mods.alt;
         if centre {
             if let Some(c) = self.ctrl_mut(p) {
                 c.set_attr("dragPart", "primary".into());
+                // With option the base alone moves (mode 1).
+                if alt {
+                    c.set_attr("dragEnd", end.to_string());
+                }
             }
             self.wheel_part = Some(p.to_vec());
-            self.v2_set(p, (base + d).clamp(0.0, 1.0), true, &mut out);
+            if alt {
+                self.v2_set_base_keep_end(p, (base + d).clamp(0.0, 1.0), end, &mut out);
+            } else {
+                self.v2_set(p, (base + d).clamp(0.0, 1.0), true, &mut out);
+            }
         } else {
             let dep = crate::v2ctl::depth_after(base, c.value * 2.0 - 1.0, d, None);
             self.v2_set(p, (dep + 1.0) / 2.0, false, &mut out);
@@ -913,6 +967,7 @@ impl App {
             if self.pressed.as_ref().is_none_or(|q| q.0 != p) {
                 if let Some(c) = self.ctrl_mut(&p) {
                     c.remove_attr("dragPart");
+                    c.remove_attr("dragEnd");
                 }
             }
         }
@@ -1112,6 +1167,9 @@ impl App {
         self.clear_wheel_part();
         self.ctrl_press = self.ctrl_click_right && button == MouseButton::Left && self.mods.ctrl;
         let button = if self.ctrl_press { MouseButton::Right } else { button };
+        if button == MouseButton::Left {
+            self.left_held = true;
+        }
         let (x, y) = self.mouse;
         // A click anywhere commits a pending text edit.
         let mut committed = self.commit_edit();
@@ -1214,10 +1272,19 @@ impl App {
                 self.menu_slider = Some(i);
                 return vec![UiEvent::MenuSlider { anchor, index: i, value: v }];
             }
+            self.menu_drag_from = None;
             if let Some(i) = m.item_at(x, y) {
+                // [re:9c68e5]: second-generation items are picked by the
+                // release over the item pressed.
+                if self.v2_controls {
+                    self.menu_press = (button == MouseButton::Left).then_some(i);
+                    self.menu = Some(m);
+                    return Vec::new();
+                }
                 let name = self.ctrl(&m.anchor).map(|c| c.name.clone()).unwrap_or_default();
                 return vec![UiEvent::MenuSelected { anchor: m.anchor, name, index: i }];
             }
+            self.menu_press = None;
             if m.contains(x, y) {
                 self.menu = Some(m);
             }
@@ -1540,10 +1607,16 @@ impl App {
         // with a source selected a press on the centre / main track edits
         // the primary (base) value, the ring / strip the depth.
         let mut primary = false;
+        // [re:081d3e] / [re:654080]: option on the centre / main track of a
+        // modulated control moves the base alone (mode 1, the end stays).
+        let mut keep_end = None;
         if let Some(c) = self.ctrl(&path) {
             let (ox, oy) = self.origin(&path);
             if let Some(cur) = crate::cursor::transmod(c, x - ox as f32, y - oy as f32, self.mods.alt) {
                 primary = c.attr("editingDepth") == Some("true") && cur != crate::cursor::Cursor::image("TransmodSecondary");
+                if self.v2_controls && primary && cur == crate::cursor::Cursor::image("TransmodPrimary") {
+                    keep_end = Some(c.attr_f32("baseValue", c.value) + c.value * 2.0 - 1.0);
+                }
                 self.cursor = cur;
             }
         }
@@ -1556,6 +1629,9 @@ impl App {
         out.push(UiEvent::Pressed { path: path.clone(), name: c.name.clone() });
         let v0 = if primary {
             c.set_attr("dragPart", "primary".into());
+            if let Some(end) = keep_end {
+                c.set_attr("dragEnd", end.to_string());
+            }
             c.attr_f32("baseValue", c.value)
         } else if c.class == "CtrlRangeSlider" {
             // The handle nearer the press (the high one when they meet and
@@ -1602,7 +1678,39 @@ impl App {
     }
 
     pub fn mouse_up(&mut self, button: MouseButton) -> Vec<UiEvent> {
-        self.damage_only(|a| a.mouse_up_events(button))
+        self.damage_only(|a| {
+            let picked = a.menu_release(button);
+            let mut out = a.mouse_up_events(button);
+            out.splice(0..0, picked);
+            out
+        })
+    }
+
+    /// [re:9c68e5]: a left release over an item of the open menu picks it
+    /// when the press went down on that item, or when the menu appeared
+    /// during this press ([re:e72b4d]) and the pointer was dragged onto
+    /// the item; elsewhere the menu stays open. Slider items keep their
+    /// press-and-drag handling. [`App::v2_controls`] only.
+    fn menu_release(&mut self, button: MouseButton) -> Option<UiEvent> {
+        let left = button == MouseButton::Left && !self.ctrl_press;
+        if !left {
+            return None;
+        }
+        self.left_held = false;
+        let (pressed_on, from) = (self.menu_press.take(), self.menu_drag_from.take());
+        if !self.v2_controls || self.menu_slider.is_some() {
+            return None;
+        }
+        let (x, y) = self.mouse;
+        let m = self.menu.as_ref()?;
+        let i = m.item_at(x, y).filter(|&i| m.slider_at(i, x).is_none())?;
+        let dragged = from.is_some_and(|(px, py)| (x - px).hypot(y - py) >= DRAG_THRESHOLD);
+        if pressed_on != Some(i) && !dragged {
+            return None;
+        }
+        let m = self.menu.take()?;
+        let name = self.ctrl(&m.anchor).map(|c| c.name.clone()).unwrap_or_default();
+        Some(UiEvent::MenuSelected { anchor: m.anchor, name, index: i })
     }
 
     fn mouse_up_events(&mut self, button: MouseButton) -> Vec<UiEvent> {
@@ -1635,6 +1743,7 @@ impl App {
         let Some((path, ..)) = self.pressed.take() else { return Vec::new() };
         if let Some(c) = self.ctrl_mut(&path) {
             c.remove_attr("dragPart");
+            c.remove_attr("dragEnd");
         }
         let inside = self.hit(x, y).starts_with(&path);
         let mut out = Vec::new();
@@ -2363,6 +2472,137 @@ mod tests {
         app.mouse_move(20.0, 20.0);
         assert!(app.mouse_down(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { name, .. } if name == "P")));
         assert!(!app.mouse_up(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { .. })));
+    }
+
+    /// [re:9c68e5]: second-generation menu items are picked on the
+    /// release over the item pressed; a menu opened by the press picks
+    /// the item a drag releases over.
+    #[test]
+    fn v2_menu_items_are_picked_on_release() {
+        let picked = |ev: &[UiEvent]| ev.iter().find_map(|e| if let UiEvent::MenuSelected { index, .. } = e { Some(*index) } else { None });
+        let mut app = v2_app(vec![v2_ctrl("CtrlPopupButton", "P", crate::ctrl::Rect::new(10, 10, 60, 20), 0.0)]);
+        let item = |app: &App, i: usize| {
+            let m = app.menu.as_ref().unwrap();
+            (m.x + 10.0, m.y + 20.0 * i as f32 + 10.0)
+        };
+        let items = || vec!["One".to_string(), "Two".into(), crate::menu::slider_item(0.5), "Three".into()];
+        // A click on the button opens the menu at the press; the release on
+        // the button keeps it open.
+        app.mouse_move(20.0, 20.0);
+        app.mouse_down(MouseButton::Left);
+        app.open_menu(&[0], items(), None);
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), None);
+        assert!(app.menu.is_some());
+        // A press on an item does nothing; the release over it picks it.
+        let (x, y) = item(&app, 1);
+        app.mouse_move(x, y);
+        assert!(app.mouse_down(MouseButton::Left).is_empty());
+        assert!(app.menu.is_some());
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), Some(1));
+        assert!(app.menu.is_none());
+        // Pressed on one item, released over another: nothing, still open.
+        app.open_menu(&[0], items(), None);
+        let (x, y) = item(&app, 0);
+        app.mouse_move(x, y);
+        app.mouse_down(MouseButton::Left);
+        let (x, y) = item(&app, 3);
+        app.mouse_move(x, y);
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), None);
+        assert!(app.menu.is_some());
+        // The slider item still sets its value on the press and the drag.
+        let (x, y) = item(&app, 2);
+        app.mouse_move(x, y);
+        assert!(app.mouse_down(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::MenuSlider { index: 2, .. })));
+        assert!(app.mouse_move(x + 5.0, y).iter().any(|e| matches!(e, UiEvent::MenuSlider { index: 2, .. })));
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), None);
+        assert!(app.menu.is_some());
+        // A press outside closes it.
+        app.mouse_move(390.0, 390.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_up(MouseButton::Left);
+        assert!(app.menu.is_none());
+        // Press on the button, drag onto an item, release: picked.
+        app.mouse_move(20.0, 20.0);
+        app.mouse_down(MouseButton::Left);
+        app.open_menu(&[0], items(), None);
+        let (x, y) = item(&app, 3);
+        app.mouse_move(x, y);
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), Some(3));
+        // ... but not when released outside the items.
+        app.mouse_move(20.0, 20.0);
+        app.mouse_down(MouseButton::Left);
+        app.open_menu(&[0], items(), None);
+        app.mouse_move(390.0, 390.0);
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), None);
+        assert!(app.menu.is_some());
+        // A right-button release over an item does not pick it.
+        let (x, y) = item(&app, 0);
+        app.mouse_move(x, y);
+        app.mouse_down(MouseButton::Right);
+        assert_eq!(picked(&app.mouse_up(MouseButton::Right)), None);
+        // Without the second-generation controls the press picks.
+        app.v2_controls = false;
+        app.open_menu(&[0], items(), None);
+        app.mouse_move(x, y);
+        assert_eq!(picked(&app.mouse_down(MouseButton::Left)), Some(0));
+        assert!(app.menu.is_none());
+        assert_eq!(picked(&app.mouse_up(MouseButton::Left)), None);
+    }
+
+    /// [re:081d3e]: option on a modulated transmod knob's centre moves
+    /// the base alone; the modulation end stays (the depth follows), with
+    /// the base snapping onto the end unless shift alone.
+    #[test]
+    fn v2_option_drags_of_the_base_keep_the_modulation_end() {
+        let mut k = v2_ctrl("CtrlTransmodKnob", "T", crate::ctrl::Rect::new(10, 200, 40, 40), 0.6);
+        k.set_attr("editingDepth", "true".into());
+        k.set_attr("baseValue", "0.5".into());
+        k.set_attr("modDepth", "0.2".into());
+        let mut app = v2_app(vec![k.clone()]);
+        let state = |app: &App| {
+            let c = app.ctrl(&[0]).unwrap();
+            (c.attr_f32("baseValue", 0.0), c.value * 2.0 - 1.0, c.attr_f32("modDepth", 0.0))
+        };
+        app.mods.alt = true;
+        app.mouse_move(30.0, 220.0);
+        app.mouse_down(MouseButton::Left);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragPart"), Some("primary"));
+        // 20 px down = −0.1 (away from the end the snap's offsets cancel).
+        let ev = app.mouse_move(30.0, 240.0);
+        let (b, d, md) = state(&app);
+        assert!((last_value(&ev).unwrap() - b).abs() < 1e-6);
+        assert!((b - 0.4).abs() < 1e-5 && (b + d - 0.7).abs() < 1e-5 && (md - d).abs() < 1e-6, "{b} {d}");
+        // Up past the end: the base sticks to it (depth 0) ...
+        app.mouse_move(30.0, 180.0);
+        let (b, d, _) = state(&app);
+        assert!((b - 0.7).abs() < 1e-5 && d.abs() < 1e-5, "{b} {d}");
+        // ... and letting go of option mid-drag keeps the mode.
+        app.mods.alt = false;
+        app.mouse_move(30.0, 180.0);
+        app.mouse_move(30.0, 220.0);
+        let (b, d, _) = state(&app);
+        assert!((b + d - 0.7).abs() < 1e-5, "{b} {d}");
+        app.mouse_up(MouseButton::Left);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragEnd"), None);
+        // Without option the depth stays.
+        let mut app = v2_app(vec![k.clone()]);
+        app.mouse_move(30.0, 220.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_move(30.0, 240.0);
+        let (b, d, _) = state(&app);
+        assert!((b - 0.4).abs() < 1e-5 && (d - 0.2).abs() < 1e-5, "{b} {d}");
+        app.mouse_up(MouseButton::Left);
+        // The wheel with option: the base alone, no snap.
+        let mut app = v2_app(vec![k]);
+        app.mods.alt = true;
+        app.mouse_move(30.0, 220.0);
+        let ev = app.mouse_scroll(0.0, 1.0, true);
+        let (b, d, _) = state(&app);
+        assert!((last_value(&ev).unwrap() - b).abs() < 1e-6);
+        assert!((b - (0.5 + 1.0 / 150.0)).abs() < 1e-5 && (b + d - 0.7).abs() < 1e-5, "{b} {d}");
+        assert!(app.ctrl(&[0]).unwrap().attr("dragEnd").is_some());
+        app.mouse_move(30.0, 221.0);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragEnd"), None);
     }
 
     #[test]
