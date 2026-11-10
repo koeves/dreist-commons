@@ -73,7 +73,19 @@ pub trait Editor: Send {
     //       and API agnostic, add a way to ask the GuiContext if the wrapper already provides a
     //       tick function. If it does not, then the Editor implementation must handle this by
     //       itself. This would also need an associated `PREFERRED_FRAME_RATE` constant.
-    // TODO: Host->Plugin resizing
+    /// Host->Plugin resizing: the smallest size (logical pixels) the host may resize the editor
+    /// to, or `None` (the default) when the host may not resize it.
+    fn min_size(&self) -> Option<(u32, u32)> {
+        None
+    }
+
+    /// Host->Plugin resizing: the host resized the editor's view to `(width, height)` logical
+    /// pixels (at least [`min_size()`][Self::min_size()]). Afterwards
+    /// [`size()`][Self::size()] reports that size. Returns false when the editor does not follow.
+    fn set_size(&self, width: u32, height: u32) -> bool {
+        let _ = (width, height);
+        false
+    }
 }
 
 /// A raw window handle for platform and GUI framework agnostic editors. This implements
