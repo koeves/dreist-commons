@@ -110,6 +110,19 @@ pub struct Ctrl {
     pub hover: bool,
     /// [re:d45123] channels (see `meter.rs`).
     pub meters: Vec<crate::meter::MeterInfo>,
+    /// Where the anchors last placed this control from (see
+    /// [`Ctrl::auto_resize_children`]).
+    pub anchored: Option<Anchored>,
+}
+
+/// An anchored control's layout basis: the rect it had with its parent at
+/// `parent` (its skin rect, or where code last put it) and the rect the
+/// anchors made of it since.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Anchored {
+    pub base: Rect,
+    pub parent: (i32, i32),
+    pub placed: Rect,
 }
 
 /// A control's skin attributes. Reads go through `Deref`; any mutable
@@ -374,19 +387,32 @@ impl Ctrl {
     }
 
     /// Edge anchoring of the children [re:00273a].
+    ///
+    /// Each child is placed from its basis (its rect at a known parent
+    /// size: the skin's, or wherever code last put it), not from its
+    /// current rect, so a resize gives the same layout whatever sizes the
+    /// parent went through before: a parent squeezed below its children's
+    /// sizes (whose rects then clamp to nothing) or shrunk and grown back
+    /// step by step comes back exactly as one resized there at once.
     pub fn auto_resize_children(&mut self, old: Rect, new: Rect) {
-        if old.w == 0 && old.h == 0 {
-            return;
-        }
         for c in &mut self.children {
             let [(lm, lv), (tm, tv), (rm, rv), (bm, bv)] = c.anchors;
             if [lm, tm, rm, bm].iter().all(|m| *m == Anchor::None) {
                 continue;
             }
-            let r = anchor_axis(c.rect.y, c.rect.h, (tm, tv), (bm, bv), old.h, new.h);
-            let (y, h) = r;
-            let (x, w) = anchor_axis(c.rect.x, c.rect.w, (lm, lv), (rm, rv), old.w, new.w);
-            c.set_rect(Rect { x, y, w, h });
+            // Moved by code since the anchors last placed it (or never
+            // placed): that rect, at the parent's old size, is the basis.
+            let basis = match c.anchored {
+                Some(a) if a.placed == c.rect => a,
+                _ if old.w == 0 && old.h == 0 => continue,
+                _ => Anchored { base: c.rect, parent: (old.w, old.h), placed: c.rect },
+            };
+            let b = basis.base;
+            let (y, h) = anchor_axis(b.y, b.h, (tm, tv), (bm, bv), basis.parent.1, new.h);
+            let (x, w) = anchor_axis(b.x, b.w, (lm, lv), (rm, rv), basis.parent.0, new.w);
+            let r = Rect { x, y, w, h };
+            c.anchored = Some(Anchored { placed: r, ..basis });
+            c.set_rect(r);
         }
     }
 }
@@ -464,5 +490,62 @@ mod tests {
         // LNear on the far edge: the far edge follows the parent's (stretch).
         assert_eq!(anchor_axis(60, 30, (Anchor::None, -1.0), (Anchor::LockedNear, 0.0), 100, 200), (60, 130));
         assert_eq!(anchor_axis(10, 20, (Anchor::Center, 0.0), (Anchor::None, -1.0), 100, 200), (90, 20));
+    }
+
+    /// A panel with a fixed-width left column, a stretching body, a
+    /// centred toolbar and a nested stretching child.
+    fn panel() -> Ctrl {
+        let a = |l, t, r, b| [l, t, r, b];
+        let kid = |name: &str, rect, anchors, children| Ctrl { name: name.into(), rect, anchors, children, visible: true, ..Ctrl::default() };
+        let inner = kid("inner", Rect::new(4, 4, 312, 192), a((Anchor::FixedNear, 4.0), (Anchor::FixedNear, 4.0), (Anchor::FixedNear, 4.0), (Anchor::FixedNear, 4.0)), vec![]);
+        kid(
+            "root",
+            Rect::new(0, 0, 400, 300),
+            Default::default(),
+            vec![
+                kid("column", Rect::new(0, 30, 80, 270), a((Anchor::FixedNear, 0.0), (Anchor::FixedNear, 30.0), (Anchor::FixedFar, 80.0), (Anchor::FixedNear, 0.0)), vec![]),
+                kid("body", Rect::new(80, 30, 320, 200), a((Anchor::FixedNear, 80.0), (Anchor::FixedNear, 30.0), (Anchor::FixedNear, 0.0), (Anchor::LockedNear, 0.0)), vec![inner]),
+                kid("tools", Rect::new(150, 5, 100, 20), a((Anchor::Center, 0.0), (Anchor::None, -1.0), (Anchor::None, -1.0), (Anchor::None, -1.0)), vec![]),
+                kid("corner", Rect::new(380, 280, 15, 15), a((Anchor::FixedFar, 20.0), (Anchor::FixedFar, 20.0), (Anchor::FixedFar, 15.0), (Anchor::FixedFar, 15.0)), vec![]),
+            ],
+        )
+    }
+
+    fn rects(c: &Ctrl, out: &mut Vec<(String, Rect)>) {
+        for k in &c.children {
+            out.push((k.name.clone(), k.rect));
+            rects(k, out);
+        }
+    }
+
+    /// Resized through any sizes (squeezed to nothing, shrunk and grown
+    /// step by step), the layout equals one resized there at once.
+    #[test]
+    fn anchoring_does_not_depend_on_the_resize_path() {
+        for (w, h) in [(400, 300), (520, 410), (300, 220), (1200, 900)] {
+            let mut direct = panel();
+            direct.set_rect(Rect::new(0, 0, w, h));
+            let mut want = Vec::new();
+            rects(&direct, &mut want);
+            for path in [vec![(0, 0)], vec![(1, 1), (90, 40)], (0..40).map(|k| (400 - k * 7, 300 - k * 5)).collect::<Vec<_>>(), vec![(2000, 1500), (60, 50), (700, 500)]] {
+                let mut c = panel();
+                for (pw, ph) in path.iter().copied().chain([(w, h)]) {
+                    c.set_rect(Rect::new(0, 0, pw, ph));
+                }
+                let mut got = Vec::new();
+                rects(&c, &mut got);
+                assert_eq!(got, want, "{w}x{h} after {path:?}");
+            }
+        }
+    }
+
+    /// A control code moved is anchored from where it was put.
+    #[test]
+    fn code_placed_controls_anchor_from_their_new_rect() {
+        let mut c = panel();
+        c.set_rect(Rect::new(0, 0, 500, 300));
+        c.children[2].rect = Rect::new(200, 12, 100, 24);
+        c.set_rect(Rect::new(0, 0, 600, 400));
+        assert_eq!(c.children[2].rect, Rect::new(250, 12, 100, 24));
     }
 }
