@@ -140,9 +140,11 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             return;
         }
         let Ok(mut buf) = surface.buffer_mut() else { return };
-        for (d, s) in buf.iter_mut().zip(pm.pixels()) {
-            // Opaque backdrop, so premultiplied == straight.
-            *d = (s.red() as u32) << 16 | (s.green() as u32) << 8 | s.blue() as u32;
+        for (d, s) in buf.iter_mut().zip(pm.data().as_chunks::<4>().0) {
+            // Opaque backdrop, so premultiplied == straight: RGBA bytes to
+            // 0RGB (a form the compiler vectorizes).
+            let v = u32::from_le_bytes(*s);
+            *d = (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
         }
         let _ = buf.present();
         self.physical = (w, h);
