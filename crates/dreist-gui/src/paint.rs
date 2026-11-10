@@ -263,16 +263,49 @@ pub struct Painter<'a> {
     pub dash: Option<(f32, f32)>,
     /// A recording painter ([`Painter::recording`]) hashes what it is
     /// asked to draw instead of drawing it.
-    record: Option<std::collections::hash_map::DefaultHasher>,
+    record: Option<crate::ctrl::FxHasher>,
 }
 
-/// Feeds `Debug` output into a hasher (no allocation).
-struct HashWrite<'h>(&'h mut std::collections::hash_map::DefaultHasher);
+/// The arguments of a recorded drawing call ([`Painter::record`]).
+pub struct Key<'h>(&'h mut crate::ctrl::FxHasher);
 
-impl std::fmt::Write for HashWrite<'_> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        std::hash::Hasher::write(self.0, s.as_bytes());
-        Ok(())
+impl Key<'_> {
+    pub fn u(&mut self, v: u64) -> &mut Self {
+        self.0.mix(v);
+        self
+    }
+    pub fn f(&mut self, v: f32) -> &mut Self {
+        self.u(v.to_bits() as u64)
+    }
+    pub fn s(&mut self, v: &str) -> &mut Self {
+        self.u(v.len() as u64);
+        std::hash::Hasher::write(self.0, v.as_bytes());
+        self
+    }
+    pub fn c(&mut self, c: Colour) -> &mut Self {
+        self.u(u32::from_le_bytes([c.r, c.g, c.b, c.a]) as u64)
+    }
+    pub fn r(&mut self, r: RectF) -> &mut Self {
+        self.f(r.x).f(r.y).f(r.w).f(r.h)
+    }
+    pub fn path(&mut self, p: &tiny_skia::Path) -> &mut Self {
+        self.u(p.len() as u64);
+        for pt in p.points() {
+            self.f(pt.x).f(pt.y);
+        }
+        for v in p.verbs() {
+            self.u(*v as u64);
+        }
+        self
+    }
+    pub fn font(&mut self, f: &FontSpec) -> &mut Self {
+        self.s(&f.family).f(f.size).u(f.bold as u64)
+    }
+    pub fn align(&mut self, h: HAlign, v: VAlign) -> &mut Self {
+        self.u(h as u64).u(v as u64)
+    }
+    pub fn fx(&mut self, fx: TextFx) -> &mut Self {
+        self.f(fx.spacing).f(fx.scale_x).f(fx.slant)
     }
 }
 
@@ -320,18 +353,17 @@ impl<'a> Painter<'a> {
         self.record.is_some()
     }
 
-    /// When recording: hash call `what` with its arguments (and the state
-    /// it is drawn in) and return true, the call drawing nothing.
-    pub fn record(&mut self, what: std::fmt::Arguments) -> bool {
-        let state = (self.tx, self.ty, self.clip, self.scale, self.dash);
+    /// When recording: hash call `tag` with its arguments (`args`) and
+    /// the state it is drawn in, and return true: the call draws nothing.
+    pub fn record(&mut self, tag: u64, args: impl FnOnce(&mut Key)) -> bool {
+        let (tx, ty, clip, scale, dash) = (self.tx, self.ty, self.clip, self.scale, self.dash);
         let Some(h) = self.record.as_mut() else { return false };
-        let _ = std::fmt::write(&mut HashWrite(h), format_args!("{what};{state:?}|"));
+        let mut k = Key(h);
+        k.u(tag).f(tx).f(ty).f(scale).u(clip.0 as u32 as u64).u(clip.1 as u32 as u64).u(clip.2 as u32 as u64).u(clip.3 as u32 as u64);
+        let (d, g) = dash.unwrap_or((-1.0, -1.0));
+        k.f(d).f(g);
+        args(&mut k);
         true
-    }
-
-    /// The points and verbs of `path`, for [`Painter::record`].
-    fn path_key(path: &tiny_skia::Path) -> impl std::fmt::Debug + '_ {
-        (path.points(), path.verbs().iter().map(|v| *v as u8).collect::<Vec<u8>>())
     }
 
     fn transform(&self) -> Transform {
@@ -406,7 +438,9 @@ impl<'a> Painter<'a> {
         if c.a == 0 || b.width() <= 0.0 || b.height() <= 0.0 {
             return;
         }
-        if self.record(format_args!("fill_path{:?}{c:?}", Self::path_key(path))) {
+        if self.record(1, |k| {
+            k.path(path).c(c);
+        }) {
             return;
         }
         let t = self.transform();
@@ -420,13 +454,15 @@ impl<'a> Painter<'a> {
         if c.a == 0 || width <= 0.0 {
             return;
         }
+        if self.record(2, |k| {
+            k.path(path).c(c).f(width);
+        }) {
+            return;
+        }
         self.stroke_path_with(path, &paint(c), width);
     }
 
     fn stroke_path_with(&mut self, path: &tiny_skia::Path, paint: &Paint, width: f32) {
-        if self.record(format_args!("stroke{:?}{:?}{width:?}", Self::path_key(path), paint.shader)) {
-            return;
-        }
         let t = self.transform();
         let dash = self.dash.filter(|(d, g)| *d > 0.0 && *g > 0.0).and_then(|(d, g)| StrokeDash::new(vec![d, g], 0.0));
         let s = Stroke { width, dash, ..Stroke::default() };
@@ -446,7 +482,12 @@ impl<'a> Painter<'a> {
         if from == g.to {
             return self.fill_path(path, from);
         }
-        if self.record(format_args!("fill_gradient{:?}{from:?}{g:?}", Self::path_key(path))) {
+        if self.record(4, |k| {
+            k.path(path).c(from).c(g.to).u(g.horizontal as u64);
+            if let Some(r) = g.radial {
+                k.f(r.cx).f(r.cy).f(r.r).f(r.r0);
+            }
+        }) {
             return;
         }
         let stops = [(0.0, from), (1.0, g.to)];
@@ -482,6 +523,14 @@ impl<'a> Painter<'a> {
         if width <= 0.0 || b.height() <= 0.0 {
             return;
         }
+        if self.record(3, |k| {
+            k.path(path).f(width);
+            for (o, c) in stops {
+                k.f(*o).c(*c);
+            }
+        }) {
+            return;
+        }
         self.stroke_path_with(path, &gradient_paint((0.0, b.top()), (0.0, b.bottom()), stops), width);
     }
 
@@ -495,7 +544,9 @@ impl<'a> Painter<'a> {
         if amount <= 0.0 || b.width() <= 0.0 || b.height() <= 0.0 {
             return;
         }
-        if self.record(format_args!("noise{:?}{amount:?}{streak:?}{seed}", Self::path_key(path))) {
+        if self.record(5, |k| {
+            k.path(path).f(amount).f(streak).u(seed as u64);
+        }) {
             return;
         }
         let s = self.scale;
@@ -550,7 +601,9 @@ impl<'a> Painter<'a> {
         if s.is_empty() || c.a == 0 || r.w <= 0.0 || r.h <= 0.0 || radius <= 0.0 {
             return;
         }
-        if self.record(format_args!("glow{r:?}{s:?}{c:?}{font:?}{h:?}{v:?}{fx:?}{radius:?}{strength:?}")) {
+        if self.record(6, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).fx(fx).f(radius).f(strength);
+        }) {
             return;
         }
         let sc = self.scale;
@@ -579,7 +632,9 @@ impl<'a> Painter<'a> {
         if c.a == 0 || r.w <= 0.0 || r.h <= 0.0 {
             return;
         }
-        if self.record(format_args!("fill_rect{r:?}{c:?}")) {
+        if self.record(7, |k| {
+            k.r(r).c(c);
+        }) {
             return;
         }
         let s = self.scale;
@@ -695,7 +750,9 @@ impl<'a> Painter<'a> {
     /// rect whose left edge sits on (`x`, `bottom`) and runs up.
     #[allow(clippy::too_many_arguments)]
     pub fn text_up(&mut self, x: f32, bottom: f32, len: f32, thick: f32, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign) {
-        if self.record(format_args!("text_up{x:?}{bottom:?}{len:?}{thick:?}{s:?}{c:?}{font:?}{h:?}{v:?}")) {
+        if self.record(8, |k| {
+            k.f(x).f(bottom).f(len).f(thick).s(s).c(c).font(font).align(h, v);
+        }) {
             return;
         }
         let sc = self.scale;
@@ -717,7 +774,9 @@ impl<'a> Painter<'a> {
     /// painter hashes the image by its pixels' address and size (images
     /// are expected to stay put while shown, e.g. in a cache).
     pub fn image(&mut self, img: &Pixmap, r: RectF) {
-        if self.record(format_args!("image{:?}{}x{}{r:?}", img.data().as_ptr(), img.width(), img.height())) {
+        if self.record(9, |k| {
+            k.u(img.data().as_ptr() as u64).u(img.width() as u64).u(img.height() as u64).r(r);
+        }) {
             return;
         }
         let s = self.scale;
@@ -753,7 +812,9 @@ impl<'a> Painter<'a> {
         if s.is_empty() || c.a == 0 || r.h <= 0.0 {
             return;
         }
-        if self.record(format_args!("text_fx{r:?}{s:?}{c:?}{font:?}{h:?}{v:?}{fx:?}")) {
+        if self.record(10, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).fx(fx);
+        }) {
             return;
         }
         let sc = self.scale;
@@ -794,7 +855,9 @@ impl<'a> Painter<'a> {
         if s.is_empty() || c.a == 0 {
             return;
         }
-        if self.record(format_args!("text{r:?}{s:?}{c:?}{font:?}{h:?}{v:?}{spacing:?}")) {
+        if self.record(11, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).f(spacing);
+        }) {
             return;
         }
         let scale = self.scale;

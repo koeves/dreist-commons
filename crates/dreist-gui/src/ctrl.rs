@@ -159,7 +159,7 @@ impl FromIterator<(String, String)> for Attrs {
 
 /// A cheap word-at-a-time hasher (FxHash mixing) for [`Ctrl::draw_hash`]:
 /// short fields, run over the whole tree on every sync.
-struct FxHasher(u64);
+pub(crate) struct FxHasher(u64);
 
 impl Default for FxHasher {
     fn default() -> FxHasher {
@@ -168,7 +168,7 @@ impl Default for FxHasher {
 }
 
 impl FxHasher {
-    fn mix(&mut self, w: u64) {
+    pub(crate) fn mix(&mut self, w: u64) {
         self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x517c_c1b7_2722_0a95);
     }
 }

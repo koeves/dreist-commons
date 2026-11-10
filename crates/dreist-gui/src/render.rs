@@ -238,7 +238,9 @@ impl<'s> Renderer<'s> {
 
     /// [re:527038]: draw `c` into a layer, composite it.
     fn draw_alpha(&self, p: &mut Painter, c: &Ctrl, alpha: f32) {
-        if p.record(format_args!("layer{alpha:?}")) {
+        if p.record(12, |k| {
+            k.f(alpha);
+        }) {
             self.in_layer.set(self.in_layer.get() + 1);
             self.draw_enabled(p, c);
             self.in_layer.set(self.in_layer.get() - 1);
