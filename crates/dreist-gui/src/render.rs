@@ -192,7 +192,7 @@ impl<'s> Renderer<'s> {
         self.in_layer.set(self.in_layer.get() - 1);
         let paint = tiny_skia::PixmapPaint { opacity: alpha.clamp(0.0, 1.0), ..Default::default() };
         let m = if p.need_mask(((ax * s).floor(), (ay * s).floor(), lw as f32, lh as f32)) { p.mask.as_ref() } else { None };
-        p.pm.draw_pixmap((ax * s).floor() as i32, (ay * s).floor() as i32, layer.as_ref(), &paint, tiny_skia::Transform::identity(), m);
+        crate::paint::blit(p.pm, (ax * s).floor() as i32, (ay * s).floor() as i32, layer.as_ref(), &paint, m);
     }
 
     fn draw_enabled(&self, p: &mut Painter, c: &Ctrl) {

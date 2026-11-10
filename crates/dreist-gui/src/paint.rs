@@ -106,6 +106,28 @@ fn unit(seed: u32, a: u32, b: u32) -> f32 {
     (hash3(seed, a, b) & 0xFFFF) as f32 / 32767.5 - 1.0
 }
 
+/// Draw `src` with its top left at device pixel (`x`, `y`) of `pm`. A
+/// source starting left of or above the pixmap is cut there first: drawn
+/// across that edge, it would also cover the column (or row) after it.
+pub fn blit(pm: &mut Pixmap, x: i32, y: i32, src: tiny_skia::PixmapRef, paint: &tiny_skia::PixmapPaint, mask: Option<&Mask>) {
+    if x >= 0 && y >= 0 {
+        pm.draw_pixmap(x, y, src, paint, Transform::identity(), mask);
+        return;
+    }
+    let (cx, cy) = ((-x).max(0) as u32, (-y).max(0) as u32);
+    if cx >= src.width() || cy >= src.height() {
+        return;
+    }
+    let (w, h) = (src.width() - cx, src.height() - cy);
+    let Some(mut part) = Pixmap::new(w, h) else { return };
+    let (sw, w4) = (src.width() as usize * 4, w as usize * 4);
+    for row in 0..h as usize {
+        let s0 = (cy as usize + row) * sw + cx as usize * 4;
+        part.data_mut()[row * w4..(row + 1) * w4].copy_from_slice(&src.data()[s0..s0 + w4]);
+    }
+    pm.draw_pixmap(x.max(0), y.max(0), part.as_ref(), paint, Transform::identity(), mask);
+}
+
 /// Box-blur premultiplied RGBA `data` (`w` x `h`) by `r` px, three passes
 /// each way (close to a gaussian).
 fn box_blur(data: &mut [u8], w: usize, h: usize, r: usize) {
@@ -484,7 +506,7 @@ impl<'a> Painter<'a> {
         let ty = ((r.y - pad + self.ty) * sc).round();
         let b = (tx, ty, pw as f32, ph as f32);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
-        self.pm.draw_pixmap(0, 0, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::from_translate(tx, ty), m);
+        blit(self.pm, tx as i32, ty as i32, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), m);
     }
 
     pub fn fill_rect(&mut self, r: RectF, c: Colour) {
@@ -812,6 +834,25 @@ mod mask_tests {
                     }
                 }
             }
+        }
+    }
+
+    /// A layer drawn across the pixmap's left or top edge covers only its
+    /// own pixels, as anywhere else.
+    #[test]
+    fn layers_across_the_edge_cover_only_themselves() {
+        let mut layer = Pixmap::new(31, 28).unwrap();
+        layer.fill(tiny_skia::Color::from_rgba8(200, 100, 50, 255));
+        let paint = tiny_skia::PixmapPaint { opacity: 0.7, ..Default::default() };
+        for (x, y) in [(-16, 5), (5, -9), (-16, -9), (4, 3)] {
+            let mut pm = Pixmap::new(60, 50).unwrap();
+            pm.fill(tiny_skia::Color::from_rgba8(10, 10, 10, 255));
+            blit(&mut pm, x, y, layer.as_ref(), &paint, None);
+            let (r, b) = (x + 31, y + 28);
+            let inside = pm.pixel((r - 1) as u32, (b - 1) as u32).unwrap();
+            assert_ne!(inside.red(), 10, "({x}, {y}) inside");
+            assert_eq!(pm.pixel(r as u32, (b - 1) as u32).unwrap().red(), 10, "({x}, {y}) right of it");
+            assert_eq!(pm.pixel((r - 1) as u32, b as u32).unwrap().red(), 10, "({x}, {y}) below it");
         }
     }
 }
