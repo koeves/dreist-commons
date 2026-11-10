@@ -161,11 +161,14 @@ pub fn render_full(
     let w = ((root.rect.w.max(1)) as f32 * scale).ceil() as u32;
     let h = ((root.rect.h.max(1)) as f32 * scale).ceil() as u32;
     let mut pm = tiny_skia::Pixmap::new(w, h).expect("pixmap");
-    render_full_into(skin, fonts, root, scale, custom, menu, tip, custom_drawn, &mut pm);
+    render_full_into(skin, fonts, root, scale, custom, menu, tip, custom_drawn, None, &mut pm);
     pm
 }
 
-/// [`render_full`] into an existing pixmap of the window's size.
+/// [`render_full`] into an existing pixmap of the window's size; with
+/// `custom_paths`, the custom-drawn controls outside layers are listed
+/// there by path instead of in `custom_drawn` (see
+/// [`render::replay_custom`]).
 #[allow(clippy::too_many_arguments)]
 pub fn render_full_into(
     skin: &Skin,
@@ -176,6 +179,7 @@ pub fn render_full_into(
     menu: Option<&menu::Menu>,
     tip: Option<&tooltip::Tip>,
     custom_drawn: Option<&std::cell::RefCell<Vec<ctrl::Rect>>>,
+    custom_paths: Option<&std::cell::RefCell<Vec<Vec<usize>>>>,
     pm: &mut tiny_skia::Pixmap,
 ) {
     // The window backdrop ([re:8c39a3] fill) behind transparent panels.
@@ -187,6 +191,7 @@ pub fn render_full_into(
     let mut r = render::Renderer::new(&skin.styles);
     r.custom = custom;
     r.custom_drawn = custom_drawn;
+    r.custom_paths = custom_paths;
     r.draw(&mut p, root);
     p.tx = 0.0;
     p.ty = 0.0;

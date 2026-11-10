@@ -29,11 +29,64 @@ pub struct Renderer<'s> {
     /// Collects where custom drawing happened (painter coordinates), so
     /// the app can repaint those areas when its model changes.
     pub custom_drawn: Option<&'s std::cell::RefCell<Vec<crate::ctrl::Rect>>>,
+    /// With `custom_drawn`: the paths (from the drawn root) of the
+    /// custom-drawn controls outside layers, whose drawing
+    /// [`replay_custom`] can fingerprint again later.
+    pub custom_paths: Option<&'s std::cell::RefCell<Vec<Vec<usize>>>>,
+    /// The path of the control being drawn.
+    path: std::cell::RefCell<Vec<usize>>,
     /// Inside a translucent layer (painter coordinates are the layer's).
     in_layer: std::cell::Cell<u32>,
     /// The control whose children are being drawn is on (see
     /// `colParentOnFill`).
     parent_on: std::cell::Cell<bool>,
+}
+
+/// Fingerprint the custom drawing of the control at `path` (from `root`)
+/// as a full frame at `scale` draws it: `custom`'s draw and draw-over calls
+/// run on a recording painter (with the translation, clip and parent state
+/// the frame gives the control), not on pixels. `None` when the control is
+/// gone or hidden, or is no longer custom-drawn.
+pub fn replay_custom(styles: &StyleSheet, fonts: &mut crate::text::Fonts, root: &Ctrl, scale: f32, custom: &dyn CustomDraw, path: &[usize]) -> Option<u64> {
+    let (w, h) = (root.rect.w, root.rect.h);
+    let mut clip = (0, 0, w, h);
+    let (mut x, mut y) = (-root.rect.x, -root.rect.y);
+    let mut c = root;
+    let mut parent_on = false;
+    let cut = |clip: &mut (i32, i32, i32, i32), x: i32, y: i32, c: &Ctrl| {
+        let (nx, ny) = (x.max(clip.0), y.max(clip.1));
+        let (nr, nb) = ((x + c.rect.w).min(clip.0 + clip.2), (y + c.rect.h).min(clip.1 + clip.3));
+        *clip = (nx, ny, (nr - nx).max(0), (nb - ny).max(0));
+    };
+    x += c.rect.x;
+    y += c.rect.y;
+    if !c.visible {
+        return None;
+    }
+    cut(&mut clip, x, y, c);
+    for &i in path {
+        parent_on = c.on;
+        c = c.children.get(i)?;
+        if !c.visible {
+            return None;
+        }
+        x += c.rect.x;
+        y += c.rect.y;
+        cut(&mut clip, x, y, c);
+    }
+    let mut pm = tiny_skia::Pixmap::new(1, 1)?;
+    let mut p = Painter::recording(&mut pm, fonts, scale);
+    p.tx = x as f32;
+    p.ty = y as f32;
+    p.clip = clip;
+    let mut r = Renderer::new(styles);
+    r.custom = Some(custom);
+    r.parent_on.set(parent_on);
+    if !custom.draw(&r, &mut p, c) {
+        return None;
+    }
+    custom.draw_over(&r, &mut p, c);
+    p.finish()
 }
 
 fn std_col(name: &str) -> Colour {
@@ -117,7 +170,7 @@ enum Handle {
 
 impl<'s> Renderer<'s> {
     pub fn new(styles: &'s StyleSheet) -> Renderer<'s> {
-        Renderer { styles, custom: None, custom_drawn: None, in_layer: std::cell::Cell::new(0), parent_on: std::cell::Cell::new(false) }
+        Renderer { styles, custom: None, custom_drawn: None, custom_paths: None, path: Default::default(), in_layer: std::cell::Cell::new(0), parent_on: std::cell::Cell::new(false) }
     }
 
     pub fn style<'c>(&self, c: &'c Ctrl) -> &'c str {
@@ -172,8 +225,25 @@ impl<'s> Renderer<'s> {
         self.draw_enabled(p, c);
     }
 
+    /// Draw child `ch` of `c`, its path kept for `custom_paths`.
+    fn draw_child(&self, p: &mut Painter, c: &Ctrl, ch: &Ctrl) {
+        if self.custom_paths.is_none() {
+            return self.draw(p, ch);
+        }
+        let i = (ch as *const Ctrl as usize - c.children.as_ptr() as usize) / std::mem::size_of::<Ctrl>();
+        self.path.borrow_mut().push(i);
+        self.draw(p, ch);
+        self.path.borrow_mut().pop();
+    }
+
     /// [re:527038]: draw `c` into a layer, composite it.
     fn draw_alpha(&self, p: &mut Painter, c: &Ctrl, alpha: f32) {
+        if p.record(format_args!("layer{alpha:?}")) {
+            self.in_layer.set(self.in_layer.get() + 1);
+            self.draw_enabled(p, c);
+            self.in_layer.set(self.in_layer.get() - 1);
+            return;
+        }
         let s = p.scale;
         let (ax, ay) = (p.tx + c.rect.x as f32, p.ty + c.rect.y as f32);
         let (lw, lh) = (((c.rect.w as f32) * s).ceil() as u32, ((c.rect.h as f32) * s).ceil() as u32);
@@ -208,7 +278,10 @@ impl<'s> Renderer<'s> {
                 self.logo_meter(p, c);
             } else if custom.is_some_and(|cd| cd.draw(self, p, c)) {
                 if let Some(d) = self.custom_drawn.filter(|_| self.in_layer.get() == 0) {
-                    d.borrow_mut().push(crate::ctrl::Rect::new(abs_x, abs_y, c.rect.w, c.rect.h));
+                    match self.custom_paths {
+                        Some(paths) => paths.borrow_mut().push(self.path.borrow().clone()),
+                        None => d.borrow_mut().push(crate::ctrl::Rect::new(abs_x, abs_y, c.rect.w, c.rect.h)),
+                    }
                 }
             } else {
                 self.draw_self(p, c);
@@ -229,17 +302,17 @@ impl<'s> Renderer<'s> {
                 let mut order: Vec<&Ctrl> = c.children.iter().filter(|k| k.class != "CtrlLabel").collect();
                 order.sort_by_key(|k| k.zorder);
                 for ch in order {
-                    self.draw(p, ch);
+                    self.draw_child(p, c, ch);
                 }
             } else if c.children.windows(2).all(|w| w[0].zorder <= w[1].zorder) {
                 for ch in &c.children {
-                    self.draw(p, ch);
+                    self.draw_child(p, c, ch);
                 }
             } else {
                 let mut order: Vec<&Ctrl> = c.children.iter().collect();
                 order.sort_by_key(|k| k.zorder);
                 for ch in order {
-                    self.draw(p, ch);
+                    self.draw_child(p, c, ch);
                 }
             }
             self.parent_on.set(parent_on);

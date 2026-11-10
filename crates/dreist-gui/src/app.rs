@@ -127,6 +127,10 @@ pub struct App {
     frame: Option<(f32, tiny_skia::Pixmap)>,
     /// Where the last full frame's custom drawing went (root coordinates).
     custom_rects: Vec<crate::ctrl::Rect>,
+    /// The custom-drawn controls of the last full frame (paths) with the
+    /// fingerprint of their drawing as the frame shows it
+    /// ([`crate::render::replay_custom`]; `None`: unknown).
+    custom_marks: Vec<(Vec<usize>, Option<u64>)>,
     /// Controls in the last [`App::marks`] (its vector's size next time).
     marks_len: std::cell::Cell<usize>,
     hover: Option<Vec<usize>>,
@@ -222,6 +226,7 @@ impl App {
             damage: Vec::new(),
             frame: None,
             custom_rects: Vec::new(),
+            custom_marks: Vec::new(),
             marks_len: std::cell::Cell::new(0),
             hover: None,
             pressed: None,
@@ -1404,10 +1409,44 @@ impl App {
     /// which draw from the application's model. A changed tree shape
     /// repaints everything.
     pub fn invalidate_changes(&mut self, before: &Marks) {
-        if self.invalidate_tree_changes(before) {
-            for r in self.custom_rects.clone() {
+        self.invalidate_changes_with(before, None);
+    }
+
+    /// [`App::invalidate_changes`], the custom-drawn controls repainted
+    /// only when `custom` (the drawer frames are drawn with) now draws them
+    /// differently from what the frame shows.
+    pub fn invalidate_changes_with(&mut self, before: &Marks, custom: Option<&dyn crate::render::CustomDraw>) {
+        if !self.invalidate_tree_changes(before) {
+            return;
+        }
+        for r in self.custom_rects.clone() {
+            self.invalidate_rect(r);
+        }
+        let scale = self.frame.as_ref().map(|(s, _)| *s);
+        for i in 0..self.custom_marks.len() {
+            let changed = match (custom, scale, self.custom_marks[i].1) {
+                (Some(cd), Some(s), Some(k)) => crate::render::replay_custom(&self.skin.styles, &mut self.fonts, &self.root, s, cd, &self.custom_marks[i].0) != Some(k),
+                _ => true,
+            };
+            if changed {
+                let r = self.abs_rect(&self.custom_marks[i].0.clone());
                 self.invalidate_rect(r);
             }
+        }
+    }
+
+    /// Fingerprint again the custom-drawn controls a repaint of `rects`
+    /// (all: `None`) drew, as the frame now shows them.
+    fn refresh_custom_marks(&mut self, scale: f32, custom: Option<&dyn crate::render::CustomDraw>, rects: Option<&[crate::ctrl::Rect]>) {
+        for i in 0..self.custom_marks.len() {
+            let path = self.custom_marks[i].0.clone();
+            if rects.is_some_and(|rs| {
+                let a = self.abs_rect(&path);
+                !rs.iter().any(|r| r.intersects(&a))
+            }) {
+                continue;
+            }
+            self.custom_marks[i].1 = custom.and_then(|cd| crate::render::replay_custom(&self.skin.styles, &mut self.fonts, &self.root, scale, cd, &path));
         }
     }
 
@@ -1453,21 +1492,25 @@ impl App {
             let r = menu_damage_rect(m);
             crate::device_rect(&self.root, scale, r).map(|d| (r, d))
         });
+        // Where a partial repaint drew.
+        let mut repainted = Vec::new();
         if self.dirty || !reusable {
             let drawn = std::cell::RefCell::new(Vec::new());
+            let paths = std::cell::RefCell::new(Vec::new());
             let tip = self.tooltip.as_ref().filter(|t| t.visible());
             // The menu is drawn after the pixels beneath it are kept.
             let menu = if menu_at.is_some() { None } else { self.menu.as_ref() };
             // The last frame's pixmap is redrawn when its size still fits.
-            match self.frame.as_mut().filter(|_| reusable) {
-                Some((_, pm)) => crate::render_full_into(&self.skin, &mut self.fonts, &self.root, scale, custom, menu, tip, Some(&drawn), pm),
-                None => {
-                    let pm = crate::render_full(&self.skin, &mut self.fonts, &self.root, scale, custom, menu, tip, Some(&drawn));
-                    self.frame = Some((scale, pm));
-                }
+            if !reusable {
+                self.frame = tiny_skia::Pixmap::new(w.max(1), h.max(1)).map(|pm| (scale, pm));
+            }
+            if let Some((_, pm)) = self.frame.as_mut() {
+                crate::render_full_into(&self.skin, &mut self.fonts, &self.root, scale, custom, menu, tip, Some(&drawn), Some(&paths), pm);
             }
             let (ox, oy) = (self.root.rect.x, self.root.rect.y);
             self.custom_rects = drawn.into_inner().into_iter().map(|r| crate::ctrl::Rect::new(r.x + ox, r.y + oy, r.w, r.h)).collect();
+            self.custom_marks = paths.into_inner().into_iter().map(|p| (p, None)).collect();
+            self.refresh_custom_marks(scale, custom, None);
             self.menu_under = None;
             if let (Some((r, d)), Some(m), Some((_, pm))) = (menu_at, self.menu.as_ref(), self.frame.as_mut()) {
                 if let Some(mut under) = tiny_skia::Pixmap::new(d.2, d.3) {
@@ -1506,9 +1549,10 @@ impl App {
             // The frame already shows what is beneath a new menu: nothing
             // repaints there and no menu was drawn in that place.
             let clean = menu_at.is_some_and(|(r, _)| !damage_rects.iter().any(|d| d.intersects(&r)) && self.menu_drawn.as_ref().is_none_or(|o| menu_damage_rect(o) != r));
-            for r in damage_rects {
+            for &r in &damage_rects {
                 crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
             }
+            repainted = damage_rects;
             if let (true, Some((r, d)), Some(m)) = (menu_changed, menu_at, self.menu.as_ref()) {
                 let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == r);
                 let under = match kept {
@@ -1520,6 +1564,7 @@ impl App {
                     // The pixels beneath, drawn without the menu.
                     None => {
                         crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, None, None, pm, r);
+                        repainted.push(r);
                         tiny_skia::Pixmap::new(d.2, d.3).map(|mut u| {
                             crate::copy_device_rect(pm, &mut u, d, false);
                             u
@@ -1533,6 +1578,9 @@ impl App {
             }
         }
         self.menu_drawn = self.menu.clone();
+        if !repainted.is_empty() {
+            self.refresh_custom_marks(scale, custom, Some(&repainted));
+        }
         self.dirty = false;
         &self.frame.as_ref().expect("frame").1
     }
@@ -1725,6 +1773,61 @@ mod tests {
                 let _ = app.mouse_up(MouseButton::Left);
                 check(&mut app, "release after the menu");
             }
+        }
+    }
+
+    /// After a change, a code-drawn control repaints only when its drawer
+    /// now draws it differently; the frame stays a full render's.
+    #[test]
+    fn custom_controls_repaint_when_their_drawing_changes() {
+        struct Bars<'a>(&'a std::cell::Cell<[u8; 2]>);
+        impl crate::render::CustomDraw for Bars<'_> {
+            fn draw(&self, _r: &crate::render::Renderer, p: &mut crate::paint::Painter, c: &Ctrl) -> bool {
+                let k = if c.overload == "BarA" {
+                    0
+                } else if c.overload == "BarB" {
+                    1
+                } else {
+                    return false;
+                };
+                let v = self.0.get()[k];
+                p.fill_rect(crate::paint::RectF::new(0.0, 0.0, c.rect.w as f32, c.rect.h as f32), crate::Colour::rgba(20, 20, 20, 255));
+                p.fill_rect(crate::paint::RectF::new(2.0, 2.0, v as f32, 6.0), crate::Colour::rgba(200, 120, 40, 255));
+                true
+            }
+        }
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let bar = |o: &str, y: i32| Ctrl { class: "CtrlPanel".into(), overload: o.into(), rect: crate::ctrl::Rect::new(10, y, 100, 10), visible: true, enabled: true, ..Ctrl::default() };
+        let mut label = Ctrl { class: "CtrlPanel".into(), name: "Plain".into(), rect: crate::ctrl::Rect::new(10, 60, 40, 10), visible: true, enabled: true, ..Ctrl::default() };
+        label.set_attr("fillColour", "#204060".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 120, 80), visible: true, enabled: true, children: vec![bar("BarA", 10), bar("BarB", 30), label], ..Ctrl::default() };
+        let state = std::cell::Cell::new([30u8, 50]);
+        for scale in [1.0f32, 2.0] {
+            let mut app = App::new(skin.clone(), root.clone());
+            let d = Bars(&state);
+            let _ = app.render_frame_with(scale, Some(&d));
+            let step = |app: &mut App, s: [u8; 2], colour: &str, want: &[crate::ctrl::Rect]| {
+                let before = app.marks();
+                state.set(s);
+                app.ctrl_mut(&[2]).unwrap().set_attr("fillColour", colour.into());
+                app.invalidate_changes_with(&before, Some(&d));
+                let mut got = app.pending_damage().to_vec();
+                got.sort_by_key(|r| (r.y, r.x));
+                assert_eq!(got, want, "scale {scale}: {s:?}");
+                let partial = app.render_frame_with(scale, Some(&d)).clone();
+                let full = crate::render_full(&app.skin, &mut app.fonts, &app.root, scale, Some(&d), None, None, None);
+                assert!(partial.data() == full.data(), "scale {scale}: {s:?}");
+            };
+            let (a, b, plain) = (crate::ctrl::Rect::new(10, 10, 100, 10), crate::ctrl::Rect::new(10, 30, 100, 10), crate::ctrl::Rect::new(10, 60, 40, 10));
+            // Nothing changed: nothing repaints.
+            step(&mut app, [30, 50], "#204060", &[]);
+            // One bar's state: that bar.
+            step(&mut app, [30, 70], "#204060", &[b]);
+            // The other bar and a plain control.
+            step(&mut app, [10, 70], "#406080", &[a, plain, plain]);
+            // Back to an earlier state: still repainted.
+            step(&mut app, [30, 50], "#406080", &[a, b]);
+            state.set([30, 50]);
         }
     }
 
