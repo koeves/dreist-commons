@@ -7,7 +7,7 @@ description = "VCtrl-compatible GUI toolkit drawing the skins (tiny-skia)"
 
 [dependencies]
 dreist-formats = { path = "../dreist-formats" }
-tiny-skia = "0.11"
+tiny-skia = "0.12"
 fontdue = "0.9"
 baseview = { git = "https://github.com/RustAudio/baseview.git", rev = "579130ecb4f9f315ae52190af42f0ea46aeaa4a2", optional = true, features = ["opengl"] }
 softbuffer = { version = "0.4", optional = true, default-features = false }
