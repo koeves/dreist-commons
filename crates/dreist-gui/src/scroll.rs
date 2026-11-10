@@ -155,7 +155,11 @@ fn shift(c: &mut Ctrl, dx: i32, dy: i32) {
     for k in c.children.iter_mut().filter(|k| !is_bar(k)) {
         k.rect.x += dx;
         k.rect.y += dy;
+        // The anchors' basis moves with the content, so a later resize
+        // keeps the offset.
         if let Some(a) = k.anchored.as_mut() {
+            a.base.x += dx;
+            a.base.y += dy;
             a.placed = k.rect;
         }
     }
@@ -410,6 +414,31 @@ mod tests {
         place(&mut c);
         assert_eq!(offset(&c), (0, 50));
         assert_eq!(c.children.iter().filter(|k| !is_bar(k)).map(|k| k.rect.y).collect::<Vec<_>>(), vec![-50, 50]);
+    }
+
+    #[test]
+    fn anchored_content_keeps_the_offset_through_resizes() {
+        use crate::ctrl::Anchor;
+        let mut parent = Ctrl { rect: Rect::new(0, 0, 400, 300), visible: true, ..Ctrl::default() };
+        let mut c = container("v", 400, 300, &[]);
+        c.anchors = [(Anchor::FixedNear, 0.0), (Anchor::FixedNear, 0.0), (Anchor::FixedNear, 0.0), (Anchor::FixedNear, 0.0)];
+        for i in 0..6 {
+            let mut k = Ctrl { rect: Rect::new(0, i * 100, 388, 98), visible: true, ..Ctrl::default() };
+            k.anchors[2] = (Anchor::FixedNear, 0.0);
+            c.children.push(k);
+        }
+        place(&mut c);
+        scroll_to(&mut c, 0, 150);
+        parent.children.push(c);
+        for (w, h) in [(500, 400), (300, 250), (450, 350)] {
+            parent.set_rect(Rect::new(0, 0, w, h));
+            let c = &parent.children[0];
+            let (_, sy) = offset(c);
+            let first = c.children.iter().find(|k| !is_bar(k)).unwrap().rect;
+            assert_eq!(first.y, -sy, "{w}x{h}: the content sits at the offset");
+            assert_eq!(first.w, view(c).w, "{w}x{h}: rows span the view");
+            assert!(sy <= (content(c).1 - view(c).h).max(0), "{w}x{h}: offset clamped");
+        }
     }
 
     #[test]
