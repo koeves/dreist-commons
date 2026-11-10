@@ -84,7 +84,7 @@ fn radial_paint(cx: f32, cy: f32, rx: f32, ry: f32, stops: &[(f32, Colour)]) -> 
     let mut p = paint(first);
     if rx > 0.0 && ry > 0.0 {
         let t = Transform::from_row(rx, 0.0, 0.0, ry, cx, cy);
-        if let Some(shader) = RadialGradient::new(Point::from_xy(0.0, 0.0), Point::from_xy(0.0, 0.0), 1.0, stops, SpreadMode::Pad, t) {
+        if let Some(shader) = RadialGradient::new(Point::from_xy(0.0, 0.0), 0.0, Point::from_xy(0.0, 0.0), 1.0, stops, SpreadMode::Pad, t) {
             p.shader = shader;
         }
     }

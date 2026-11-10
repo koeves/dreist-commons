@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.2] - 2026-11-10
+
+Dependency updates (tiny-skia 0.12 with pixel-identical rendering, roxmltree, fontdue, midir 0.11
+for the vendored standalone), Dependabot and CodeQL on release tags.
+
+### Fixes
+
+- **gui:** Radial gradients for tiny-skia 0.12
+
+### Build and CI
+
+- Dependabot for cargo and GitHub Actions
+- CodeQL on release tags and by hand; read-only workflow permissions
+- **deps:** Bump actions/checkout from 4 to 7
+- **vendor:** Nih-plug standalone on midir 0.11
+
+### Other
+
+- **deps:** Bump fontdue
+- **deps:** Bump roxmltree from 0.20.0 to 0.21.2
+- **deps:** Bump tiny-skia from 0.11.4 to 0.12.0
+
 ## [0.2.1] - 2026-11-10
 
 Shared work for Dreist's UI pass. Everything new is opt-in (an app marks a container
