@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
   workflow_call:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Windows that tests open stay in the background (vendor/baseview).
