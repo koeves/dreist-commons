@@ -444,6 +444,8 @@ impl<'s> Renderer<'s> {
             "CtrlPanSlider" => self.pan_slider(p, c),
             "CtrlRangeSlider" => self.range_slider(p, c),
             "CtrlPlot" => self.plot(p, c),
+            // Opt-in: a poly plot given `curves` draws as a plot.
+            "CtrlPolyPlot" if c.attr("curves").is_some() => self.plot(p, c),
             "CtrlMeter" if self.style_class(c) == Some("CtrlMeterStyle") => self.needle_meter(p, c),
             "CtrlTableView" | "CtrlListBox" if self.native_table(c) => self.table(p, c),
             "root" => {}
@@ -1942,12 +1944,32 @@ impl<'s> Renderer<'s> {
                 .map(|(x, y)| (area.x + x * area.w, area.y + (1.0 - y) * area.h))
                 .collect()
         };
+        // Opt-in grid: 1 px vertical lines in `colGrid` at the `gridX`
+        // fractions (comma-separated) of the area's width.
+        if let (Some(xs), Some(col)) = (c.attr("gridX"), opt_colour(s, st, c, "colGrid")) {
+            for x in xs.split(',').filter_map(|v| v.trim().parse::<f32>().ok()) {
+                let x = (area.x + (x * area.w).floor()).round() + 0.5;
+                if x > area.x && x < area.x + area.w {
+                    p.line(x, area.y, x, area.y + area.h, col, 1.0);
+                }
+            }
+        }
         if let Some(curves) = c.attr("curves") {
+            // Opt-in `realCurveFillAlpha`: each curve's area down to the
+            // bottom filled in its colour at that alpha first.
+            let fill = opt_raw(s, st, c, "realCurveFillAlpha").and_then(|v| v.trim().parse::<f32>().ok());
             for curve in curves.split(';') {
                 let Some((col, pts)) = curve.split_once('|') else { continue };
                 let pts = parse(pts);
                 if pts.len() >= 2 {
-                    p.polyline(&pts, s.parse_colour(col), lw);
+                    let col = s.parse_colour(col);
+                    if let Some(a) = fill {
+                        let mut poly = pts.clone();
+                        poly.push((pts[pts.len() - 1].0, area.y + area.h));
+                        poly.push((pts[0].0, area.y + area.h));
+                        p.fill_polygon(&poly, col.with_alpha(col.a as f32 / 255.0 * a));
+                    }
+                    p.polyline(&pts, col, lw);
                 }
             }
             return;
@@ -2433,6 +2455,25 @@ mod tests {
         // Empty: nothing but the fill.
         let none = draw(&s, &ctrl("CtrlPlot", "Plot", 107, 50, &[("curves", "")]));
         assert_eq!(at(&none, 53, 25), at(&none, 53, 5));
+    }
+
+    #[test]
+    fn poly_plots_with_curves_grids_and_fills_are_opt_in() {
+        let base = [COLOURS, &[("realBorderWidth", "0")]].concat();
+        let eq = [base.as_slice(), &[("colGrid", "255, 0, 0, 255"), ("realCurveFillAlpha", "0.5")]].concat();
+        let s = sheet(&[("Plain", "CtrlStyle", &base), ("Eq", "CtrlStyle", &eq)]);
+        let at = |px: &[u8], x: usize, y: usize| px[(y * 107 + x) * 4..(y * 107 + x) * 4 + 3].to_vec();
+        // Without curves a poly plot is a plain panel, as before.
+        let bare = draw(&s, &ctrl("CtrlPolyPlot", "Eq", 107, 50, &[("gridX", "0.5")]));
+        assert_eq!(bare, draw(&s, &ctrl("CtrlPanel", "Eq", 107, 50, &[])));
+        // Curves, no grid / fill attributes: the line only.
+        let plain = draw(&s, &ctrl("CtrlPolyPlot", "Plain", 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 1,0.5"), ("gridX", "0.5")]));
+        assert!(at(&plain, 20, 25)[2] > 128);
+        assert_eq!(at(&plain, 20, 45), at(&plain, 20, 5));
+        // The grid line and the curve's fill below it.
+        let d = draw(&s, &ctrl("CtrlPolyPlot", "Eq", 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 1,0.5"), ("gridX", "0.5")]));
+        assert!(at(&d, 53, 5)[0] > 200, "grid");
+        assert_ne!(at(&d, 20, 45), at(&d, 20, 5), "filled below the curve");
     }
 
     #[test]
