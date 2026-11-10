@@ -379,18 +379,27 @@ fn read_and_play_step(
                     sidx = abs.rem_euclid(len) as u32;
                 }
             }
+            // The current step with this sub-block's graph record writes
+            // applied (v1 rule only).
+            let mut written: Option<crate::pattern::StepData> = None;
             if graph_v1 {
                 // v1 [re:c0679e]: in the current-step pass of each
                 // sub-block while recording (not the one that wrapped,
                 // which cleared the values), every held value goes into
                 // the current step; nothing is cleared here.
+                // v1 writes before it reads the step, so this step's
+                // note (shift, velocity, repeats) sees the new values.
                 if k == 0 && state.recording && !state.wrapped && state.graph_rec_dirty[t] {
+                    let mut cur = track.step(sidx).clone();
                     for l in 0..LANES {
                         let cc = state.graph_rec[t][l];
                         if cc != -1 {
-                            state.graph_writes.push((t, sidx, l, cc as f32 / 127.0));
+                            let v = cc as f32 / 127.0;
+                            state.graph_writes.push((t, sidx, l, v));
+                            cur.lanes[l] = v;
                         }
                     }
+                    written = Some(cur);
                 }
             } else if moved && state.graph_rec_dirty[t] {
                 for l in 0..LANES {
@@ -402,7 +411,7 @@ fn read_and_play_step(
                 state.graph_rec[t] = [-1; LANES];
                 state.graph_rec_dirty[t] = false;
             }
-            let step = track.step(sidx);
+            let step = written.as_ref().unwrap_or_else(|| track.step(sidx));
             let at = (step.lanes[lane::SHIFT] + step.lanes[lane::SHIFT] - 1.0) as f64 + swing * timing.swing_depth as f64 + k as f64;
             let tied_continuation = sidx > 0 && step.tied() && track.step(sidx - 1).on && !pads.one_shot[t];
             if at < end_rel && frac <= at && !tied_continuation && step.on && state.pad_suppression[t] < 1 && state.gate {
@@ -412,7 +421,7 @@ fn read_and_play_step(
                     continue;
                 }
                 let delay = ((at - frac) * samples_per_step).max(0.0);
-                start_voice(state, pattern, t, sidx as i32, samples_per_step, delay, pads, rng, out);
+                start_voice(state, pattern, t, sidx as i32, written.as_ref(), samples_per_step, delay, pads, rng, out);
                 triggers.push(t);
             }
         }
@@ -421,12 +430,25 @@ fn read_and_play_step(
 
 /// [re:927da0] for a sequenced step.
 #[allow(clippy::too_many_arguments)]
-fn start_voice(state: &EngineState, pattern: &PatternData, pad: usize, step_index: i32, samples_per_step: f64, delay: f64, pads: &PadInfo, rng: &mut Rng, out: &mut Vec<NoteRequest>) {
+/// `over`: the triggering step as the sequencer read it, when that differs
+/// from the pattern's (v1's graph record writes it first).
+fn start_voice(
+    state: &EngineState,
+    pattern: &PatternData,
+    pad: usize,
+    step_index: i32,
+    over: Option<&crate::pattern::StepData>,
+    samples_per_step: f64,
+    delay: f64,
+    pads: &PadInfo,
+    rng: &mut Rng,
+    out: &mut Vec<NoteRequest>,
+) {
     if !track_plays(pattern, pad) {
         return;
     }
     let track = &pattern.tracks[pad];
-    let step = track.step(step_index as u32);
+    let step = over.unwrap_or_else(|| track.step(step_index as u32));
     let mut rand = || rng.next_f32();
     let (velocity, repeats) = if dreist_dsp::rules::get().lanes_v1 {
         // v1 [re:3b0509]: the velocity as stored, the repeats through the
