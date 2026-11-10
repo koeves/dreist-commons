@@ -69,6 +69,11 @@ pub struct Rules {
     /// Voices in the timestretch pool (the original v1: 8 [re:70951b]; at
     /// most [`crate::voices::TIMESTRETCH_VOICES`]).
     pub timestretch_voices: usize,
+    /// The original v1's graph record: while recording, every sub-block
+    /// writes each lane's last recorded value into the track's current
+    /// step, and the values stay until the pattern wraps ([re:c0679e]);
+    /// the reference writes them once into the next step reached.
+    pub graph_record_v1: bool,
 }
 
 /// The reference behaviour.
@@ -89,6 +94,7 @@ pub const REFERENCE: Rules = Rules {
     sampler_modes_v1: false,
     sequencer_window_v1: false,
     timestretch_voices: crate::voices::TIMESTRETCH_VOICES,
+    graph_record_v1: false,
 };
 
 static RULES: OnceLock<Rules> = OnceLock::new();

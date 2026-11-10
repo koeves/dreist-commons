@@ -1526,6 +1526,7 @@ impl Dreist {
                 self.requests.clear();
                 self.triggers.clear();
                 let eng = &mut self.engines[e];
+                eng.state.recording = self.recording;
                 let pattern = eng.patterns.get(eng.state.current_pattern);
                 let pads = PadInfo { one_shot: &eng.one_shot, links: &eng.links };
                 let mut click = None;

@@ -51,6 +51,9 @@ pub struct EngineState {
     /// Queued values that reached a step this block: (track, step, lane,
     /// value), applied by the engine.
     pub graph_writes: Vec<(usize, u32, usize, f32)>,
+    /// Transport record armed (set by the engine every sub-block; read
+    /// by [`dreist_dsp::rules::Rules::graph_record_v1`]).
+    pub recording: bool,
 }
 
 pub const NO_PHASE: f64 = -999.0;
@@ -87,6 +90,7 @@ impl Default for EngineState {
             graph_rec: vec![[-1; LANES]; TRACKS],
             graph_rec_dirty: [false; TRACKS],
             graph_writes: Vec::with_capacity(64),
+            recording: false,
         }
     }
 }
@@ -330,6 +334,7 @@ fn read_and_play_step(
     let samples_per_step = spb / r;
     let frac = (wstart * r - i0 as f64) + offset * r;
     let swing_steps = timing.swing.steps.max(1);
+    let graph_v1 = dreist_dsp::rules::get().graph_record_v1;
 
     for k in -1..=1 {
         // Absolute step index (not wrapped by the pattern length) and pattern step.
@@ -374,7 +379,20 @@ fn read_and_play_step(
                     sidx = abs.rem_euclid(len) as u32;
                 }
             }
-            if moved && state.graph_rec_dirty[t] {
+            if graph_v1 {
+                // v1 [re:c0679e]: in the current-step pass of each
+                // sub-block while recording (not the one that wrapped,
+                // which cleared the values), every held value goes into
+                // the current step; nothing is cleared here.
+                if k == 0 && state.recording && !state.wrapped && state.graph_rec_dirty[t] {
+                    for l in 0..LANES {
+                        let cc = state.graph_rec[t][l];
+                        if cc != -1 {
+                            state.graph_writes.push((t, sidx, l, cc as f32 / 127.0));
+                        }
+                    }
+                }
+            } else if moved && state.graph_rec_dirty[t] {
                 for l in 0..LANES {
                     let cc = state.graph_rec[t][l];
                     if cc != -1 {
