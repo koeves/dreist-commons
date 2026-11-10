@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.2.0] - 2026-11-10
+
+Shared work for Einst's v1 look and parity pass and Dreist's video parity pass. All new
+renderer features are opt-in style attributes, so neither app changes look unless it asks.
+
+### Summary
+
+- **dreist-gui**: opt-in looks for v1's knobs, buttons, faders, scroll bars, plots and menu
+  buttons; resizing rebuilt so any resize path ends like a fresh layout (anchors, mounted
+  skins, splitters); host resizing with a minimum size (vendored nih-plug); much faster
+  repaints for menu hover, clicks and panel updates (only what changed is redrawn).
+- **dreist-dsp / dreist-engine**: analog table reads floor like the originals (a shared
+  porting bug, audible in the voice filters, the vintage path and the analog filter
+  effects); v1 rules for the sequencer window, the timestretch pool and graph record.
+
+### Features
+
+- **gui:** Popup arrow box width option
+- **gui:** Button glyphs, meter base band and range markers
+- **gui:** Opt-in scroll bar frame, key strip inset, icon panels on parent state
+- **gui:** Opt-in search box without magnifier and tick outline
+- **gui:** Opt-in transmod slider with a modulation strip
+- **gui:** Opt-in outer mod track on transmod knobs
+- **gui:** Opt-in plot background and range marker bar
+- **gui:** Opt-in looks for knobs, sliders and buttons
+- **gui:** Opt-in dial shadow under knobs
+- **rules:** V1 sequencer window and timestretch pool size
+- **rules:** V1 graph record rewrites the current step until the wrap
+- **gui:** A recording painter that fingerprints drawing calls
+- **vendor:** Nih-plug lets the host resize an editor that has a minimum size
+
+### Fixes
+
+- **gui:** Resized splitters keep the far panel and clamp
+- **gui:** Clamp a splitter's bar to its panel limits on resize
+- **gui:** Layers drawn across a pixmap's left or top edge stay in place
+- **dsp:** Analog table reads floor the index like the original
+- **engine:** V1 graph record writes reach that sub-block's note
+- **gui:** Anchored controls lay out from their basis, whatever the resize path
+- **gui:** A mounted skin keeps filling its host as the host resizes
+- **gui:** A resized splitter moves from the position last chosen
+
+### Performance
+
+- **gui:** Brushed noise only for the texels a clip shows
+- **gui:** Menu hover redraws only the menu
+- **gui:** Faster copy of the frame into the window buffer
+- **gui:** Clicks and menus repaint only what they change
+- **gui:** Code-drawn panels repaint only when their drawing changes
+- **gui:** Fingerprint drawing calls as words, not formatted text
+
+### Documentation
+
+- Rebuild both apps' VST3s after a change
+- Keep work branches local until a release
+
 ## [0.1.0] - 2026-11-06
 
 First release: the crates Dreist and Einst share, moved out of Dreist beta 1 and renamed

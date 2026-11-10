@@ -1526,6 +1526,7 @@ impl Dreist {
                 self.requests.clear();
                 self.triggers.clear();
                 let eng = &mut self.engines[e];
+                eng.state.recording = self.recording;
                 let pattern = eng.patterns.get(eng.state.current_pattern);
                 let pads = PadInfo { one_shot: &eng.one_shot, links: &eng.links };
                 let mut click = None;
@@ -2173,7 +2174,8 @@ impl Dreist {
             // [re:58d360]: timestretch layers use their own 16-voice
             // pool ([re:701ae1], stealing in [re:f48101]).
             let stretch = setup.layer[LayerParam::TimestretchActive as usize][0] >= 0.5;
-            let pool = if stretch { NORMAL_VOICES..NORMAL_VOICES + TIMESTRETCH_VOICES } else { 0..NORMAL_VOICES };
+            let ts = dreist_dsp::rules::get().timestretch_voices.min(TIMESTRETCH_VOICES);
+            let pool = if stretch { NORMAL_VOICES..NORMAL_VOICES + ts } else { 0..NORMAL_VOICES };
             let base = pool.start;
             let idx = match self.voices[pool.clone()].iter().position(|v| v.state == VoiceState::Idle) {
                 Some(i) => base + i,

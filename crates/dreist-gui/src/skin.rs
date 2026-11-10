@@ -143,6 +143,11 @@ impl Skin {
         let sub = self.load_skin(&rel)?;
         for mut c in sub.children {
             c.set_rect(crate::ctrl::Rect::new(0, 0, host.rect.w, host.rect.h));
+            // Sized to the host, and kept so as the host resizes (a
+            // splitter or a window resize), unless the skin anchors it.
+            if c.anchors.iter().all(|a| a.0 == crate::ctrl::Anchor::None) {
+                c.anchors = crate::ctrl::anchors_fill();
+            }
             host.children.push(c);
         }
         Ok(())

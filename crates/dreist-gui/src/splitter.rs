@@ -24,6 +24,12 @@
 //! - [re:9e9841]: the bar's style background,
 //!   then (thin side > 3 px) seven 4×4 dots 6 px apart, centred, in the
 //!   style's colAltBorder (default white).
+//! - Resizing ([re:1edcc1], [re:ed7bab]; flags as loaded by [re:7b5e65]): with
+//!   `optSplitterIsLocked` or `optDbClkCollapse1` the bar moves with the far
+//!   edge (panel 1 keeps its size), else it stays (panel 0 keeps its size);
+//!   then the position is clamped as above. The port moves it from the
+//!   position last chosen rather than the clamped one, so a window shrunk
+//!   and grown back gets the chosen layout back.
 //! - Opening the editor [re:468d3b] → reading the saved state [re:a605da]: a saved
 //!   position ≥ 0 is clamped and applied.
 
@@ -85,9 +91,42 @@ pub fn clamp(c: &Ctrl, p: i32) -> i32 {
     v
 }
 
+/// The position last chosen (dragged, restored, set by code) and the
+/// panel length then, kept beside the clamped position the bar has now:
+/// `(wanted, length, placed)`.
+fn wanted(c: &Ctrl) -> Option<(i32, i32, i32)> {
+    let mut it = c.attr("splitWanted")?.split(',').map(|v| v.parse::<i32>().ok());
+    Some((it.next()??, it.next()??, it.next()??))
+}
+
+fn set_wanted(c: &mut Ctrl, p: i32, len: i32, placed: i32) {
+    c.set_attr("splitWanted", format!("{p},{len},{placed}"));
+}
+
+/// The panel was resized from `old` (its rect is already the new one): the
+/// bar keeps panel 1's size when locked or `optDbClkCollapse1`, else panel
+/// 0's, clamped. It moves from the position last chosen, not from where an
+/// earlier, smaller size clamped it, so room coming back brings the chosen
+/// layout back (and any resize path ends as a single resize would).
+pub fn follow_resize(c: &mut Ctrl, old: Rect) {
+    let len = length(c);
+    let old_len = if vertical(c) { old.h } else { old.w };
+    let (p0, len0) = match wanted(c) {
+        Some((p, l, placed)) if placed == position(c) => (p, l),
+        // Never chosen, or set by code since: from here.
+        _ => (position(c), if old_len > dim(c) { old_len } else { len }),
+    };
+    let keep1 = locked(c) || c.attr_bool("optDbClkCollapse1", true);
+    let p = clamp(c, p0 + if keep1 { len - len0 } else { 0 });
+    c.set_attr("intSplitPosition", p.to_string());
+    set_wanted(c, p0, len0, p);
+}
+
 /// Move the bar to `p` (unclamped) and lay the panels out.
 pub fn set_position(c: &mut Ctrl, p: i32) {
     c.set_attr("intSplitPosition", p.to_string());
+    let len = length(c);
+    set_wanted(c, p, len, p);
     c.layout_splitter();
 }
 
@@ -149,5 +188,43 @@ mod tests {
         // total = 746 − 8 = 738.
         assert_eq!(clamp(&c, 600), 518);
         assert_eq!(clamp(&c, 700), 738);
+    }
+
+    #[test]
+    fn resizing_keeps_the_far_panel_and_clamps() {
+        // RootSkin's pad splitter (panel 1 = the pads, min 220) in a
+        // 674 px column: the bar moves up with the bottom edge, so the pads
+        // keep their size.
+        let mut c = split(&[("intMinSize0", "66"), ("intMinSize1", "220"), ("intSplitPosition", "518"), ("intSplitterDim", "8")]);
+        c.rect = Rect::new(0, 0, 300, 746);
+        let old = c.rect;
+        c.rect.h = 674;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 446);
+        // Without double-click collapse panel 0 keeps its size, clamped:
+        // the pads still get their minimum.
+        let mut c = split(&[("intMinSize1", "220"), ("intSplitPosition", "518"), ("intSplitterDim", "8"), ("optDbClkCollapse1", "false")]);
+        let old = c.rect;
+        c.rect.h = 674;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 446);
+        // Growing: panel 0 gets back the size chosen before the squeeze,
+        // then stays.
+        let old = c.rect;
+        c.rect.h = 900;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 518);
+        let old = c.rect;
+        c.rect.h = 1000;
+        follow_resize(&mut c, old);
+        assert_eq!(position(&c), 518);
+        // A position set since (a drag) is the one kept.
+        set_position(&mut c, 300);
+        let old = c.rect;
+        c.rect.h = 600;
+        follow_resize(&mut c, old);
+        c.rect.h = 1000;
+        follow_resize(&mut c, Rect::new(0, 0, 1390, 600));
+        assert_eq!(position(&c), 300);
     }
 }

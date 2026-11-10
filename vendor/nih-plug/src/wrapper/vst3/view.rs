@@ -385,8 +385,8 @@ impl<P: Vst3Plugin> IPlugView for WrapperView<P> {
     unsafe fn on_size(&self, new_size: *mut ViewRect) -> tresult {
         check_null_ptr!(new_size);
 
-        // TODO: Implement Host->Plugin resizing
-        let (unscaled_width, unscaled_height) = self.editor.lock().size();
+        let editor = self.editor.lock();
+        let (unscaled_width, unscaled_height) = editor.size();
         let scaling_factor = self.scaling_factor.load(Ordering::Relaxed);
         let (editor_width, editor_height) = (
             (unscaled_width as f32 * scaling_factor).round() as i32,
@@ -396,6 +396,16 @@ impl<P: Vst3Plugin> IPlugView for WrapperView<P> {
         let width = (*new_size).right - (*new_size).left;
         let height = (*new_size).bottom - (*new_size).top;
         if width == editor_width && height == editor_height {
+            kResultOk
+        } else if editor.min_size().is_some()
+            && width > 0
+            && height > 0
+            && editor.set_size(
+                (width as f32 / scaling_factor).round() as u32,
+                (height as f32 / scaling_factor).round() as u32,
+            )
+        {
+            // Host->Plugin resizing: the editor follows the host's view.
             kResultOk
         } else {
             kResultFalse
@@ -434,14 +444,31 @@ impl<P: Vst3Plugin> IPlugView for WrapperView<P> {
     }
 
     unsafe fn can_resize(&self) -> tresult {
-        // TODO: Implement Host->Plugin resizing
-        kResultFalse
+        if self.editor.lock().min_size().is_some() {
+            kResultOk
+        } else {
+            kResultFalse
+        }
     }
 
     unsafe fn check_size_constraint(&self, rect: *mut ViewRect) -> tresult {
         check_null_ptr!(rect);
 
-        // TODO: Implement Host->Plugin resizing
+        // Host->Plugin resizing: no smaller than the editor's minimum size.
+        if let Some((min_width, min_height)) = self.editor.lock().min_size() {
+            let scaling_factor = self.scaling_factor.load(Ordering::Relaxed);
+            let min_width = (min_width as f32 * scaling_factor).round() as i32;
+            let min_height = (min_height as f32 * scaling_factor).round() as i32;
+            let r = &mut *rect;
+            if r.right - r.left < min_width {
+                r.right = r.left + min_width;
+            }
+            if r.bottom - r.top < min_height {
+                r.bottom = r.top + min_height;
+            }
+            return kResultOk;
+        }
+
         if (*rect).right - (*rect).left > 0 && (*rect).bottom - (*rect).top > 0 {
             kResultOk
         } else {

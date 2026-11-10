@@ -106,6 +106,28 @@ fn unit(seed: u32, a: u32, b: u32) -> f32 {
     (hash3(seed, a, b) & 0xFFFF) as f32 / 32767.5 - 1.0
 }
 
+/// Draw `src` with its top left at device pixel (`x`, `y`) of `pm`. A
+/// source starting left of or above the pixmap is cut there first: drawn
+/// across that edge, it would also cover the column (or row) after it.
+pub fn blit(pm: &mut Pixmap, x: i32, y: i32, src: tiny_skia::PixmapRef, paint: &tiny_skia::PixmapPaint, mask: Option<&Mask>) {
+    if x >= 0 && y >= 0 {
+        pm.draw_pixmap(x, y, src, paint, Transform::identity(), mask);
+        return;
+    }
+    let (cx, cy) = ((-x).max(0) as u32, (-y).max(0) as u32);
+    if cx >= src.width() || cy >= src.height() {
+        return;
+    }
+    let (w, h) = (src.width() - cx, src.height() - cy);
+    let Some(mut part) = Pixmap::new(w, h) else { return };
+    let (sw, w4) = (src.width() as usize * 4, w as usize * 4);
+    for row in 0..h as usize {
+        let s0 = (cy as usize + row) * sw + cx as usize * 4;
+        part.data_mut()[row * w4..(row + 1) * w4].copy_from_slice(&src.data()[s0..s0 + w4]);
+    }
+    pm.draw_pixmap(x.max(0), y.max(0), part.as_ref(), paint, Transform::identity(), mask);
+}
+
 /// Box-blur premultiplied RGBA `data` (`w` x `h`) by `r` px, three passes
 /// each way (close to a gaussian).
 fn box_blur(data: &mut [u8], w: usize, h: usize, r: usize) {
@@ -239,6 +261,52 @@ pub struct Painter<'a> {
     pub scale: f32,
     /// Dash pattern (dash, gap) of the strokes drawn while set.
     pub dash: Option<(f32, f32)>,
+    /// A recording painter ([`Painter::recording`]) hashes what it is
+    /// asked to draw instead of drawing it.
+    record: Option<crate::ctrl::FxHasher>,
+}
+
+/// The arguments of a recorded drawing call ([`Painter::record`]).
+pub struct Key<'h>(&'h mut crate::ctrl::FxHasher);
+
+impl Key<'_> {
+    pub fn u(&mut self, v: u64) -> &mut Self {
+        self.0.mix(v);
+        self
+    }
+    pub fn f(&mut self, v: f32) -> &mut Self {
+        self.u(v.to_bits() as u64)
+    }
+    pub fn s(&mut self, v: &str) -> &mut Self {
+        self.u(v.len() as u64);
+        std::hash::Hasher::write(self.0, v.as_bytes());
+        self
+    }
+    pub fn c(&mut self, c: Colour) -> &mut Self {
+        self.u(u32::from_le_bytes([c.r, c.g, c.b, c.a]) as u64)
+    }
+    pub fn r(&mut self, r: RectF) -> &mut Self {
+        self.f(r.x).f(r.y).f(r.w).f(r.h)
+    }
+    pub fn path(&mut self, p: &tiny_skia::Path) -> &mut Self {
+        self.u(p.len() as u64);
+        for pt in p.points() {
+            self.f(pt.x).f(pt.y);
+        }
+        for v in p.verbs() {
+            self.u(*v as u64);
+        }
+        self
+    }
+    pub fn font(&mut self, f: &FontSpec) -> &mut Self {
+        self.s(&f.family).f(f.size).u(f.bold as u64)
+    }
+    pub fn align(&mut self, h: HAlign, v: VAlign) -> &mut Self {
+        self.u(h as u64).u(v as u64)
+    }
+    pub fn fx(&mut self, fx: TextFx) -> &mut Self {
+        self.f(fx.spacing).f(fx.scale_x).f(fx.slant)
+    }
 }
 
 /// Set the device pixels of the clip rectangle `(x, y, w, h)` (logical
@@ -263,7 +331,39 @@ fn set_rect(m: &mut Mask, (x, y, w, h): (i32, i32, i32, i32), scale: f32, v: u8)
 impl<'a> Painter<'a> {
     pub fn new(pm: &'a mut Pixmap, fonts: &'a mut Fonts, scale: f32) -> Painter<'a> {
         let clip = (0, 0, (pm.width() as f32 / scale) as i32, (pm.height() as f32 / scale) as i32);
-        Painter { pm, fonts, tx: 0.0, ty: 0.0, clip, mask: None, mask_clip: None, scale, dash: None }
+        Painter { pm, fonts, tx: 0.0, ty: 0.0, clip, mask: None, mask_clip: None, scale, dash: None, record: None }
+    }
+
+    /// A painter that draws nothing: every drawing call is hashed (with the
+    /// translation, clip, scale and dash it is made under), so the same
+    /// calls give the same [`Painter::finish`] and different ones,
+    /// almost surely, a different one. `pm` is not touched.
+    pub fn recording(pm: &'a mut Pixmap, fonts: &'a mut Fonts, scale: f32) -> Painter<'a> {
+        let mut p = Painter::new(pm, fonts, scale);
+        p.record = Some(Default::default());
+        p
+    }
+
+    /// The hash of a recording painter's calls so far.
+    pub fn finish(&self) -> Option<u64> {
+        self.record.as_ref().map(std::hash::Hasher::finish)
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.record.is_some()
+    }
+
+    /// When recording: hash call `tag` with its arguments (`args`) and
+    /// the state it is drawn in, and return true: the call draws nothing.
+    pub fn record(&mut self, tag: u64, args: impl FnOnce(&mut Key)) -> bool {
+        let (tx, ty, clip, scale, dash) = (self.tx, self.ty, self.clip, self.scale, self.dash);
+        let Some(h) = self.record.as_mut() else { return false };
+        let mut k = Key(h);
+        k.u(tag).f(tx).f(ty).f(scale).u(clip.0 as u32 as u64).u(clip.1 as u32 as u64).u(clip.2 as u32 as u64).u(clip.3 as u32 as u64);
+        let (d, g) = dash.unwrap_or((-1.0, -1.0));
+        k.f(d).f(g);
+        args(&mut k);
+        true
     }
 
     fn transform(&self) -> Transform {
@@ -338,14 +438,25 @@ impl<'a> Painter<'a> {
         if c.a == 0 || b.width() <= 0.0 || b.height() <= 0.0 {
             return;
         }
+        if self.record(1, |k| {
+            k.path(path).c(c);
+        }) {
+            return;
+        }
         let t = self.transform();
         let b = self.device_bounds(path, 0.0);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.fill_path(path, &paint(c), FillRule::Winding, t, m);
     }
 
     pub fn stroke_path(&mut self, path: &tiny_skia::Path, c: Colour, width: f32) {
         if c.a == 0 || width <= 0.0 {
+            return;
+        }
+        if self.record(2, |k| {
+            k.path(path).c(c).f(width);
+        }) {
             return;
         }
         self.stroke_path_with(path, &paint(c), width);
@@ -357,6 +468,7 @@ impl<'a> Painter<'a> {
         let s = Stroke { width, dash, ..Stroke::default() };
         let b = self.device_bounds(path, width / 2.0);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.stroke_path(path, paint, &s, t, m);
     }
 
@@ -369,6 +481,14 @@ impl<'a> Painter<'a> {
         }
         if from == g.to {
             return self.fill_path(path, from);
+        }
+        if self.record(4, |k| {
+            k.path(path).c(from).c(g.to).u(g.horizontal as u64);
+            if let Some(r) = g.radial {
+                k.f(r.cx).f(r.cy).f(r.r).f(r.r0);
+            }
+        }) {
+            return;
         }
         let stops = [(0.0, from), (1.0, g.to)];
         let paint = match g.radial {
@@ -384,6 +504,7 @@ impl<'a> Painter<'a> {
         let t = self.transform();
         let db = self.device_bounds(path, 0.0);
         let m = if self.need_mask(db) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.fill_path(path, &paint, FillRule::Winding, t, m);
     }
 
@@ -402,6 +523,14 @@ impl<'a> Painter<'a> {
         if width <= 0.0 || b.height() <= 0.0 {
             return;
         }
+        if self.record(3, |k| {
+            k.path(path).f(width);
+            for (o, c) in stops {
+                k.f(*o).c(*c);
+            }
+        }) {
+            return;
+        }
         self.stroke_path_with(path, &gradient_paint((0.0, b.top()), (0.0, b.bottom()), stops), width);
     }
 
@@ -415,14 +544,32 @@ impl<'a> Painter<'a> {
         if amount <= 0.0 || b.width() <= 0.0 || b.height() <= 0.0 {
             return;
         }
+        if self.record(5, |k| {
+            k.path(path).f(amount).f(streak).u(seed as u64);
+        }) {
+            return;
+        }
         let s = self.scale;
         let (w, h) = ((b.right() * s).ceil().max(1.0) as u32, (b.bottom() * s).ceil().max(1.0) as u32);
-        let Some(mut tex) = Pixmap::new(w, h) else { return };
+        // Only the texels that can land in the clip (and the pixmap) are
+        // made: a small repaint over a large panel stays cheap. Texel
+        // (i, j) lies at device (i + tx·s, j + ty·s) either way.
+        let (cx, cy, cw, ch) = self.clip;
+        let (ox, oy) = (self.tx * s, self.ty * s);
+        let lo = |c: i32, o: f32| ((c as f32 * s - o).floor() - 1.0).max(0.0) as u32;
+        let hi = |c: i32, o: f32, lim: u32| ((c as f32 * s).min(lim as f32) - o).ceil().max(0.0) as u32 + 1;
+        let (x0, y0) = (lo(cx.max(0), ox), lo(cy.max(0), oy));
+        let (x1, y1) = (hi(cx + cw, ox, self.pm.width()).min(w), hi(cy + ch, oy, self.pm.height()).min(h));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let Some(mut tex) = Pixmap::new(x1 - x0, y1 - y0) else { return };
+        let tw = x1 - x0;
         let len = (streak * s).max(1.0);
         let data = tex.data_mut();
-        for y in 0..h {
+        for y in y0..y1 {
             let row = unit(seed, y, 0x0F0F);
-            for x in 0..w {
+            for x in x0..x1 {
                 let f = x as f32 / len;
                 let k = f.floor();
                 let t = f - k;
@@ -432,15 +579,17 @@ impl<'a> Painter<'a> {
                 let n = (0.45 * row + 0.55 * (a0 + (a1 - a0) * t)).clamp(-1.0, 1.0);
                 let a = (n.abs() * amount * 255.0).round() as u8;
                 let v = if n > 0.0 { a } else { 0 };
-                let i = ((y * w + x) * 4) as usize;
+                let i = (((y - y0) * tw + x - x0) * 4) as usize;
                 data[i..i + 4].copy_from_slice(&[v, v, v, a]);
             }
         }
-        let shader = tiny_skia::Pattern::new(tex.as_ref(), SpreadMode::Pad, tiny_skia::FilterQuality::Nearest, 1.0, Transform::from_scale(1.0 / s, 1.0 / s));
+        let place = Transform::from_translate(x0 as f32, y0 as f32).post_scale(1.0 / s, 1.0 / s);
+        let shader = tiny_skia::Pattern::new(tex.as_ref(), SpreadMode::Pad, tiny_skia::FilterQuality::Nearest, 1.0, place);
         let paint = Paint { anti_alias: true, shader, ..Default::default() };
         let t = self.transform();
         let db = self.device_bounds(path, 0.0);
         let m = if self.need_mask(db) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.fill_path(path, &paint, FillRule::Winding, t, m);
     }
 
@@ -450,6 +599,11 @@ impl<'a> Painter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn text_glow(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign, fx: TextFx, radius: f32, strength: f32) {
         if s.is_empty() || c.a == 0 || r.w <= 0.0 || r.h <= 0.0 || radius <= 0.0 {
+            return;
+        }
+        if self.record(6, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).fx(fx).f(radius).f(strength);
+        }) {
             return;
         }
         let sc = self.scale;
@@ -470,11 +624,17 @@ impl<'a> Painter<'a> {
         let ty = ((r.y - pad + self.ty) * sc).round();
         let b = (tx, ty, pw as f32, ph as f32);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
-        self.pm.draw_pixmap(0, 0, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), Transform::from_translate(tx, ty), m);
+        debug_assert!(self.record.is_none(), "a recording painter drew");
+        blit(self.pm, tx as i32, ty as i32, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), m);
     }
 
     pub fn fill_rect(&mut self, r: RectF, c: Colour) {
         if c.a == 0 || r.w <= 0.0 || r.h <= 0.0 {
+            return;
+        }
+        if self.record(7, |k| {
+            k.r(r).c(c);
+        }) {
             return;
         }
         let s = self.scale;
@@ -492,10 +652,12 @@ impl<'a> Painter<'a> {
         if rr - l < 2.0 || b - t < 2.0 {
             // Thin rectangles: tiny-skia's anti-aliased rect fast path
             // trips on slivers; the path filler draws them the same.
+            debug_assert!(self.record.is_none(), "a recording painter drew");
             self.pm.fill_path(&PathBuilder::from_rect(rect), &paint(c), FillRule::Winding, Transform::identity(), None);
             return;
         }
         // `Pixmap::fill_rect`: no path rasterizer for the commonest shape.
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.fill_rect(rect, &paint(c), Transform::identity(), None);
     }
 
@@ -588,6 +750,11 @@ impl<'a> Painter<'a> {
     /// rect whose left edge sits on (`x`, `bottom`) and runs up.
     #[allow(clippy::too_many_arguments)]
     pub fn text_up(&mut self, x: f32, bottom: f32, len: f32, thick: f32, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign) {
+        if self.record(8, |k| {
+            k.f(x).f(bottom).f(len).f(thick).s(s).c(c).font(font).align(h, v);
+        }) {
+            return;
+        }
         let sc = self.scale;
         let (pw, ph) = ((len * sc).ceil().max(1.0) as u32, (thick * sc).ceil().max(1.0) as u32);
         let Some(mut tmp) = Pixmap::new(pw, ph) else { return };
@@ -599,7 +766,27 @@ impl<'a> Painter<'a> {
         let t = Transform::from_row(0.0, -1.0, 1.0, 0.0, (x + self.tx) * sc, (bottom + self.ty) * sc);
         let b = ((x + self.tx) * sc, (bottom + self.ty - len) * sc, thick * sc, len * sc);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.draw_pixmap(0, 0, tmp.as_ref(), &tiny_skia::PixmapPaint::default(), t, m);
+    }
+
+    /// `img` scaled into `r` (control coordinates), bilinear. A recording
+    /// painter hashes the image by its pixels' address and size (images
+    /// are expected to stay put while shown, e.g. in a cache).
+    pub fn image(&mut self, img: &Pixmap, r: RectF) {
+        if self.record(9, |k| {
+            k.u(img.data().as_ptr() as u64).u(img.width() as u64).u(img.height() as u64).r(r);
+        }) {
+            return;
+        }
+        let s = self.scale;
+        let (sx, sy) = (r.w / img.width().max(1) as f32, r.h / img.height().max(1) as f32);
+        let t = Transform::from_row(sx * s, 0.0, 0.0, sy * s, (self.tx + r.x) * s, (self.ty + r.y) * s);
+        let paint = tiny_skia::PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() };
+        let b = ((self.tx + r.x) * s, (self.ty + r.y) * s, r.w * s, r.h * s);
+        let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
+        self.pm.draw_pixmap(0, 0, img.as_ref(), &paint, t, m);
     }
 
     /// [re:128485].
@@ -623,6 +810,11 @@ impl<'a> Painter<'a> {
             return self.text_spaced(r, s, c, font, h, v, fx.spacing);
         }
         if s.is_empty() || c.a == 0 || r.h <= 0.0 {
+            return;
+        }
+        if self.record(10, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).fx(fx);
+        }) {
             return;
         }
         let sc = self.scale;
@@ -652,6 +844,7 @@ impl<'a> Painter<'a> {
         let b = (tx.min(tx - k * r.h * sc) - 1.0, ty, lw * sc * sx + lean * 2.0 + 2.0, r.h * sc);
         let m = if self.need_mask(b) { self.mask.as_ref() } else { None };
         let paint = tiny_skia::PixmapPaint { quality: tiny_skia::FilterQuality::Bilinear, ..Default::default() };
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         self.pm.draw_pixmap(0, 0, tmp.as_ref(), &paint, t, m);
     }
 
@@ -660,6 +853,11 @@ impl<'a> Painter<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn text_spaced(&mut self, r: RectF, s: &str, c: Colour, font: &FontSpec, h: HAlign, v: VAlign, spacing: f32) {
         if s.is_empty() || c.a == 0 {
+            return;
+        }
+        if self.record(11, |k| {
+            k.r(r).s(s).c(c).font(font).align(h, v).f(spacing);
+        }) {
             return;
         }
         let scale = self.scale;
@@ -702,6 +900,7 @@ impl<'a> Painter<'a> {
             glyphs.push((pen.floor() as i32 + m.xmin, baseline as i32 - m.height as i32 - m.ymin, m.width, m.height, bmp));
             pen += m.advance_width + gap;
         }
+        debug_assert!(self.record.is_none(), "a recording painter drew");
         let data = self.pm.pixels_mut();
         for (gx, gy, gw, gh, bmp) in glyphs {
             for yy in 0..gh {
@@ -763,6 +962,60 @@ mod mask_tests {
                     panic!("scale {scale} clip {i}: {clip:?} ours {:?} raster {:?}", span(m.data()), span(r.data()));
                 }
             }
+        }
+    }
+
+    /// Brushed noise drawn under a small clip gives the pixels the whole
+    /// texture gives there (only the clipped texels are made).
+    #[test]
+    fn clipped_noise_matches_the_whole_texture() {
+        let mut fonts = crate::text::Fonts::new(std::path::Path::new("/nonexistent"));
+        for scale in [1.0f32, 2.0, 1.5] {
+            let (w, h) = ((240.0 * scale) as u32, (160.0 * scale) as u32);
+            let path = rounded_rect_path(RectF::new(3.0, 2.0, 200.0, 140.0), 6.0, [true; 4]).unwrap();
+            let draw = |fonts: &mut crate::text::Fonts, clip: Option<(i32, i32, i32, i32)>| {
+                let mut pm = Pixmap::new(w, h).unwrap();
+                pm.fill(tiny_skia::Color::from_rgba8(40, 50, 60, 255));
+                let mut p = Painter::new(&mut pm, fonts, scale);
+                p.tx = 17.0;
+                p.ty = 9.0;
+                if let Some(c) = clip {
+                    p.clip = c;
+                }
+                p.fill_path_noise(&path, 0.4, 24.0, 7);
+                drop(p);
+                pm
+            };
+            let whole = draw(&mut fonts, None);
+            for clip in [(60, 40, 50, 30), (17, 9, 5, 200), (180, 120, 100, 100), (0, 0, 240, 160)] {
+                let part = draw(&mut fonts, Some(clip));
+                let (x0, y0) = ((clip.0 as f32 * scale).ceil() as u32, (clip.1 as f32 * scale).ceil() as u32);
+                let (x1, y1) = ((((clip.0 + clip.2) as f32 * scale).floor() as u32).min(w), (((clip.1 + clip.3) as f32 * scale).floor() as u32).min(h));
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        assert_eq!(whole.pixel(x, y), part.pixel(x, y), "scale {scale} clip {clip:?} at ({x}, {y})");
+                    }
+                }
+            }
+        }
+    }
+
+    /// A layer drawn across the pixmap's left or top edge covers only its
+    /// own pixels, as anywhere else.
+    #[test]
+    fn layers_across_the_edge_cover_only_themselves() {
+        let mut layer = Pixmap::new(31, 28).unwrap();
+        layer.fill(tiny_skia::Color::from_rgba8(200, 100, 50, 255));
+        let paint = tiny_skia::PixmapPaint { opacity: 0.7, ..Default::default() };
+        for (x, y) in [(-16, 5), (5, -9), (-16, -9), (4, 3)] {
+            let mut pm = Pixmap::new(60, 50).unwrap();
+            pm.fill(tiny_skia::Color::from_rgba8(10, 10, 10, 255));
+            blit(&mut pm, x, y, layer.as_ref(), &paint, None);
+            let (r, b) = (x + 31, y + 28);
+            let inside = pm.pixel((r - 1) as u32, (b - 1) as u32).unwrap();
+            assert_ne!(inside.red(), 10, "({x}, {y}) inside");
+            assert_eq!(pm.pixel(r as u32, (b - 1) as u32).unwrap().red(), 10, "({x}, {y}) right of it");
+            assert_eq!(pm.pixel((r - 1) as u32, b as u32).unwrap().red(), 10, "({x}, {y}) below it");
         }
     }
 }
