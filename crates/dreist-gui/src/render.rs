@@ -376,6 +376,7 @@ impl<'s> Renderer<'s> {
         }
         match c.class.as_str() {
             "CtrlWindowSizer" => self.window_sizer(p, c),
+            "CtrlDisclosureButton" if opt_bool(self.styles, self.style(c), c, "optDisclosureArrow", false) => self.disclosure(p, c),
             "CtrlButton" | "CtrlDisclosureButton" => self.button(p, c),
             "CtrlSearchBox" => self.search_box(p, c),
             "CtrlLabel" | "CtrlMultiLineLabel" | "CtrlTempoBox" | "CtrlValueBox" | "CtrlTextBox" => self.label(p, c),
@@ -385,6 +386,7 @@ impl<'s> Renderer<'s> {
             "CtrlTransmodSlider" if opt_bool(self.styles, self.style(c), c, "optModStrip", false) => self.transmod_slider(p, c),
             "CtrlSlider" | "CtrlTransmodSlider" => self.slider(p, c),
             "CtrlCollapsePanel" => self.collapse(p, c),
+            "CtrlScrollBar" if opt_bool(self.styles, self.style(c), c, "optFramedThumb", false) => self.scroll_bar(p, c),
             "CtrlScrollBar" => {
                 let st = self.style(c);
                 let (w, h) = (c.rect.w as f32, c.rect.h as f32);
@@ -426,6 +428,7 @@ impl<'s> Renderer<'s> {
                     }
                 }
             }
+            "CtrlValueStepper" if opt_bool(self.styles, self.style(c), c, "optStepperArrows", false) => self.value_stepper(p, c),
             "CtrlValueStepper" => {
                 self.label(p, c);
                 let st = self.style(c);
@@ -441,6 +444,8 @@ impl<'s> Renderer<'s> {
             "CtrlPanSlider" => self.pan_slider(p, c),
             "CtrlRangeSlider" => self.range_slider(p, c),
             "CtrlPlot" => self.plot(p, c),
+            // Opt-in: a poly plot given `curves` draws as a plot.
+            "CtrlPolyPlot" if c.attr("curves").is_some() => self.plot(p, c),
             "CtrlMeter" if self.style_class(c) == Some("CtrlMeterStyle") => self.needle_meter(p, c),
             "CtrlTableView" | "CtrlListBox" if self.native_table(c) => self.table(p, c),
             "root" => {}
@@ -452,6 +457,94 @@ impl<'s> Renderer<'s> {
             }
             _ => self.default_fill(p, c, "colFill", "colBorder", false),
         }
+    }
+
+    /// Opt-in `optFramedThumb` scroll bar ([re:4b1e07], thumb [re:9c52d3]):
+    /// the default fill (colFill / colBorder), then the thumb (the page's
+    /// share of the length, at least 8 px, placed by the value) inset 2 px
+    /// all round, pixel-aligned, filled in colAltFill rounded
+    /// realCornerRounding and framed 1 px in colAltBorder (default
+    /// colAltFill darkened .4).
+    fn scroll_bar(&self, p: &mut Painter, c: &Ctrl) {
+        self.default_fill(p, c, "colFill", "colBorder", false);
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let page = c.attr_f32("realPage", 1.0).clamp(0.0, 1.0);
+        if page >= 1.0 && !opt_bool(s, st, c, "optThumbWhenFull", false) {
+            return;
+        }
+        let v = c.value.clamp(0.0, 1.0);
+        let r = if h > w {
+            let th = (h * page).max(8.0).min(h).round();
+            RectF::new(0.0, (v * (h - th)).round(), w, th)
+        } else {
+            let tw = (w * page).max(8.0).min(w).round();
+            RectF::new((v * (w - tw)).round(), 0.0, tw, h)
+        };
+        let r = RectF::new(r.x + 2.0, r.y + 2.0, (r.w - 4.0).max(0.0), (r.h - 4.0).max(0.0));
+        let fill = s.colour(st, "colAltFill", std_col("StandardControlBorderLighter"));
+        let frame = s.colour(st, "colAltBorder", fill.darken(0.4));
+        let radius = s.float(st, "realCornerRounding", 0.0).max(0.0).min(r.w.min(r.h) / 2.0);
+        p.fill_rounded(r, radius, [true; 4], fill);
+        p.stroke_rounded(r.inset(0.5), radius, [true; 4], frame, 1.0);
+    }
+
+    /// Opt-in `optStepperArrows` value stepper ([re:e3d6a1]): a panel
+    /// (the default fill) holding a value box over its left 80 % and two
+    /// buttons in the rest, the upper half stepping down and the lower half
+    /// up (layout [re:0b8e74]). Each button draws only a triangle
+    /// ([re:71c0f4] / [re:d24e5b]) half the button's smaller side across,
+    /// centred, in colText: pointing up on the upper button, down on the
+    /// lower one.
+    fn value_stepper(&self, p: &mut Painter, c: &Ctrl) {
+        self.default_fill(p, c, "colFill", "colBorder", false);
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let split = (w * 0.8).round();
+        if self.draws_text(c) {
+            let text = if c.text.is_empty() { c.attr("placeholder").unwrap_or("").to_string() } else { c.text.clone() };
+            self.draw_text(p, c, RectF::new(0.0, 0.0, split, h), &text, "colText");
+        }
+        let col = self.styles.colour(self.style(c), "colText", std_col("StandardControlText"));
+        let mid = (h * 0.5).round();
+        for (y0, bh, up) in [(0.0, mid, true), (mid, h - mid, false)] {
+            let bw = w - split;
+            let side = ((bw.min(bh) as i32) as f32) * 0.5;
+            let (cx, cy) = (split + (bw as i32 / 2) as f32, y0 + (bh as i32 / 2) as f32);
+            let (t, b) = (cy - side * 0.5, cy + side * 0.5);
+            let pts = if up { [(cx - side * 0.5, b), (cx + side * 0.5, b), (cx, t)] } else { [(cx - side * 0.5, t), (cx + side * 0.5, t), (cx, b)] };
+            p.fill_polygon(&pts, col);
+        }
+    }
+
+    /// Opt-in `optDisclosureArrow` disclosure button ([re:1d5a0f], arrow
+    /// [re:c08e47]): the default fill (on: colAltFill / colAltBorder),
+    /// then no text but a triangle the rect's smaller side across, centred
+    /// and pointing down, turned by `realArrowAngle` degrees (default 0 when
+    /// on, −90, pointing right, when off) and scaled by `realScaling`
+    /// (default 1) about the centre, in colAltText when on, else colText.
+    fn disclosure(&self, p: &mut Painter, c: &Ctrl) {
+        let st = self.style(c);
+        if c.on {
+            self.default_fill(p, c, "colAltFill", "colAltBorder", true);
+        } else {
+            self.default_fill(p, c, "colFill", "colBorder", true);
+        }
+        let (w, h) = (c.rect.w, c.rect.h);
+        let side = w.min(h) as f32;
+        let (cx, cy) = ((w / 2) as f32, (h / 2) as f32);
+        let x0 = (w / 2 - w.min(h) / 2) as f32;
+        let y0 = (h / 2 - w.min(h) / 2) as f32;
+        let angle = c.attr_f32("realArrowAngle", if c.on { 0.0 } else { -90.0 }).to_radians();
+        let k = c.attr_f32("realScaling", 1.0);
+        let (sn, cs) = angle.sin_cos();
+        let t = |(x, y): (f32, f32)| {
+            let (dx, dy) = ((x - cx) * k, (y - cy) * k);
+            (cx + dx * cs - dy * sn, cy + dx * sn + dy * cs)
+        };
+        let pts = [t((x0, y0)), t((x0 + side, y0)), t((x0 + side * 0.5, y0 + side))];
+        let col = self.styles.colour(st, if c.on { "colAltText" } else { "colText" }, std_col("StandardControlText"));
+        p.fill_polygon(&pts, col);
     }
 
     /// [re:33ddf4] (ev_db5615b5… background [re:7fa1f2] / bar
@@ -732,6 +825,12 @@ impl<'s> Renderer<'s> {
     }
 
     pub fn draw_text(&self, p: &mut Painter, c: &Ctrl, r: RectF, text: &str, colour_attr: &str) {
+        self.draw_text_fit(p, c, r, text, colour_attr, None);
+    }
+
+    /// [`Self::draw_text`], shortening the text to fit `fit` px instead of
+    /// the text rect's width when given.
+    fn draw_text_fit(&self, p: &mut Painter, c: &Ctrl, r: RectF, text: &str, colour_attr: &str, fit: Option<f32>) {
         let st = self.style(c);
         if text.is_empty() {
             return;
@@ -748,7 +847,7 @@ impl<'s> Renderer<'s> {
         }
         let tr = self.text_rect(c, r);
         let fx = self.text_fx(c);
-        let s = p.fonts.shorten(&font, text, tr.w / fx.scale_x.max(0.1), self.styles.shorten(st));
+        let s = p.fonts.shorten(&font, text, fit.unwrap_or(tr.w) / fx.scale_x.max(0.1), self.styles.shorten(st));
         let (h, v) = (self.styles.h_align(st), self.styles.v_align(st));
         // Opt-in glow: `<colour attr>Glow` (`colTextGlow`, `colAltTextGlow`)
         // blurred `realTextGlowRadius` px (default 2) behind the text,
@@ -983,7 +1082,17 @@ impl<'s> Renderer<'s> {
         let aw = b.h * opt_f32(self.styles, st, c, "realPopupArrowSize", 0.4);
         let ax = arrow_x + box_w * 0.5 - aw * 0.5;
         let tr = if explicit { RectF::new(b.x, b.y, ax - 1.0 - b.x, b.h) } else { RectF::new(b.x + 2.0, b.y, arrow_x - b.x - 2.0, b.h) };
-        self.draw_text(p, c, tr, &c.text, "colText");
+        // Opt-in `optShortenToControlWidth`: the text shortened to the
+        // whole control's width and clipped to the text rect (the
+        // original's DrawText shortens to Ctrl::Width [re:1dcf76], so a
+        // label just too wide for the rect is cut off, not elided).
+        if opt_bool(self.styles, st, c, "optShortenToControlWidth", false) {
+            let prev = p.push_clip((p.tx + tr.x).floor() as i32, (p.ty + tr.y).floor() as i32, tr.w.ceil() as i32, tr.h.ceil() as i32);
+            self.draw_text_fit(p, c, tr, &c.text, "colText", Some(b.w));
+            p.pop_clip(prev);
+        } else {
+            self.draw_text(p, c, tr, &c.text, "colText");
+        }
         // (opt-in `colPopupArrow`: the arrow's own colour)
         let text = opt_colour(self.styles, st, c, "colPopupArrow").unwrap_or_else(|| self.styles.colour(st, "colText", std_col("StandardControlText")));
         let border = self.styles.colour(st, "colBorder", std_col("StandardControlBorder"));
@@ -1163,6 +1272,9 @@ impl<'s> Renderer<'s> {
     fn transmod_knob(&self, p: &mut Painter, c: &Ctrl) {
         let st = self.style(c);
         let s = self.styles;
+        if opt_bool(s, st, c, "optTransmodLayers", false) {
+            return self.transmod_knob_layers(p, c);
+        }
         let b = Self::bounds(c);
         let thick = c.attr_f32("realDialThickness", 0.2) * b.w;
         let mod_dim = c.attr_f32("realModDim", 0.25);
@@ -1224,6 +1336,122 @@ impl<'s> Renderer<'s> {
         }
     }
 
+    /// Opt-in `optTransmodLayers`: all seven layers of the transmod knob
+    /// ([re:d277c8], layers [re:3f0b5e]). `realModDim` md (× the width w,
+    /// default .25) and `realDialThickness` t (× w, default .2):
+    ///
+    /// 0. the outer ring ([re:acc5e5]): the full sweep in colModTrackFill,
+    ///    (t + md) / 2 wide from the edge; while a source is selected
+    ///    (`editingDepth`) again in colModulationIndication at alpha .2;
+    /// 1. the track: colFill, the value colAltFill (from 270° when
+    ///    `optCentered`), (w − md) across, t wide; disabled only colFill;
+    /// 2. while a source is selected, the depth zone ([re:5d0d8e]) md / 2 + t
+    ///    wide from the edge in colDepth: base .. base + depth, or with a
+    ///    bipolar source (`polar`) the mirrored range around the base;
+    /// 3. the live position (`modPosition`, else the base value; panels
+    ///    set it every tick from the parameter's current transmod value
+    ///    [re:55a64c]): a 10° mark at 110 + 310·pos in colModulationPos,
+    ///    max(.3·md, 1) wide at the edge;
+    /// 4. while a source is selected, the depth handles ([re:2a7c51]): a
+    ///    2 px line in colHandleBorder from the track's inner edge to the
+    ///    rim at each zone end and (knobs over 32 px) a dot (md / 2 + t / 2)
+    ///    / 2 across at radius (w − md / 2) / 2, colHandleFill inside;
+    /// 5. knobs over 32 px: the value handle (colHandleBorder, colHandleFill
+    ///    inset max(t / 5, 1)) on the track;
+    /// 6. a modulated parameter (`modulated`): a 1 px colDepth circle
+    ///    (opaque) inset 1.
+    fn transmod_knob_layers(&self, p: &mut Painter, c: &Ctrl) {
+        let st = self.style(c);
+        let s = self.styles;
+        let b = Self::bounds(c);
+        let w = b.w;
+        let thick = c.attr_f32("realDialThickness", 0.2) * w;
+        let md = c.attr_f32("realModDim", 0.25) * w;
+        let half = thick * 0.5;
+        let (cx, cy) = (b.w * 0.5, b.h * 0.5);
+        let small = c.rect.w <= 32 || c.rect.h <= 32;
+        let secondary = c.attr("editingDepth") == Some("true");
+        let polar = c.attr_bool("polar", false);
+        let (base, end, mirror, has) = transmod_values(c);
+        let angle = |v: f32| ARC_START + v.clamp(0.0, 1.0) * ARC_SWEEP;
+        // 0: outer ring.
+        let rw = half + md * 0.5;
+        let outer = b.inset(rw * 0.5);
+        p.stroke_arc(outer, ARC_START, ARC_SWEEP, true, s.colour(st, "colModTrackFill", std_col("Grey")), rw);
+        if secondary && c.enabled {
+            let ind = s.colour(st, "colModulationIndication", std_col("StandardControlHighlight")).with_alpha(0.2);
+            p.stroke_arc(outer, ARC_START, ARC_SWEEP, true, ind, rw);
+        }
+        // 1: track.
+        let (tw, th) = (b.w - md, b.h - c.attr_f32("realModDim", 0.25) * b.h);
+        let track = RectF::new(cx - tw * 0.5 + half, cy - th * 0.5 + half, tw - thick, th - thick);
+        p.stroke_arc(track, ARC_START, ARC_SWEEP, true, s.colour(st, "colFill", std_col("StandardControlBackground")), thick);
+        if c.enabled {
+            let alt = s.colour(st, "colAltFill", std_col("StandardControlBackground"));
+            let v = base * ARC_SWEEP;
+            if !c.attr_bool("optCentered", false) {
+                p.stroke_arc(track, ARC_START, v, true, alt, thick);
+            } else if ARC_START + v >= 270.0 {
+                p.stroke_arc(track, 270.0, ARC_START + v - 270.0, true, alt, thick);
+            } else {
+                p.stroke_arc(track, 270.0, 270.0 - v - ARC_START, false, alt, thick);
+            }
+        }
+        // 2: depth zone.
+        if secondary && has {
+            let tz = md * 0.5 + thick;
+            let zone = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
+            let r = b.inset(tz * 0.5);
+            let (from, to) = if polar { (angle(mirror), angle(end)) } else { (angle(base), angle(end)) };
+            p.stroke_arc(r, from, (to - from).abs(), to >= from, zone, tz);
+        }
+        if !c.enabled {
+            return;
+        }
+        // 3: live modulation position (without a `modPosition`, the base
+        // value: what an unmodulated parameter's panel reports).
+        {
+            let pos = c.attr("modPosition").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(base);
+            let tm = (md * 0.3).max(1.0);
+            let col = s.colour(st, "colModulationPos", std_col("Red"));
+            p.stroke_arc(b.inset(tm * 0.5), pos.clamp(0.0, 1.0) * 310.0 + 110.0, 10.0, true, col, tm);
+        }
+        let ring = s.colour(st, "colHandleBorder", Colour::WHITE);
+        let fill = s.colour(st, "colHandleFill", Colour::BLACK);
+        // 4: depth handles.
+        if secondary {
+            let r_in = (w - md - 2.0 * thick) * 0.5;
+            let r_out = c.rect.w as f32 * 0.5;
+            let d = (md * 0.5 + half) * 0.5;
+            let r_dot = (w - md * 0.5) * 0.5;
+            let i = (half * 0.4).max(1.0) * 0.5;
+            let ends: &[f32] = if polar { &[end, mirror] } else { &[end] };
+            for &v in ends {
+                let a = angle(v).to_radians();
+                let (ux, uy) = (a.cos(), a.sin());
+                p.line(cx + ux * r_in, cy + uy * r_in, cx + ux * r_out, cy + uy * r_out, ring, 2.0);
+                if !small {
+                    let r = RectF::new(cx + ux * r_dot - d * 0.5, cy + uy * r_dot - d * 0.5, d, d);
+                    p.fill_ellipse(r, ring);
+                    p.fill_ellipse(r.inset(i), fill);
+                }
+            }
+        }
+        // 5: value handle.
+        if !small {
+            let rad = cx - (md * 0.5 + half);
+            let a = angle(base).to_radians();
+            let r = RectF::new(a.cos() * rad + cx - half, cy + a.sin() * rad - half, thick, thick);
+            p.fill_ellipse(r, ring);
+            p.fill_ellipse(r.inset((half * 0.4).max(1.0)), fill);
+        }
+        // 6: modulated.
+        if c.attr_bool("modulated", false) {
+            let d = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
+            p.stroke_ellipse(RectF::new(1.0, 1.0, b.w - 2.0, b.h - 2.0), Colour { a: 255, ..d }, 1.0);
+        }
+    }
+
     /// Opt-in (`optModStrip`) transmod slider: the main track and a
     /// modulation strip at its right, `realModDim` × the width
     /// ([re:97130d]; vertical sliders). The main track
@@ -1259,6 +1487,9 @@ impl<'s> Renderer<'s> {
         p.fill_rect(RectF::new(inset, 0.0, main_w, centre.max(0.0)), fill);
         p.fill_rect(RectF::new(inset, centre, main_w, (h - centre).max(0.0)), alt);
         p.fill_rect(RectF::new(inset + main_w, 0.0, (w - main_w - 2.0 * inset).max(0.0), h), strip);
+        if opt_bool(s, st, c, "optTransmodLayers", false) {
+            return self.transmod_slider_layers(p, c, inset, RectF::new(inset + main_w, 0.0, (w - main_w - 2.0 * inset).max(0.0), h), hs);
+        }
         let depth = c.attr_f32("modDepth", 0.0);
         if depth.abs() > 1e-4 {
             let zone = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
@@ -1271,6 +1502,55 @@ impl<'s> Renderer<'s> {
         let r = RectF::new(0.0, hy, w - (w * mod_dim).round(), hs);
         p.fill_ellipse(r, ring);
         p.fill_ellipse(r.inset((w * 0.125).ceil()), dot);
+    }
+
+    /// Opt-in `optTransmodLayers` on an `optModStrip` slider: the layers
+    /// over the tracks ([re:97130d]). While a source is selected
+    /// (`editingDepth`): the strip again in colModulationIndication at
+    /// alpha .2 ([re:ffb722]); the depth zone ([re:6ad3bc]) in colDepth
+    /// from the main track's left to the strip's right, between the
+    /// handle's centre and the modulation's end (bipolar `polar`: between
+    /// the end and its mirror); at each end a 2 px colHandleBorder line
+    /// across the whole width and a strip-wide disc on the strip
+    /// (colHandleBorder, colHandleFill inset round(ceil(w / 8) / 2)). Then
+    /// the handle ([re:bf1a22]) and, for a modulated parameter
+    /// (`modulated`), a 1 px opaque colDepth frame inset 1.
+    fn transmod_slider_layers(&self, p: &mut Painter, c: &Ctrl, main_x: f32, strip: RectF, hs: f32) {
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let secondary = c.attr("editingDepth") == Some("true");
+        let polar = c.attr_bool("polar", false);
+        let (base, end, mirror, has) = transmod_values(c);
+        let ring = s.colour(st, "colHandleBorder", Colour::WHITE);
+        let dot = s.colour(st, "colHandleFill", Colour::BLACK);
+        let hy = ((1.0 - base) * (h - hs)).trunc();
+        if secondary {
+            let ind = s.colour(st, "colModulationIndication", std_col("StandardControlHighlight")).with_alpha(0.2);
+            p.fill_rect(strip, ind);
+            let centre = |v: f32| ((1.0 - v) * (h - hs)).trunc() + (hs as i32 / 2) as f32;
+            let (y0, y1) = if polar { (centre(end), centre(mirror)) } else { (hy + (hs as i32 / 2) as f32, centre(end)) };
+            if has {
+                let zone = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
+                p.fill_rect(RectF::new(main_x, y0.min(y1), (strip.x + strip.w - main_x).max(0.0), (y1 - y0).abs()), zone);
+            }
+            let ends: &[f32] = if polar { &[end, mirror] } else { &[end] };
+            let i = ((w * 0.125).ceil() * 0.5).round();
+            for &v in ends {
+                let y = (hs * 0.5 + (1.0 - v) * (h - hs)).round();
+                p.fill_rect(RectF::new(0.0, y - 1.0, w, 2.0), ring);
+                let r = RectF::new(strip.x, (y - strip.w * 0.5).round(), strip.w, strip.w);
+                p.fill_ellipse(r, ring);
+                p.fill_ellipse(r.inset(i), dot);
+            }
+        }
+        let r = RectF::new(0.0, hy, w - (w * c.attr_f32("realModDim", 0.25)).round(), hs);
+        p.fill_ellipse(r, ring);
+        p.fill_ellipse(r.inset((w * 0.125).ceil()), dot);
+        if c.attr_bool("modulated", false) {
+            let d = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
+            p.stroke_rect(RectF::new(1.5, 1.5, w - 3.0, h - 3.0), Colour { a: 255, ..d }, 1.0);
+        }
     }
 
     /// [re:0c57f8] + handle [re:a65320]. Opt-in: `enumHandleShape="Rect"`
@@ -1684,12 +1964,44 @@ impl<'s> Renderer<'s> {
                 .map(|(x, y)| (area.x + x * area.w, area.y + (1.0 - y) * area.h))
                 .collect()
         };
+        // Opt-in grid: 1 px vertical lines in `colGrid` at the `gridX`
+        // fractions (comma-separated) of the area's width.
+        if let (Some(xs), Some(col)) = (c.attr("gridX"), opt_colour(s, st, c, "colGrid")) {
+            for x in xs.split(',').filter_map(|v| v.trim().parse::<f32>().ok()) {
+                let x = (area.x + (x * area.w).floor()).round() + 0.5;
+                if x > area.x && x < area.x + area.w {
+                    p.line(x, area.y, x, area.y + area.h, col, 1.0);
+                }
+            }
+        }
         if let Some(curves) = c.attr("curves") {
+            // Opt-in `realCurveFillAlpha`: each curve's area down to the
+            // bottom filled in its colour at that alpha first.
+            let fill = opt_raw(s, st, c, "realCurveFillAlpha").and_then(|v| v.trim().parse::<f32>().ok());
+            // Opt-in `optCurveClosed`: the line runs on from the curve's end
+            // down to the bottom 1 px right of the area and back along the
+            // bottom to the left edge (the original's display lines end in
+            // (w + 1, h) and (0, h) [re:b03feb]).
+            let closed = opt_bool(s, st, c, "optCurveClosed", false);
             for curve in curves.split(';') {
                 let Some((col, pts)) = curve.split_once('|') else { continue };
-                let pts = parse(pts);
+                let mut pts = parse(pts);
                 if pts.len() >= 2 {
-                    p.polyline(&pts, s.parse_colour(col), lw);
+                    let col = s.parse_colour(col);
+                    let bottom = area.y + area.h;
+                    if closed {
+                        pts.push((area.x + area.w + 1.0, bottom));
+                        pts.push((area.x, bottom));
+                    }
+                    if let Some(a) = fill {
+                        let mut poly = pts.clone();
+                        if !closed {
+                            poly.push((pts[pts.len() - 1].0, bottom));
+                            poly.push((pts[0].0, bottom));
+                        }
+                        p.fill_polygon(&poly, col.with_alpha(col.a as f32 / 255.0 * a));
+                    }
+                    p.polyline(&pts, col, lw);
                 }
             }
             return;
@@ -1754,6 +2066,9 @@ impl<'s> Renderer<'s> {
         // Screen angles (degrees clockwise from 3 o'clock, y down).
         let a0 = -o("realAngleStart", 135.0);
         let sweep = o("realAngleSize", 90.0);
+        if opt_bool(s, st, c, "optMeterMarkings", false) {
+            return self.meter_markings(p, c);
+        }
         let scale = self.colour_attr(st, "colAltBorder");
         let text = self.colour_attr(st, "colText");
         p.stroke_arc(RectF::new(px - rad, py - rad, 2.0 * rad, 2.0 * rad), a0.rem_euclid(360.0), sweep, true, scale, 1.0);
@@ -1793,6 +2108,63 @@ impl<'s> Renderer<'s> {
         let needle = s.colour(st, "colLine", text);
         let (x, y) = at(c.value.clamp(0.0, 1.0), rad * 0.95);
         p.line(px, py, x, y, needle, o("realLineWidth", 1.5));
+    }
+
+    /// Opt-in `optMeterMarkings` on a needle meter: the original's
+    /// markings and needle ([re:664306]), all in DarkGrey. With
+    /// the pivot (cx, cy) = floor((`realPivotX`, `realPivotY`) × (w, h))
+    /// (default .5, 1), R = `realRadius` (default 1) × min(w, h) and angles
+    /// counter-clockwise from 3 o'clock (`realAngleStart` a, default 135,
+    /// `realAngleSize` s, default 90): a 1 px arc of radius floor(.95·R)
+    /// over a → a − s; five 1 px ticks at a − k·s/4 from .99·R to 1.05·R
+    /// (floored); `textLeftRange` / `textRightRange` centred in a 20 × 12
+    /// box whose top left is 10 px left of and above the outer end of the
+    /// first / last tick; `textUnits` centred in a w × 12 box at
+    /// floor(.8·R) along a − s/2 (left edge shifted as the point); the
+    /// needle 2 px from `realRadiusStart` (default 0) × min(w, h) to R at
+    /// a − v·s.
+    fn meter_markings(&self, p: &mut Painter, c: &Ctrl) {
+        use crate::style::HAlign;
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let o = |k: &str, d: f32| opt_f32(s, st, c, k, d);
+        let (cx, cy) = ((w * o("realPivotX", 0.5)).floor(), (h * o("realPivotY", 1.0)).floor());
+        let side = w.min(h);
+        let r = o("realRadius", 1.0) * side;
+        let (a, sw) = (o("realAngleStart", 135.0), o("realAngleSize", 90.0));
+        let grey = std_col("DarkGrey");
+        let font = s.font(st);
+        let r1 = (r * 0.95).floor();
+        // (screen angles run clockwise)
+        p.stroke_arc(RectF::new(cx - r1, cy - r1, 2.0 * r1, 2.0 * r1), (-a).rem_euclid(360.0), sw, true, grey, 1.0);
+        let pt = |deg: f32, k: f32| {
+            let t = deg.to_radians();
+            ((t.cos() * r * k).floor(), (t.sin() * r * k).floor())
+        };
+        if let Some(t) = c.attr("textUnits").or_else(|| s.raw(st, "textUnits")).filter(|t| !t.is_empty()) {
+            let (dx, dy) = pt(a - sw * 0.5, 0.8);
+            p.text(RectF::new(cx - (w / 2.0).trunc() + dx, cy - dy, w, 12.0), t, grey, &font, HAlign::Center, s.v_align(st));
+        }
+        for k in 0..5 {
+            let deg = a - k as f32 * sw * 0.25;
+            let (ix, iy) = pt(deg, 0.99);
+            let (ox, oy) = pt(deg, 1.05);
+            p.line(cx + ix, cy - iy, cx + ox, cy - oy, grey, 1.0);
+            let key = match k {
+                0 => "textLeftRange",
+                4 => "textRightRange",
+                _ => continue,
+            };
+            if let Some(t) = c.attr(key).or_else(|| s.raw(st, key)).filter(|t| !t.is_empty()) {
+                p.text(RectF::new(cx + ox - 10.0, cy - oy - 10.0, 20.0, 12.0), t, grey, &font, HAlign::Center, s.v_align(st));
+            }
+        }
+        let t = (a - c.value.clamp(0.0, 1.0) * sw).to_radians();
+        let r0 = o("realRadiusStart", 0.0) * side;
+        let (x0, y0) = (cx + (t.cos() * r0).floor(), cy - (t.sin() * r0).floor());
+        let (x1, y1) = (cx + (t.cos() * r).floor(), cy - (t.sin() * r).floor());
+        p.line(x0, y0, x1, y1, grey, 2.0);
     }
 
     /// A table or list box with a table style (see [`Renderer::native_table`]):
@@ -1957,6 +2329,25 @@ impl<'s> Renderer<'s> {
 }
 
 /// A range slider's (`valueLow`, `valueHigh`), clamped to 0..1 and ordered.
+/// [re:6e1b0c] The transmod values of a knob or slider: the base, the
+/// modulation's end (base + `modDepth`) and its mirror about the base
+/// (2·base − end), each clamped to 0..1, and whether they differ. The
+/// base is `baseValue` while a source is selected (`editingDepth`), else
+/// the value. A base at 0 with a negative depth mirrors to base + |depth|.
+pub fn transmod_values(c: &Ctrl) -> (f32, f32, f32, bool) {
+    let editing = c.attr("editingDepth") == Some("true");
+    let a0 = if editing { c.attr_f32("baseValue", 0.0) } else { c.value };
+    let b0 = a0 + if editing { c.attr_f32("modDepth", 0.0) } else { 0.0 };
+    let cl = |v: f32| v.clamp(0.0, 1.0);
+    let (a, b) = (cl(a0), cl(b0));
+    let mut m = cl(2.0 * a0 - b0);
+    if (b0 - a0).abs() >= 1e-6 && a0 > b0 && a0.abs() <= 1e-6 {
+        m = cl(a0 + b0.abs());
+    }
+    let has = (a - b).abs() > 1e-6 || (a - m).abs() > 1e-6 || (b - m).abs() > 1e-6;
+    (a, b, m, has)
+}
+
 pub fn range_values(c: &Ctrl) -> (f32, f32) {
     let lo = c.attr_f32("valueLow", 0.0).clamp(0.0, 1.0);
     let hi = c.attr_f32("valueHigh", 1.0).clamp(0.0, 1.0);
@@ -2156,6 +2547,25 @@ mod tests {
         // Empty: nothing but the fill.
         let none = draw(&s, &ctrl("CtrlPlot", "Plot", 107, 50, &[("curves", "")]));
         assert_eq!(at(&none, 53, 25), at(&none, 53, 5));
+    }
+
+    #[test]
+    fn poly_plots_with_curves_grids_and_fills_are_opt_in() {
+        let base = [COLOURS, &[("realBorderWidth", "0")]].concat();
+        let eq = [base.as_slice(), &[("colGrid", "255, 0, 0, 255"), ("realCurveFillAlpha", "0.5")]].concat();
+        let s = sheet(&[("Plain", "CtrlStyle", &base), ("Eq", "CtrlStyle", &eq)]);
+        let at = |px: &[u8], x: usize, y: usize| px[(y * 107 + x) * 4..(y * 107 + x) * 4 + 3].to_vec();
+        // Without curves a poly plot is a plain panel, as before.
+        let bare = draw(&s, &ctrl("CtrlPolyPlot", "Eq", 107, 50, &[("gridX", "0.5")]));
+        assert_eq!(bare, draw(&s, &ctrl("CtrlPanel", "Eq", 107, 50, &[])));
+        // Curves, no grid / fill attributes: the line only.
+        let plain = draw(&s, &ctrl("CtrlPolyPlot", "Plain", 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 1,0.5"), ("gridX", "0.5")]));
+        assert!(at(&plain, 20, 25)[2] > 128);
+        assert_eq!(at(&plain, 20, 45), at(&plain, 20, 5));
+        // The grid line and the curve's fill below it.
+        let d = draw(&s, &ctrl("CtrlPolyPlot", "Eq", 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 1,0.5"), ("gridX", "0.5")]));
+        assert!(at(&d, 53, 5)[0] > 200, "grid");
+        assert_ne!(at(&d, 20, 45), at(&d, 20, 5), "filled below the curve");
     }
 
     #[test]
@@ -2830,5 +3240,156 @@ mod tests {
         let s = sheet(&[("P", "CtrlStyle", &st)]);
         let a = draw(&s, &ctrl("CtrlPopupButton", "P", 60, 20, &[]));
         assert_eq!(px(&a, 60, 50, 8), [255, 0, 255], "the arrow in its own colour");
+    }
+
+    const TRANSMOD: &[(&str, &str)] = &[
+        ("colFill", "40, 40, 40, 255"),
+        ("colAltFill", "0, 255, 0, 255"),
+        ("colModTrackFill", "90, 90, 90, 255"),
+        ("colModulationIndication", "0, 0, 255, 255"),
+        ("colDepth", "255, 0, 0, 255"),
+        ("colHandleBorder", "255, 255, 255, 255"),
+        ("colHandleFill", "0, 0, 0, 255"),
+        ("colModulationPos", "255, 255, 0, 255"),
+    ];
+
+    #[test]
+    fn transmod_layers_are_opt_in() {
+        let mut st: Vec<(&str, &str)> = TRANSMOD.to_vec();
+        let plain = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        st.push(("optTransmodLayers", "true"));
+        let layered = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        // A small knob: the old drawing outlines it always, the layers only
+        // when the parameter is modulated.
+        let k = ctrl("CtrlTransmodKnob", "T", 24, 24, &[]);
+        assert_ne!(draw(&plain, &k), draw(&layered, &k));
+        let a = draw(&layered, &k);
+        let m = draw(&layered, &ctrl("CtrlTransmodKnob", "T", 24, 24, &[("modulated", "true")]));
+        assert_eq!(px(&a, 24, 12, 1), [90, 90, 90], "the mod track, no outline unmodulated");
+        assert!(px(&m, 24, 12, 1)[0] > 150 && px(&m, 24, 12, 1)[1] < 90, "the colDepth outline when modulated");
+    }
+
+    #[test]
+    fn transmod_knob_depth_zone_handles_and_polarity() {
+        let st: Vec<(&str, &str)> = TRANSMOD.iter().copied().chain([("optTransmodLayers", "true")]).collect();
+        let s = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        let edit = |depth: &str, polar: bool| {
+            let mut c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[("editingDepth", "true"), ("baseValue", "0.5"), ("modDepth", depth)]);
+            if polar {
+                c.set_attr("polar", "true".into());
+            }
+            draw(&s, &c)
+        };
+        let red = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
+        let none = edit("0", false);
+        let up = edit("0.25", false);
+        let bi = edit("0.25", true);
+        assert_eq!(red(&none), 0, "no zone without a depth");
+        assert!(red(&up) > 50, "a zone over the depth");
+        assert!(red(&bi) > red(&up) * 3 / 2, "bipolar: mirrored about the base");
+        // Base .5 sits at the top (270°): +.25 runs clockwise to the right.
+        assert!(px(&up, 60, 48, 12)[0] > 200 || px(&up, 60, 50, 14)[0] > 200, "the zone is right of the top");
+        assert!(px(&up, 60, 12, 12)[0] < 200, "nothing left of the top");
+        // The selected-source indication tints the outer ring.
+        let ring = px(&none, 60, 2, 30);
+        assert!(ring[2] > ring[0], "the outer ring is tinted blue: {ring:?}");
+    }
+
+    #[test]
+    fn transmod_values_mirror_the_depth() {
+        let c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[("editingDepth", "true"), ("baseValue", "0.4"), ("modDepth", "0.3")]);
+        let (a, b, m, has) = transmod_values(&c);
+        assert!((a - 0.4).abs() < 1e-6 && (b - 0.7).abs() < 1e-6 && (m - 0.1).abs() < 1e-6 && has);
+        let c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[("editingDepth", "true"), ("baseValue", "0"), ("modDepth", "-0.3")]);
+        let (_, b, m, _) = transmod_values(&c);
+        assert!(b.abs() < 1e-6 && (m - 0.3).abs() < 1e-6, "a base at 0 mirrors upwards");
+        let c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[]);
+        assert!(!transmod_values(&c).3, "no source: nothing to draw");
+    }
+
+    #[test]
+    fn transmod_slider_depth_lines_and_discs() {
+        let st: Vec<(&str, &str)> = TRANSMOD.iter().copied().chain([("optTransmodLayers", "true"), ("optModStrip", "true")]).collect();
+        let s = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        let c = ctrl("CtrlTransmodSlider", "T", 16, 100, &[("editingDepth", "true"), ("baseValue", "0.2"), ("modDepth", "0.5")]);
+        let a = draw(&s, &c);
+        // hs = trunc(16 × .75) = 12; the end (.7) at round(6 + .3 × 88) = 32.
+        assert_eq!(px(&a, 16, 2, 31), [255, 255, 255], "the 2 px line at the end");
+        assert_eq!(px(&a, 16, 2, 50)[0], 255, "the zone between the handle and the end");
+    }
+
+    #[test]
+    fn framed_scroll_thumbs_inset_two() {
+        let st = [("colFill", "0, 0, 0, 0"), ("colAltFill", "0, 255, 0, 255"), ("colAltBorder", "255, 0, 0, 255"), ("realCornerRounding", "3"), ("optFramedThumb", "true")];
+        let s = sheet(&[("Sb", "CtrlStyle", &st)]);
+        let a = draw(&s, &ctrl("CtrlScrollBar", "Sb", 12, 100, &[("realPage", "0.5")]));
+        assert_eq!(px(&a, 12, 1, 25), [0, 0, 0], "2 px clear of the edge");
+        assert_eq!(px(&a, 12, 2, 25), [255, 0, 0], "the frame");
+        assert_eq!(px(&a, 12, 6, 25), [0, 255, 0], "the fill");
+        assert_eq!(px(&a, 12, 6, 60), [0, 0, 0], "the thumb spans half");
+    }
+
+    #[test]
+    fn stepper_triangles_and_disclosure_arrows() {
+        let st = [("colFill", "0, 0, 0, 0"), ("colBorder", "0, 0, 0, 0"), ("colText", "255, 255, 255, 255"), ("colAltText", "255, 0, 0, 255"), ("optStepperArrows", "true")];
+        let s = sheet(&[("V", "CtrlStyle", &st)]);
+        let a = draw(&s, &ctrl("CtrlValueStepper", "V", 50, 20, &[]));
+        // Buttons 10 × 10 at x 40: triangles 5 across, centred on (45, 5) / (45, 15).
+        assert_eq!(px(&a, 50, 45, 6), [255, 255, 255], "the upper triangle");
+        assert_eq!(px(&a, 50, 43, 3), [0, 0, 0]);
+        assert_eq!(px(&a, 50, 45, 14), [255, 255, 255], "the lower one");
+        assert_eq!(px(&a, 50, 43, 16), [0, 0, 0]);
+        let d = |on: bool| {
+            let mut c = ctrl("CtrlDisclosureButton", "V", 20, 20, &[("optDisclosureArrow", "true")]);
+            c.on = on;
+            draw(&s, &c)
+        };
+        let (closed, open) = (d(false), d(true));
+        assert_eq!(px(&closed, 20, 15, 10), [255, 255, 255], "closed: pointing right");
+        assert_eq!(px(&closed, 20, 10, 18), [0, 0, 0]);
+        assert_eq!(px(&open, 20, 10, 14), [255, 0, 0], "open: pointing down in colAltText");
+    }
+
+    #[test]
+    fn transmod_layers_mark_the_base_without_a_mod_position() {
+        let st: Vec<(&str, &str)> = TRANSMOD.iter().copied().chain([("optTransmodLayers", "true")]).collect();
+        let s = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        let yellow = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 200 && p[1] > 200 && p[2] < 60).count();
+        let mut c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[]);
+        c.value = 0.5;
+        let at_value = draw(&s, &c);
+        assert!(yellow(&at_value) > 0, "the mark at the value");
+        // The mark at 270° (top centre) for 0.5: 115 + 310 · .5.
+        assert_eq!(px(&at_value, 60, 30, 1), [255, 255, 0]);
+        c.set_attr("modPosition", "0".into());
+        assert_ne!(px(&draw(&s, &c), 60, 30, 1), [255, 255, 0], "a given position wins");
+    }
+
+    #[test]
+    fn closed_curves_run_along_the_bottom() {
+        let base = [COLOURS, &[("realBorderWidth", "0"), ("realLineWidth", "2")]].concat();
+        let closed = [base.as_slice(), &[("optCurveClosed", "true")]].concat();
+        let s = sheet(&[("Open", "CtrlStyle", &base), ("Closed", "CtrlStyle", &closed)]);
+        let c = |st: &str| draw(&s, &ctrl("CtrlPolyPlot", st, 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 0.99,0.5")]));
+        let (open, shut) = (c("Open"), c("Closed"));
+        assert!(px(&shut, 107, 50, 49)[2] > 100, "the line along the bottom");
+        assert!(px(&open, 107, 50, 49)[2] < 100);
+        assert!(px(&shut, 107, 106, 40)[2] > 100, "and down the right edge");
+    }
+
+    #[test]
+    fn meter_markings_are_opt_in() {
+        let meter = [COLOURS, &[("optDrawBorder", "false")]].concat();
+        let marks = [meter.as_slice(), &[("optMeterMarkings", "true")]].concat();
+        let s = sheet(&[("Needle", "CtrlMeterStyle", &meter), ("Marks", "CtrlMeterStyle", &marks)]);
+        let plain = draw(&s, &ctrl("CtrlMeter", "Needle", 107, 50, &[]));
+        let m = draw(&s, &ctrl("CtrlMeter", "Marks", 107, 50, &[]));
+        assert_ne!(plain, m);
+        // Value 0: the needle in DarkGrey from the pivot (53, 50) up-left at
+        // 135°, R = 50.
+        let p = px(&m, 107, 35, 32);
+        assert!(p[0] > 30 && p[0] < 90 && p[0] == p[2], "{p:?}");
+        // The arc (radius floor(.95 · 50) = 47) at its top.
+        assert!(px(&m, 107, 53, 3)[0] > 20);
     }
 }

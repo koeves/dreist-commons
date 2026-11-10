@@ -358,6 +358,7 @@ impl Ctrl {
             self.layout_splitter();
         } else if (old.w, old.h) != (r.w, r.h) {
             self.auto_resize_children(old, r);
+            crate::scroll::refresh(self);
         }
     }
 

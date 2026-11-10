@@ -15,11 +15,13 @@ pub mod meter;
 mod objc_class;
 pub mod paint;
 pub mod render;
+pub mod scroll;
 pub mod skin;
 pub mod splitter;
 pub mod style;
 pub mod text;
 pub mod tooltip;
+pub mod v2ctl;
 #[cfg(feature = "window")]
 pub mod window;
 
