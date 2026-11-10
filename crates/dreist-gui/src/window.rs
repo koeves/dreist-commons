@@ -229,6 +229,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                             return EventStatus::Ignored;
                         }
                     }
+                    keyboard_types::Key::Escape if self.app.app().escape() => {}
                     other if !self.app.app().is_editing() => {
                         let key = match other {
                             keyboard_types::Key::Backspace | keyboard_types::Key::Delete => "delete",

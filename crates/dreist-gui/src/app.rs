@@ -171,6 +171,20 @@ pub struct App {
     pub ctrl_click_right: bool,
     /// The current press is a remapped ctrl-click.
     ctrl_press: bool,
+    /// The second-generation stock controls ([`crate::v2ctl`]): relative
+    /// knob drags with shift for fine, sliders that jump to a press off
+    /// their thumb, transmod knob wheel steps and depth snapping, value
+    /// boxes dragged unless `optCanBeDragged="false"`, and a double click
+    /// on a knob or slider that does not start a drag ([re:9e4f27]: the
+    /// second press goes only to the double-click handler). Off by default.
+    pub v2_controls: bool,
+    /// Modifiers at the press (or the last re-anchoring) of a drag.
+    press_mods: Mods,
+    /// A transmod knob the last wheel step edited the base of (its
+    /// `dragPart` is cleared at the next input event).
+    wheel_part: Option<Vec<usize>>,
+    /// Tempo box taps ([re:71d2a8]).
+    tap: crate::v2ctl::TapTempo,
     /// Running collapse panel folds.
     folds: Vec<crate::collapse::Anim>,
     /// The cursor the window should show ([re:752b0e]); reset to
@@ -248,6 +262,10 @@ impl App {
             fine_drag: false,
             ctrl_click_right: false,
             ctrl_press: false,
+            v2_controls: false,
+            press_mods: Mods::default(),
+            wheel_part: None,
+            tap: crate::v2ctl::TapTempo::default(),
             cursor: crate::cursor::Cursor::Arrow,
             split_drag: None,
             splits: Vec::new(),
@@ -544,6 +562,7 @@ impl App {
 
     fn mouse_move_events(&mut self, x: f32, y: f32) -> Vec<UiEvent> {
         self.mouse = (x, y);
+        self.clear_wheel_part();
         let mut out = Vec::new();
         if let (Some(i), Some(m)) = (self.menu_slider, self.menu.as_mut()) {
             if let Some(v) = m.slider_at(i, x) {
@@ -588,6 +607,12 @@ impl App {
             return out;
         }
         if let Some((path, x0, y0, v0)) = self.pressed.clone() {
+            if self.v2_controls {
+                if let Some(ev) = self.v2_drag(&path, (x0, y0, v0), x, y) {
+                    out.extend(ev);
+                    return out;
+                }
+            }
             // Opt-in slider options (control attribute, else style).
             let (flip, detent) = self
                 .ctrl(&path)
@@ -713,6 +738,186 @@ impl App {
         out
     }
 
+    /// A control style number (the control's attribute, else its style's).
+    fn opt_num(&self, c: &Ctrl, k: &str, default: f32) -> f32 {
+        let st = if self.skin.styles.styles.contains_key(&c.style) { c.style.as_str() } else { "ApplicationStyle" };
+        crate::render::opt_f32(&self.skin.styles, st, c, k, default)
+    }
+
+    /// Set the control at `path` to `v` (or its `baseValue` when the drag
+    /// edits the base) and report a change.
+    fn v2_set(&mut self, path: &[usize], v: f32, base: bool, out: &mut Vec<UiEvent>) {
+        let Some(c) = self.ctrl_mut(path) else { return };
+        let old = if base { c.attr_f32("baseValue", 0.0) } else { c.value };
+        if (v - old).abs() <= 1e-6 {
+            return;
+        }
+        if base {
+            c.set_attr("baseValue", v.to_string());
+        } else {
+            c.value = v;
+        }
+        out.push(UiEvent::ValueChanged { path: path.to_vec(), name: c.name.clone(), id: c.id, value: v });
+        self.dirty = true;
+    }
+
+    /// A drag of a second-generation stock control ([`crate::v2ctl`]);
+    /// `None` for other controls. `anchor` is the press (or last
+    /// re-anchoring) point and value.
+    fn v2_drag(&mut self, path: &[usize], anchor: (f32, f32, f32), x: f32, y: f32) -> Option<Vec<UiEvent>> {
+        use crate::v2ctl as v2;
+        let class = self.ctrl(path)?.class.clone();
+        if !matches!(class.as_str(), "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider" | "CtrlValueBox" | "CtrlTempoBox") {
+            return None;
+        }
+        let c = self.ctrl(path)?.clone();
+        let c = &c;
+        let (macro_px, micro_px) = (self.opt_num(c, "realMacroValueScalar", 200.0), self.opt_num(c, "realMicroValueScaler", 2000.0));
+        let (w, h) = (c.rect.w, c.rect.h);
+        let base_part = c.attr("dragPart") == Some("primary");
+        let depth = c.attr("editingDepth") == Some("true");
+        let m = self.mods;
+        let (mut x0, mut y0, mut v0) = anchor;
+        // Transmod controls and sliders measure from the press, starting
+        // again where the modifiers change.
+        if m != self.press_mods && matches!(class.as_str(), "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider") {
+            (x0, y0, v0) = (x, y, if base_part { c.attr_f32("baseValue", 0.0) } else { c.value });
+            self.press_mods = m;
+            self.pressed = Some((path.to_vec(), x0, y0, v0));
+        }
+        let fine = v2::fine(m);
+        let knob_d = (y0 - y) / v2::knob_range(m, macro_px, micro_px);
+        let mut out = Vec::new();
+        match class.as_str() {
+            // Knobs and tempo boxes move by the travel since the last move.
+            "CtrlKnob" => {
+                let v = (v0 + knob_d).clamp(0.0, 1.0);
+                self.pressed = Some((path.to_vec(), x, y, v));
+                self.v2_set(path, v, false, &mut out);
+            }
+            "CtrlTempoBox" => {
+                let whole = c.attr("dragPart") == Some("whole");
+                let (t, frac) = v2::tempo_drag(v0, c.attr_f32("tempoFrac", 0.0), whole, knob_d);
+                self.pressed = Some((path.to_vec(), x, y, t));
+                if let Some(c) = self.ctrl_mut(path) {
+                    c.set_attr("tempoFrac", frac.to_string());
+                    c.text = format!("{t:.2}");
+                }
+                self.v2_set(path, t, false, &mut out);
+            }
+            "CtrlTransmodKnob" | "CtrlTransmodSlider" => {
+                let d = if class == "CtrlTransmodKnob" {
+                    knob_d
+                } else {
+                    let thumb = v2::transmod_slider_thumb(w, c.attr_f32("realModDim", 0.25), c.attr_f32("realSliderPortion", 1.0));
+                    (y0 - y) / v2::slider_divisor(m, macro_px) / (h - thumb).max(1) as f32
+                };
+                if base_part || !depth {
+                    self.v2_set(path, (v0 + d).clamp(0.0, 1.0), base_part, &mut out);
+                } else {
+                    // The modulation end moves; knobs snap it onto the base.
+                    let base = c.attr_f32("baseValue", 0.0);
+                    let snap = (class == "CtrlTransmodKnob").then_some(fine);
+                    let dep = v2::depth_after(base, v0 * 2.0 - 1.0, d, snap);
+                    self.v2_set(path, (dep + 1.0) / 2.0, false, &mut out);
+                }
+            }
+            "CtrlSlider" => {
+                let flip = self.opt_bool(c, "optFlipDirection");
+                let dir = if flip { -1.0 } else { 1.0 };
+                let thumb = v2::slider_thumb(w, h, self.opt_num(c, "realSliderPortion", 1.0));
+                let (delta, len) = if w < h { (y0 - y, h) } else { (x - x0, w) };
+                let v = (v0 + dir * delta / v2::slider_divisor(m, macro_px) / (len - thumb).max(1) as f32).clamp(0.0, 1.0);
+                self.v2_set(path, v, false, &mut out);
+            }
+            // Value boxes: their value in units over `realMinValue` ..
+            // `realMaxValue`, a full range per turn ([re:a83c51]).
+            _ => {
+                let (lo, hi) = (c.attr_f32("realMinValue", 0.0), c.attr_f32("realMaxValue", 1.0));
+                let v = (v0 + knob_d * (hi - lo)).clamp(lo.min(hi), hi.max(lo));
+                self.v2_set(path, v, false, &mut out);
+            }
+        }
+        Some(out)
+    }
+
+    /// A press on a tempo box ([re:b0c3e9]): with option a tap ([re:71d2a8]),
+    /// else a drag of the whole part (left half) or the fraction.
+    fn tempo_press(&mut self, p: &[usize]) -> Vec<UiEvent> {
+        let (x, y) = self.mouse;
+        let (ox, _) = self.origin(p);
+        let (alt, mods) = (self.mods.alt, self.mods);
+        if !alt {
+            self.tap.reset();
+        }
+        let Some(c) = self.ctrl_mut(p) else { return Vec::new() };
+        let tempo = c.text.trim().parse::<f32>().unwrap_or(c.value).clamp(crate::v2ctl::TEMPO_RANGE.0, crate::v2ctl::TEMPO_RANGE.1);
+        c.value = tempo;
+        let mut out = vec![UiEvent::Pressed { path: p.to_vec(), name: c.name.clone() }];
+        if alt {
+            if let Some(bpm) = self.tap.tap(std::time::Instant::now()) {
+                let bpm = bpm.clamp(crate::v2ctl::TEMPO_RANGE.0, crate::v2ctl::TEMPO_RANGE.1);
+                if let Some(c) = self.ctrl_mut(p) {
+                    c.value = bpm;
+                    c.text = format!("{bpm:.2}");
+                    out.push(UiEvent::ValueChanged { path: p.to_vec(), name: c.name.clone(), id: c.id, value: bpm });
+                }
+                self.dirty = true;
+            }
+            return out;
+        }
+        let whole = x - (ox as f32) < (c.rect.w / 2) as f32;
+        c.set_attr("dragPart", if whole { "whole" } else { "fraction" }.into());
+        self.press_at = (x, y);
+        self.dragging = false;
+        self.drag_left = false;
+        self.press_mods = mods;
+        self.pressed = Some((p.to_vec(), x, y, tempo));
+        out
+    }
+
+    /// A wheel step on a transmod knob ([re:c7e2d4]): unmodulated it moves
+    /// the value; modulated, the ring moves the depth (the modulation end,
+    /// kept in 0..1) and the centre the base.
+    fn v2_wheel_knob(&mut self, p: &[usize], step: f32) -> Vec<UiEvent> {
+        let (mx, my) = self.mouse;
+        let (ox, oy) = self.origin(p);
+        let Some(c) = self.ctrl(p) else { return Vec::new() };
+        let d = step / crate::v2ctl::transmod_wheel(self.mods);
+        let mut out = Vec::new();
+        if c.attr("editingDepth") != Some("true") {
+            let v = (c.value + d).clamp(0.0, 1.0);
+            self.v2_set(p, v, false, &mut out);
+            return out;
+        }
+        let r = c.rect.w / 2;
+        let (dx, dy) = (r - (mx as i32 - ox), r - (my as i32 - oy));
+        let centre = c.rect.w == c.rect.h && (dx * dx + dy * dy) as u32 <= (r * r) as u32;
+        let base = c.attr_f32("baseValue", 0.0);
+        if centre {
+            if let Some(c) = self.ctrl_mut(p) {
+                c.set_attr("dragPart", "primary".into());
+            }
+            self.wheel_part = Some(p.to_vec());
+            self.v2_set(p, (base + d).clamp(0.0, 1.0), true, &mut out);
+        } else {
+            let dep = crate::v2ctl::depth_after(base, c.value * 2.0 - 1.0, d, None);
+            self.v2_set(p, (dep + 1.0) / 2.0, false, &mut out);
+        }
+        out
+    }
+
+    /// Forget the base edit marker a wheel step left on a knob.
+    fn clear_wheel_part(&mut self) {
+        if let Some(p) = self.wheel_part.take() {
+            if self.pressed.as_ref().is_none_or(|q| q.0 != p) {
+                if let Some(c) = self.ctrl_mut(&p) {
+                    c.remove_attr("dragPart");
+                }
+            }
+        }
+    }
+
     /// [re:9d0c14]: step the value (attrs `realMin`, `realMax`,
     /// `realStep`; defaults 0, 100, 1) and show it as text.
     fn step(&mut self, path: &[usize], dir: f32) -> Vec<UiEvent> {
@@ -744,6 +949,31 @@ impl App {
     /// the dominant axis in lines, as [`App::mouse_wheel`].
     pub fn mouse_scroll(&mut self, dx: f32, dy: f32, lines: bool) -> Vec<UiEvent> {
         let hit = self.hit(self.mouse.0, self.mouse.1);
+        if self.v2_controls {
+            self.clear_wheel_part();
+            // [re:3a9d20]: one ±1 step per event; the innermost transmod
+            // knob or draggable value box takes it (plain knobs and
+            // sliders pass it on, [re:7b30e1] [re:2f61aa]).
+            let step = crate::v2ctl::wheel_step(dx, dy);
+            let target = (0..=hit.len())
+                .rev()
+                .map(|n| hit[..n].to_vec())
+                .find(|p| self.ctrl(p).is_some_and(|c| c.enabled && c.overload.is_empty() && (c.class == "CtrlTransmodKnob" || (c.class == "CtrlValueBox" && c.attr_bool("optCanBeDragged", true)))));
+            if let (Some(p), true) = (target, step != 0.0) {
+                return self.damage_only(|a| {
+                    if a.ctrl(&p).is_some_and(|c| c.class == "CtrlValueBox") {
+                        // [re:a83c51]: Increment / Decrement by `realIncDecRange`.
+                        let Some(c) = a.ctrl(&p) else { return Vec::new() };
+                        let (lo, hi) = (c.attr_f32("realMinValue", 0.0), c.attr_f32("realMaxValue", 1.0));
+                        let v = (c.value + step * c.attr_f32("realIncDecRange", 1.0)).clamp(lo.min(hi), hi.max(lo));
+                        let mut out = Vec::new();
+                        a.v2_set(&p, v, false, &mut out);
+                        return out;
+                    }
+                    a.v2_wheel_knob(&p, step)
+                });
+            }
+        }
         let container = self.stepper_at(&hit).is_none().then(|| (0..=hit.len()).rev().map(|n| hit[..n].to_vec()).find(|p| self.ctrl(p).is_some_and(crate::scroll::scrollable))).flatten();
         if let Some(p) = container {
             let shift = self.mods.shift;
@@ -769,6 +999,17 @@ impl App {
         let overload = self.ctrl(&p).map(|c| c.overload.clone()).unwrap_or_default();
         self.dirty = true;
         vec![UiEvent::Wheel { path: p, overload, dy }]
+    }
+
+    /// Escape: an open menu closes ([re:f3a7e2]; the same in both
+    /// originals). Returns whether one was open.
+    pub fn escape(&mut self) -> bool {
+        if self.menu.take().is_none() {
+            return false;
+        }
+        self.menu_slider = None;
+        self.dirty = true;
+        true
     }
 
     /// A key with no text box editing (see [`UiEvent::Shortcut`]).
@@ -868,6 +1109,7 @@ impl App {
     }
 
     fn mouse_down_events(&mut self, button: MouseButton) -> Vec<UiEvent> {
+        self.clear_wheel_part();
         self.ctrl_press = self.ctrl_click_right && button == MouseButton::Left && self.mods.ctrl;
         let button = if self.ctrl_press { MouseButton::Right } else { button };
         let (x, y) = self.mouse;
@@ -878,6 +1120,17 @@ impl App {
             .rev()
             .map(|n| hit[..n].to_vec())
             .find(|p| self.ctrl(p).is_some_and(|c| matches!(c.class.as_str(), "CtrlTextBox" | "CtrlValueBox" | "CtrlTempoBox" | "CtrlSearchBox") && c.enabled && !c.passive));
+        // [re:b0c3e9]: a tempo box press drags or taps; a double click
+        // without option edits.
+        if button == MouseButton::Left {
+            if let Some(p) = text_box.clone().filter(|p| self.ctrl(p).is_some_and(|c| c.class == "CtrlTempoBox")) {
+                if self.double_click(&p).is_none() || self.mods.alt {
+                    committed.extend(self.tempo_press(&p));
+                    return committed;
+                }
+                self.tap.reset();
+            }
+        }
         // `optSingleClickEdit="false"`: a double click edits; a single
         // press goes to the control underneath (e.g. a mixer strip).
         let candidate = text_box.clone();
@@ -918,7 +1171,11 @@ impl App {
         // `dragable` value boxes (control attribute, else style; [re:4ad8c8]):
         // a single press starts a drag that changes the value.
         if button == MouseButton::Left {
-            if let Some((p, v0)) = deferred.as_ref().and_then(|p| self.ctrl(p).filter(|c| c.class == "CtrlValueBox" && self.opt_bool(c, "dragable")).map(|c| (p.clone(), c.value))) {
+            // [re:a83c51]: second-generation boxes drag unless
+            // `optCanBeDragged="false"`.
+            let dragable = |a: &App, c: &Ctrl| a.opt_bool(c, "dragable") || (a.v2_controls && c.attr_bool("optCanBeDragged", true));
+            if let Some((p, v0)) = deferred.as_ref().and_then(|p| self.ctrl(p).filter(|c| c.class == "CtrlValueBox" && dragable(self, c)).map(|c| (p.clone(), c.value))) {
+                self.press_mods = self.mods;
                 self.press_at = (x, y);
                 self.dragging = false;
                 self.drag_left = false;
@@ -1070,6 +1327,12 @@ impl App {
             return Vec::new();
         };
         let double = if button == MouseButton::Left { self.double_click(&path) } else { None };
+        // [re:9e4f27]: the second press of a double click reaches only the
+        // control's double-click handler; knobs and sliders have none, so
+        // it starts no drag.
+        if self.v2_controls && double.is_some() && self.ctrl(&path).is_some_and(|c| matches!(c.class.as_str(), "CtrlKnob" | "CtrlTransmodKnob" | "CtrlSlider" | "CtrlTransmodSlider")) {
+            return double.into_iter().collect();
+        }
         let mut out = self.press_control(path, button);
         out.extend(double);
         out
@@ -1288,6 +1551,7 @@ impl App {
             let (ox, oy) = self.origin(&path);
             (x - ox as f32, y - oy as f32)
         };
+        let v2 = self.v2_controls;
         let Some(c) = self.ctrl_mut(&path) else { return out };
         out.push(UiEvent::Pressed { path: path.clone(), name: c.name.clone() });
         let v0 = if primary {
@@ -1305,6 +1569,10 @@ impl App {
         } else {
             c.value
         };
+        // [re:e72b4d]: second-generation popup buttons open on the press.
+        if v2 && c.class == "CtrlPopupButton" {
+            out.push(UiEvent::Clicked { path: path.clone(), name: c.name.clone(), id: c.id, on: c.on });
+        }
         if c.class == "CtrlButton" && c.attr_bool("optSendOnMouseDown", false) {
             let momentary = c.attr_bool("optIsMomentary", false);
             if !momentary {
@@ -1315,6 +1583,19 @@ impl App {
         if c.attr_bool("optIsMomentary", false) {
             c.on = true;
         }
+        let mut v0 = v0;
+        // [re:1b8f6c]: a plain slider pressed off its thumb jumps there.
+        let slider = c.class == "CtrlSlider";
+        if self.v2_controls && slider {
+            let portion = self.ctrl(&path).map(|c| self.opt_num(c, "realSliderPortion", 1.0)).unwrap_or(1.0);
+            let Some(c) = self.ctrl(&path) else { return out };
+            let (w, h) = (c.rect.w, c.rect.h);
+            if !crate::v2ctl::on_slider_thumb(w, h, portion, c.value, local.0, local.1) {
+                v0 = crate::v2ctl::slider_point(w, h, local.0, local.1);
+                self.v2_set(&path, v0, false, &mut out);
+            }
+        }
+        self.press_mods = self.mods;
         self.pressed = Some((path, x, y, v0));
         self.dirty = true;
         out
@@ -1361,13 +1642,14 @@ impl App {
             out.extend(self.drop_event(&path));
         }
         let parent_path = path[..path.len().saturating_sub(1)].to_vec();
+        let v2 = self.v2_controls;
         let Some(c) = self.ctrl_mut(&path) else { return out };
         let momentary = c.attr_bool("optIsMomentary", false);
         if matches!(c.class.as_str(), "CtrlButton" | "CtrlPopupButton" | "CtrlDisclosureButton") {
             if momentary {
                 c.on = false;
             }
-            if inside && !c.attr_bool("optSendOnMouseDown", false) {
+            if inside && !c.attr_bool("optSendOnMouseDown", false) && !(v2 && c.class == "CtrlPopupButton") {
                 if !momentary && c.class != "CtrlPopupButton" {
                     c.on = !c.on;
                 }
@@ -1907,5 +2189,188 @@ mod tests {
         let ev = app.mouse_move(70.0, 8.0);
         assert!(!ev.iter().any(|e| matches!(e, UiEvent::ValueChanged { .. })));
         app.mouse_up(MouseButton::Left);
+    }
+
+    fn v2_app(children: Vec<Ctrl>) -> App {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 400, 400), visible: true, enabled: true, children, ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        app.v2_controls = true;
+        app
+    }
+
+    fn v2_ctrl(class: &str, name: &str, rect: crate::ctrl::Rect, value: f32) -> Ctrl {
+        Ctrl { class: class.into(), name: name.into(), rect, visible: true, enabled: true, value, ..Ctrl::default() }
+    }
+
+    fn last_value(ev: &[UiEvent]) -> Option<f32> {
+        ev.iter().rev().find_map(|e| if let UiEvent::ValueChanged { value, .. } = e { Some(*value) } else { None })
+    }
+
+    #[test]
+    fn v2_knobs_drag_relatively_with_shift_for_fine() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlKnob", "K", crate::ctrl::Rect::new(10, 200, 30, 30), 0.9)]);
+        app.mouse_move(25.0, 215.0);
+        app.mouse_down(MouseButton::Left);
+        // 40 px up: clamped at 1 ...
+        assert_eq!(last_value(&app.mouse_move(25.0, 175.0)), Some(1.0));
+        // ... and 20 px back down responds at once.
+        let v = last_value(&app.mouse_move(25.0, 195.0)).unwrap();
+        assert!((v - 0.9).abs() < 1e-5, "{v}");
+        // Shift alone: 2000 px a turn.
+        app.mods.shift = true;
+        let v = last_value(&app.mouse_move(25.0, 215.0)).unwrap();
+        assert!((v - 0.89).abs() < 1e-5, "{v}");
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn v2_transmod_depth_drags_snap_and_reanchor() {
+        let mut k = v2_ctrl("CtrlTransmodKnob", "T", crate::ctrl::Rect::new(10, 200, 40, 40), 0.5);
+        k.set_attr("editingDepth", "true".into());
+        k.set_attr("baseValue", "0.5".into());
+        let mut app = v2_app(vec![k]);
+        // The ring (outside the centre circle) edits the depth.
+        app.mouse_move(12.0, 202.0);
+        app.mouse_down(MouseButton::Left);
+        // 10 px up = 0.05 of the end: still on the base.
+        assert_eq!(last_value(&app.mouse_move(12.0, 192.0)), None);
+        // 40 px up = 0.2: 0.1 behind → depth 0.1 → value 0.55.
+        let v = last_value(&app.mouse_move(12.0, 162.0)).unwrap();
+        assert!((v - 0.55).abs() < 1e-5, "{v}");
+        // Shift re-anchors here: 200 px more = 0.1 of depth, no snapping.
+        app.mods.shift = true;
+        assert_eq!(last_value(&app.mouse_move(12.0, 162.0)), None);
+        let v = last_value(&app.mouse_move(12.0, -38.0)).unwrap();
+        assert!((v - 0.6).abs() < 1e-5, "{v}");
+        app.mouse_up(MouseButton::Left);
+        app.mods.shift = false;
+        // Wheel over the ring: the end moves 1/150 a step.
+        app.mouse_move(12.0, 202.0);
+        let v = last_value(&app.mouse_scroll(0.0, 3.0, true)).unwrap();
+        assert!((v - (0.6 + 0.5 / 150.0)).abs() < 1e-5, "{v}");
+        // Over the centre: the base moves (marked as a base edit until the
+        // next input).
+        app.mouse_move(30.0, 220.0);
+        let ev = app.mouse_scroll(0.0, -1.0, true);
+        assert!((last_value(&ev).unwrap() - (0.5 - 1.0 / 150.0)).abs() < 1e-5);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragPart"), Some("primary"));
+        app.mouse_move(30.0, 221.0);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragPart"), None);
+    }
+
+    #[test]
+    fn v2_plain_knobs_and_sliders_pass_the_wheel_on() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlKnob", "K", crate::ctrl::Rect::new(10, 10, 30, 30), 0.5), v2_ctrl("CtrlSlider", "S", crate::ctrl::Rect::new(60, 10, 20, 100), 0.5)]);
+        app.mouse_move(20.0, 20.0);
+        assert!(app.mouse_scroll(0.0, 1.0, true).is_empty());
+        app.mouse_move(70.0, 50.0);
+        assert!(app.mouse_scroll(0.0, 1.0, true).is_empty());
+        assert_eq!(app.ctrl(&[0]).unwrap().value, 0.5);
+    }
+
+    #[test]
+    fn v2_sliders_jump_to_the_press_and_fine_drag() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlSlider", "S", crate::ctrl::Rect::new(10, 10, 20, 120), 0.0)]);
+        // Thumb at the bottom (100..120); a press at local y 50 jumps.
+        app.mouse_move(20.0, 60.0);
+        let v = last_value(&app.mouse_down(MouseButton::Left)).unwrap();
+        assert!((v - (1.0 - 50.0 / 120.0)).abs() < 1e-5, "{v}");
+        // 10 px over a 100 px track ...
+        let v2 = last_value(&app.mouse_move(20.0, 50.0)).unwrap();
+        assert!((v2 - v - 0.1).abs() < 1e-5);
+        // ... and 20 times slower with shift alone.
+        app.mods.shift = true;
+        app.mouse_move(20.0, 50.0);
+        let v3 = last_value(&app.mouse_move(20.0, 30.0)).unwrap();
+        assert!((v3 - v2 - 0.01).abs() < 1e-5, "{v3} {v2}");
+        app.mouse_up(MouseButton::Left);
+        // A press on the thumb does not jump.
+        app.mods.shift = false;
+        assert!(last_value(&app.mouse_down(MouseButton::Left)).is_none());
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn v2_double_clicks_on_knobs_start_no_drag() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlKnob", "K", crate::ctrl::Rect::new(10, 10, 30, 30), 0.5)]);
+        app.mouse_move(20.0, 20.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_up(MouseButton::Left);
+        let ev = app.mouse_down(MouseButton::Left);
+        assert!(matches!(ev.as_slice(), [UiEvent::DoubleClicked { .. }]), "{ev:?}");
+        assert!(last_value(&app.mouse_move(20.0, 0.0)).is_none());
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn v2_value_boxes_drag_and_wheel_in_units() {
+        let mut vb = v2_ctrl("CtrlValueBox", "Num", crate::ctrl::Rect::new(10, 50, 30, 17), 4.0);
+        for (k, v) in [("optSingleClickEdit", "false"), ("realMinValue", "1"), ("realMaxValue", "16"), ("realIncDecRange", "1")] {
+            vb.set_attr(k, v.into());
+        }
+        let mut off = vb.clone();
+        off.name = "Off".into();
+        off.rect = crate::ctrl::Rect::new(60, 50, 30, 17);
+        off.set_attr("optCanBeDragged", "false".into());
+        let mut app = v2_app(vec![vb, off]);
+        app.mouse_move(20.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        // 40 px up: 15 · 40 / 200 = 3 units.
+        let v = last_value(&app.mouse_move(20.0, 18.0)).unwrap();
+        assert!((v - 7.0).abs() < 1e-4, "{v}");
+        app.mouse_up(MouseButton::Left);
+        app.mouse_move(20.0, 58.0);
+        assert_eq!(last_value(&app.mouse_scroll(0.0, -1.0, true)), Some(6.0));
+        app.mouse_move(70.0, 58.0);
+        app.mouse_down(MouseButton::Left);
+        assert!(last_value(&app.mouse_move(70.0, 18.0)).is_none());
+        app.mouse_up(MouseButton::Left);
+    }
+
+    #[test]
+    fn tempo_boxes_drag_the_whole_part_or_the_fraction() {
+        let mut tb = v2_ctrl("CtrlTempoBox", "BPM", crate::ctrl::Rect::new(10, 10, 40, 15), 0.0);
+        tb.text = "120.50".into();
+        let mut app = v2_app(vec![tb]);
+        // Left half: the whole part, 1.15 BPM a pixel (floored).
+        app.mouse_move(15.0, 15.0);
+        app.mouse_down(MouseButton::Left);
+        let v = last_value(&app.mouse_move(15.0, 14.0)).unwrap();
+        assert!((v - 121.5).abs() < 1e-3, "{v}");
+        app.mouse_up(MouseButton::Left);
+        assert_eq!(app.ctrl(&[0]).unwrap().text, "121.50");
+        assert!(!app.is_editing());
+        // Right half: the fraction (kept by the box, from 0).
+        app.mouse_move(45.0, 15.0);
+        std::thread::sleep(DOUBLE_CLICK);
+        app.mouse_down(MouseButton::Left);
+        let v = last_value(&app.mouse_move(45.0, -85.0)).unwrap();
+        assert!((v - 121.495).abs() < 1e-3, "{v}");
+        app.mouse_up(MouseButton::Left);
+        // A double click edits.
+        app.mouse_move(45.0, 15.0);
+        std::thread::sleep(DOUBLE_CLICK);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_up(MouseButton::Left);
+        app.mouse_down(MouseButton::Left);
+        assert!(app.is_editing());
+    }
+
+    #[test]
+    fn v2_popup_buttons_open_on_the_press() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlPopupButton", "P", crate::ctrl::Rect::new(10, 10, 60, 20), 0.0)]);
+        app.mouse_move(20.0, 20.0);
+        assert!(app.mouse_down(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { name, .. } if name == "P")));
+        assert!(!app.mouse_up(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { .. })));
+    }
+
+    #[test]
+    fn escape_closes_an_open_menu() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlButton", "B", crate::ctrl::Rect::new(10, 10, 30, 30), 0.0)]);
+        assert!(!app.escape());
+        app.open_menu(&[0], vec!["One".into()], None);
+        assert!(app.escape());
+        assert!(app.menu.is_none());
     }
 }

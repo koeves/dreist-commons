@@ -21,6 +21,7 @@ pub mod splitter;
 pub mod style;
 pub mod text;
 pub mod tooltip;
+pub mod v2ctl;
 #[cfg(feature = "window")]
 pub mod window;
 
