@@ -30,6 +30,12 @@ impl Node for Limiter {
         &mut self.ports
     }
 
+    /// The gain-reduction meter (control output 0, 1 = none), which the
+    /// panel's meter shows ([re:f22615]).
+    fn output(&self, index: usize) -> Option<f32> {
+        (index == 0).then_some(self.gr)
+    }
+
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         let n = inp[0].len();
         if n == 0 {

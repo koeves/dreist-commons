@@ -4,7 +4,7 @@
 //! `gr = dB − ((dB − thr)/ratio + thr)` with ratio = Ratio port + 1 (the
 //! port holds `log2` of the displayed ratio, so "4" gives 3:1), makeup and
 //! wet/dry. The gain-reduction meter smoothing is reproduced for the
-//! control output only.
+//! control output (the panel's meter).
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
@@ -29,6 +29,12 @@ impl Default for VcaComp {
 impl Node for VcaComp {
     fn ports(&mut self) -> &mut Vec<Port> {
         &mut self.ports
+    }
+
+    /// The gain-reduction meter (control output 0, 1 = none), which the
+    /// panel's meter shows ([re:f22615]).
+    fn output(&self, index: usize) -> Option<f32> {
+        (index == 0).then_some(self.meter[2])
     }
 
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {

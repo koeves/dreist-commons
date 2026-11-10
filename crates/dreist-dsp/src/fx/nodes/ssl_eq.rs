@@ -6,7 +6,7 @@
 
 use crate::fx::{Ctx, Node, Port, ports, ports_from};
 
-type Coeffs = ([f64; 3], [f64; 3]);
+pub(crate) type Coeffs = ([f64; 3], [f64; 3]);
 
 const PASS: Coeffs = ([1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
 
@@ -131,7 +131,6 @@ impl SslEq {
     fn update(&mut self, sr: f32) {
         let p = |i: usize| self.ports[i].value;
         let fs = sr as f64;
-        let gain = |x: f32| ((x as f64 * 1.19029).tan() as f32 * 8.0) as f64;
         for b in 0..4 {
             let base = b * 4;
             self.on[b] = p(base + 3) >= 0.5;
@@ -140,23 +139,33 @@ impl SslEq {
                 continue;
             }
             self.keys[b] = key;
-            let c = match b {
-                0 => {
-                    let f = ((key[1] + 1.0).exp2()) as f64;
-                    if key[0] < 0.5 { ssl_shelf(f, gain(key[2]), fs, false) } else { ssl_bell(f, gain(key[2]), fs) }
-                }
-                1 | 2 => {
-                    let f = ((key[1] + 1.0).exp2()) as f64;
-                    ssl_peak(f, (-key[0]).exp() as f64, gain(key[2]), fs)
-                }
-                _ => {
-                    let f = ((key[1] + 1.0).exp2()) as f64;
-                    if key[0] < 0.5 { ssl_shelf(f, gain(key[2]), fs, true) } else { ssl_bell(f, gain(key[2]), fs) }
-                }
-            };
-            self.bands[b].c = c;
+            self.bands[b].c = band_coeffs(b, key, fs);
         }
         self.first = false;
+    }
+}
+
+/// Band `b`'s coefficients from its first three ports (shape or Q,
+/// frequency, gain) at `fs`: LF / HF shelf or bell, the mids peaking.
+pub(crate) fn band_coeffs(b: usize, key: [f32; 3], fs: f64) -> Coeffs {
+    let gain = |x: f32| ((x as f64 * 1.19029).tan() as f32 * 8.0) as f64;
+    let f = ((key[1] + 1.0).exp2()) as f64;
+    match b {
+        0 => {
+            if key[0] < 0.5 {
+                ssl_shelf(f, gain(key[2]), fs, false)
+            } else {
+                ssl_bell(f, gain(key[2]), fs)
+            }
+        }
+        1 | 2 => ssl_peak(f, (-key[0]).exp() as f64, gain(key[2]), fs),
+        _ => {
+            if key[0] < 0.5 {
+                ssl_shelf(f, gain(key[2]), fs, true)
+            } else {
+                ssl_bell(f, gain(key[2]), fs)
+            }
+        }
     }
 }
 

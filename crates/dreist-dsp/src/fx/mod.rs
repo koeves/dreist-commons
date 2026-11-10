@@ -3,6 +3,7 @@
 //! one. See the dreist-re effects notes.
 
 pub mod convert;
+pub mod display;
 pub mod nodes;
 // Generated table: kept as written.
 #[rustfmt::skip]
