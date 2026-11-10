@@ -136,7 +136,7 @@ impl Sh101 {
                 };
                 let u = y4o * rc;
                 let (j, _) = lut_pos(u);
-                let tr = if u.is_nan() || u.abs() >= 2147483648.0 { i32::MIN as f32 } else { (u as i32) as f32 };
+                let tr = crate::analog::lut_int(u) as f32;
                 let h = inp[l][i] * 48.0 - self.hp[l];
                 self.hp[l] = h * self.hp_coef + self.hp[l];
                 let x0 = (h - t[j]) + (t[j + 1] - t[j]) * (tr - u);

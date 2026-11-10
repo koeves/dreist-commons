@@ -169,16 +169,29 @@ pub fn tri_tab() -> &'static [f32] {
     })
 }
 
-/// Table read used by the analog filters: integer part truncated and
-/// saturated to 16 bits, offset by 1024 (16-bit wrap), clamped to
-/// `0..=2047`, then linear interpolation with the next entry by `v - trunc(v)`.
+/// Table read used by the analog filters: integer part saturated to 16
+/// bits, offset by 1024 (16-bit wrap), clamped to `0..=2047`, then linear
+/// interpolation with the next entry by `v - int(v)`.
 /// Returns `(index, frac)` so callers can read several tables at one point.
+///
+/// The integer part is `floor(v)`, not `trunc(v)`: the original converts
+/// with `cvtps2dq` (current rounding mode; [re:6d93d6]),
+/// and both versions run the audio thread under round-down (`fesetround`
+/// 0x400 around voices and effects, v2 [re:93ab44], v1 [re:704a2e]).
+/// Truncating read negative inputs from the segment above.
 #[inline]
 pub fn lut_pos(v: f32) -> (usize, f32) {
-    let t = if v.is_nan() || v >= 2147483648.0 || v < -2147483648.0 { i32::MIN } else { v as i32 };
+    let t = lut_int(v);
     let s = t.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
     let i = s.wrapping_add(0x400).min(0x7ff).max(0) as usize;
     (i, v - t as f32)
+}
+
+/// The original's `cvtps2dq` under round-down: `floor(v)`, or `i32::MIN`
+/// for NaN and out-of-range inputs.
+#[inline]
+pub fn lut_int(v: f32) -> i32 {
+    if v.is_nan() || v >= 2147483648.0 || v < -2147483648.0 { i32::MIN } else { v.floor() as i32 }
 }
 
 #[inline]
@@ -214,10 +227,24 @@ mod tests {
         assert!((s[1024 + 512] - 0.5).abs() < 1e-6);
     }
 
+    /// Round-down reads keep an odd table odd between entries: −x reads
+    /// the mirror segment of x (truncation extrapolated from the segment
+    /// above).
+    #[test]
+    fn lut_reads_odd_tables_symmetrically() {
+        let t = analog();
+        for k in 1..200 {
+            let x = k as f32 * 0.37;
+            let (a, b) = (lerp(&t.tanhlim, lut_pos(x)), lerp(&t.tanhlim, lut_pos(-x)));
+            assert!((a + b).abs() <= 1e-5 * a.abs().max(1.0), "{x}: {a} vs {b}");
+        }
+    }
+
     #[test]
     fn lut_clamps() {
         assert_eq!(lut_pos(0.5), (1024, 0.5));
-        assert_eq!(lut_pos(-0.5).0, 1024);
+        // Round-down: −0.5 reads the segment below the centre.
+        assert_eq!(lut_pos(-0.5), (1023, 0.5));
         assert_eq!(lut_pos(2000.0).0, 0x7ff);
         assert_eq!(lut_pos(-2000.0).0, 0);
         // Quirk kept from the original: the 16-bit add wraps past 31743.
