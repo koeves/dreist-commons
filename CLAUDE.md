@@ -27,4 +27,6 @@ resources, IDs, menus, readers) in the apps, not here.
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --features dreist-gui/window -- -D warnings
+    cargo clippy -p dreist-host --all-targets --all-features -- -D warnings
+    cargo test -p dreist-host --all-features
     cargo fmt --all --check
