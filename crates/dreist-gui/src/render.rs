@@ -825,6 +825,12 @@ impl<'s> Renderer<'s> {
     }
 
     pub fn draw_text(&self, p: &mut Painter, c: &Ctrl, r: RectF, text: &str, colour_attr: &str) {
+        self.draw_text_fit(p, c, r, text, colour_attr, None);
+    }
+
+    /// [`Self::draw_text`], shortening the text to fit `fit` px instead of
+    /// the text rect's width when given.
+    fn draw_text_fit(&self, p: &mut Painter, c: &Ctrl, r: RectF, text: &str, colour_attr: &str, fit: Option<f32>) {
         let st = self.style(c);
         if text.is_empty() {
             return;
@@ -841,7 +847,7 @@ impl<'s> Renderer<'s> {
         }
         let tr = self.text_rect(c, r);
         let fx = self.text_fx(c);
-        let s = p.fonts.shorten(&font, text, tr.w / fx.scale_x.max(0.1), self.styles.shorten(st));
+        let s = p.fonts.shorten(&font, text, fit.unwrap_or(tr.w) / fx.scale_x.max(0.1), self.styles.shorten(st));
         let (h, v) = (self.styles.h_align(st), self.styles.v_align(st));
         // Opt-in glow: `<colour attr>Glow` (`colTextGlow`, `colAltTextGlow`)
         // blurred `realTextGlowRadius` px (default 2) behind the text,
@@ -1076,7 +1082,17 @@ impl<'s> Renderer<'s> {
         let aw = b.h * opt_f32(self.styles, st, c, "realPopupArrowSize", 0.4);
         let ax = arrow_x + box_w * 0.5 - aw * 0.5;
         let tr = if explicit { RectF::new(b.x, b.y, ax - 1.0 - b.x, b.h) } else { RectF::new(b.x + 2.0, b.y, arrow_x - b.x - 2.0, b.h) };
-        self.draw_text(p, c, tr, &c.text, "colText");
+        // Opt-in `optShortenToControlWidth`: the text shortened to the
+        // whole control's width and clipped to the text rect (the
+        // original's DrawText shortens to Ctrl::Width [re:1dcf76], so a
+        // label just too wide for the rect is cut off, not elided).
+        if opt_bool(self.styles, st, c, "optShortenToControlWidth", false) {
+            let prev = p.push_clip((p.tx + tr.x).floor() as i32, (p.ty + tr.y).floor() as i32, tr.w.ceil() as i32, tr.h.ceil() as i32);
+            self.draw_text_fit(p, c, tr, &c.text, "colText", Some(b.w));
+            p.pop_clip(prev);
+        } else {
+            self.draw_text(p, c, tr, &c.text, "colText");
+        }
         // (opt-in `colPopupArrow`: the arrow's own colour)
         let text = opt_colour(self.styles, st, c, "colPopupArrow").unwrap_or_else(|| self.styles.colour(st, "colText", std_col("StandardControlText")));
         let border = self.styles.colour(st, "colBorder", std_col("StandardControlBorder"));
@@ -1332,8 +1348,10 @@ impl<'s> Renderer<'s> {
     /// 2. while a source is selected, the depth zone ([re:5d0d8e]) md / 2 + t
     ///    wide from the edge in colDepth: base .. base + depth, or with a
     ///    bipolar source (`polar`) the mirrored range around the base;
-    /// 3. `modPosition` (live, when given): a 10° mark at
-    ///    110 + 310·pos in colModulationPos, max(.3·md, 1) wide at the edge;
+    /// 3. the live position (`modPosition`, else the base value; panels
+    ///    set it every tick from the parameter's current transmod value
+    ///    [re:55a64c]): a 10° mark at 110 + 310·pos in colModulationPos,
+    ///    max(.3·md, 1) wide at the edge;
     /// 4. while a source is selected, the depth handles ([re:2a7c51]): a
     ///    2 px line in colHandleBorder from the track's inner edge to the
     ///    rim at each zone end and (knobs over 32 px) a dot (md / 2 + t / 2)
@@ -1390,8 +1408,10 @@ impl<'s> Renderer<'s> {
         if !c.enabled {
             return;
         }
-        // 3: live modulation position.
-        if let Some(pos) = c.attr("modPosition").and_then(|v| v.trim().parse::<f32>().ok()) {
+        // 3: live modulation position (without a `modPosition`, the base
+        // value: what an unmodulated parameter's panel reports).
+        {
+            let pos = c.attr("modPosition").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(base);
             let tm = (md * 0.3).max(1.0);
             let col = s.colour(st, "colModulationPos", std_col("Red"));
             p.stroke_arc(b.inset(tm * 0.5), pos.clamp(0.0, 1.0) * 310.0 + 110.0, 10.0, true, col, tm);
@@ -1958,15 +1978,27 @@ impl<'s> Renderer<'s> {
             // Opt-in `realCurveFillAlpha`: each curve's area down to the
             // bottom filled in its colour at that alpha first.
             let fill = opt_raw(s, st, c, "realCurveFillAlpha").and_then(|v| v.trim().parse::<f32>().ok());
+            // Opt-in `optCurveClosed`: the line runs on from the curve's end
+            // down to the bottom 1 px right of the area and back along the
+            // bottom to the left edge (the original's display lines end in
+            // (w + 1, h) and (0, h) [re:b03feb]).
+            let closed = opt_bool(s, st, c, "optCurveClosed", false);
             for curve in curves.split(';') {
                 let Some((col, pts)) = curve.split_once('|') else { continue };
-                let pts = parse(pts);
+                let mut pts = parse(pts);
                 if pts.len() >= 2 {
                     let col = s.parse_colour(col);
+                    let bottom = area.y + area.h;
+                    if closed {
+                        pts.push((area.x + area.w + 1.0, bottom));
+                        pts.push((area.x, bottom));
+                    }
                     if let Some(a) = fill {
                         let mut poly = pts.clone();
-                        poly.push((pts[pts.len() - 1].0, area.y + area.h));
-                        poly.push((pts[0].0, area.y + area.h));
+                        if !closed {
+                            poly.push((pts[pts.len() - 1].0, bottom));
+                            poly.push((pts[0].0, bottom));
+                        }
                         p.fill_polygon(&poly, col.with_alpha(col.a as f32 / 255.0 * a));
                     }
                     p.polyline(&pts, col, lw);
@@ -2034,6 +2066,9 @@ impl<'s> Renderer<'s> {
         // Screen angles (degrees clockwise from 3 o'clock, y down).
         let a0 = -o("realAngleStart", 135.0);
         let sweep = o("realAngleSize", 90.0);
+        if opt_bool(s, st, c, "optMeterMarkings", false) {
+            return self.meter_markings(p, c);
+        }
         let scale = self.colour_attr(st, "colAltBorder");
         let text = self.colour_attr(st, "colText");
         p.stroke_arc(RectF::new(px - rad, py - rad, 2.0 * rad, 2.0 * rad), a0.rem_euclid(360.0), sweep, true, scale, 1.0);
@@ -2073,6 +2108,63 @@ impl<'s> Renderer<'s> {
         let needle = s.colour(st, "colLine", text);
         let (x, y) = at(c.value.clamp(0.0, 1.0), rad * 0.95);
         p.line(px, py, x, y, needle, o("realLineWidth", 1.5));
+    }
+
+    /// Opt-in `optMeterMarkings` on a needle meter: the original's
+    /// markings and needle ([re:664306]), all in DarkGrey. With
+    /// the pivot (cx, cy) = floor((`realPivotX`, `realPivotY`) × (w, h))
+    /// (default .5, 1), R = `realRadius` (default 1) × min(w, h) and angles
+    /// counter-clockwise from 3 o'clock (`realAngleStart` a, default 135,
+    /// `realAngleSize` s, default 90): a 1 px arc of radius floor(.95·R)
+    /// over a → a − s; five 1 px ticks at a − k·s/4 from .99·R to 1.05·R
+    /// (floored); `textLeftRange` / `textRightRange` centred in a 20 × 12
+    /// box whose top left is 10 px left of and above the outer end of the
+    /// first / last tick; `textUnits` centred in a w × 12 box at
+    /// floor(.8·R) along a − s/2 (left edge shifted as the point); the
+    /// needle 2 px from `realRadiusStart` (default 0) × min(w, h) to R at
+    /// a − v·s.
+    fn meter_markings(&self, p: &mut Painter, c: &Ctrl) {
+        use crate::style::HAlign;
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let o = |k: &str, d: f32| opt_f32(s, st, c, k, d);
+        let (cx, cy) = ((w * o("realPivotX", 0.5)).floor(), (h * o("realPivotY", 1.0)).floor());
+        let side = w.min(h);
+        let r = o("realRadius", 1.0) * side;
+        let (a, sw) = (o("realAngleStart", 135.0), o("realAngleSize", 90.0));
+        let grey = std_col("DarkGrey");
+        let font = s.font(st);
+        let r1 = (r * 0.95).floor();
+        // (screen angles run clockwise)
+        p.stroke_arc(RectF::new(cx - r1, cy - r1, 2.0 * r1, 2.0 * r1), (-a).rem_euclid(360.0), sw, true, grey, 1.0);
+        let pt = |deg: f32, k: f32| {
+            let t = deg.to_radians();
+            ((t.cos() * r * k).floor(), (t.sin() * r * k).floor())
+        };
+        if let Some(t) = c.attr("textUnits").or_else(|| s.raw(st, "textUnits")).filter(|t| !t.is_empty()) {
+            let (dx, dy) = pt(a - sw * 0.5, 0.8);
+            p.text(RectF::new(cx - (w / 2.0).trunc() + dx, cy - dy, w, 12.0), t, grey, &font, HAlign::Center, s.v_align(st));
+        }
+        for k in 0..5 {
+            let deg = a - k as f32 * sw * 0.25;
+            let (ix, iy) = pt(deg, 0.99);
+            let (ox, oy) = pt(deg, 1.05);
+            p.line(cx + ix, cy - iy, cx + ox, cy - oy, grey, 1.0);
+            let key = match k {
+                0 => "textLeftRange",
+                4 => "textRightRange",
+                _ => continue,
+            };
+            if let Some(t) = c.attr(key).or_else(|| s.raw(st, key)).filter(|t| !t.is_empty()) {
+                p.text(RectF::new(cx + ox - 10.0, cy - oy - 10.0, 20.0, 12.0), t, grey, &font, HAlign::Center, s.v_align(st));
+            }
+        }
+        let t = (a - c.value.clamp(0.0, 1.0) * sw).to_radians();
+        let r0 = o("realRadiusStart", 0.0) * side;
+        let (x0, y0) = (cx + (t.cos() * r0).floor(), cy - (t.sin() * r0).floor());
+        let (x1, y1) = (cx + (t.cos() * r).floor(), cy - (t.sin() * r).floor());
+        p.line(x0, y0, x1, y1, grey, 2.0);
     }
 
     /// A table or list box with a table style (see [`Renderer::native_table`]):
@@ -3256,5 +3348,48 @@ mod tests {
         assert_eq!(px(&closed, 20, 15, 10), [255, 255, 255], "closed: pointing right");
         assert_eq!(px(&closed, 20, 10, 18), [0, 0, 0]);
         assert_eq!(px(&open, 20, 10, 14), [255, 0, 0], "open: pointing down in colAltText");
+    }
+
+    #[test]
+    fn transmod_layers_mark_the_base_without_a_mod_position() {
+        let st: Vec<(&str, &str)> = TRANSMOD.iter().copied().chain([("optTransmodLayers", "true")]).collect();
+        let s = sheet(&[("T", "CtrlTransmodStyle", &st)]);
+        let yellow = |px: &[u8]| px.chunks(4).filter(|p| p[0] > 200 && p[1] > 200 && p[2] < 60).count();
+        let mut c = ctrl("CtrlTransmodKnob", "T", 60, 60, &[]);
+        c.value = 0.5;
+        let at_value = draw(&s, &c);
+        assert!(yellow(&at_value) > 0, "the mark at the value");
+        // The mark at 270° (top centre) for 0.5: 115 + 310 · .5.
+        assert_eq!(px(&at_value, 60, 30, 1), [255, 255, 0]);
+        c.set_attr("modPosition", "0".into());
+        assert_ne!(px(&draw(&s, &c), 60, 30, 1), [255, 255, 0], "a given position wins");
+    }
+
+    #[test]
+    fn closed_curves_run_along_the_bottom() {
+        let base = [COLOURS, &[("realBorderWidth", "0"), ("realLineWidth", "2")]].concat();
+        let closed = [base.as_slice(), &[("optCurveClosed", "true")]].concat();
+        let s = sheet(&[("Open", "CtrlStyle", &base), ("Closed", "CtrlStyle", &closed)]);
+        let c = |st: &str| draw(&s, &ctrl("CtrlPolyPlot", st, 107, 50, &[("curves", "0, 0, 255, 255|0,0.5 0.99,0.5")]));
+        let (open, shut) = (c("Open"), c("Closed"));
+        assert!(px(&shut, 107, 50, 49)[2] > 100, "the line along the bottom");
+        assert!(px(&open, 107, 50, 49)[2] < 100);
+        assert!(px(&shut, 107, 106, 40)[2] > 100, "and down the right edge");
+    }
+
+    #[test]
+    fn meter_markings_are_opt_in() {
+        let meter = [COLOURS, &[("optDrawBorder", "false")]].concat();
+        let marks = [meter.as_slice(), &[("optMeterMarkings", "true")]].concat();
+        let s = sheet(&[("Needle", "CtrlMeterStyle", &meter), ("Marks", "CtrlMeterStyle", &marks)]);
+        let plain = draw(&s, &ctrl("CtrlMeter", "Needle", 107, 50, &[]));
+        let m = draw(&s, &ctrl("CtrlMeter", "Marks", 107, 50, &[]));
+        assert_ne!(plain, m);
+        // Value 0: the needle in DarkGrey from the pivot (53, 50) up-left at
+        // 135°, R = 50.
+        let p = px(&m, 107, 35, 32);
+        assert!(p[0] > 30 && p[0] < 90 && p[0] == p[2], "{p:?}");
+        // The arc (radius floor(.95 · 50) = 47) at its top.
+        assert!(px(&m, 107, 53, 3)[0] > 20);
     }
 }
