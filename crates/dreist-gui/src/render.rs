@@ -307,6 +307,7 @@ impl<'s> Renderer<'s> {
             "CtrlPopupButton" => self.popup(p, c),
             "CtrlKnob" => self.knob(p, c),
             "CtrlTransmodKnob" => self.transmod_knob(p, c),
+            "CtrlTransmodSlider" if opt_bool(self.styles, self.style(c), c, "optModStrip", false) => self.transmod_slider(p, c),
             "CtrlSlider" | "CtrlTransmodSlider" => self.slider(p, c),
             "CtrlCollapsePanel" => self.collapse(p, c),
             "CtrlScrollBar" => {
@@ -1070,6 +1071,55 @@ impl<'s> Renderer<'s> {
         }
     }
 
+    /// Opt-in (`optModStrip`) transmod slider: the main track and a
+    /// modulation strip at its right, `realModDim` × the width
+    /// ([re:97130d]; vertical sliders). The main track
+    /// (inset `realTrackInset`, default 0) is colFill above the handle's
+    /// centre and colAltFill below it; the strip colModTrackFill
+    /// ([re:ffb722]). A modulation depth (`modDepth`) fills base .. base +
+    /// depth across both in colDepth ([re:6ad3bc], simplified). The handle
+    /// ([re:bf1a22]) is a disc as wide as the main track × `realSliderPortion`
+    /// (default 1) in colHandleBorder, with a colHandleFill disc inset
+    /// ceil(width / 8).
+    fn transmod_slider(&self, p: &mut Painter, c: &Ctrl) {
+        let st = self.style(c);
+        let s = self.styles;
+        let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+        let mod_dim = c.attr_f32("realModDim", 0.25);
+        let portion = c.attr_f32("realSliderPortion", 1.0);
+        let inset = (w * c.attr_f32("realTrackInset", 0.0)).round();
+        let track_w = w - 2.0 * inset;
+        let mod_w = track_w * mod_dim;
+        let main_w = ((inset + track_w - mod_w).round() - inset).max(0.0);
+        let hs = ((w - w * mod_dim) * portion).trunc().max(1.0);
+        let editing_depth = c.attr("editingDepth") == Some("true");
+        let base = if editing_depth { c.attr_f32("baseValue", 0.0) } else { c.value }.clamp(0.0, 1.0);
+        let hy = ((1.0 - base) * (h - hs)).trunc();
+        let centre = hy + (hs / 2.0).trunc();
+        let fill = s.colour(st, "colFill", std_col("StandardControlBackground"));
+        let alt = s.colour(st, "colAltFill", std_col("StandardControlBackground"));
+        let strip = s.colour(st, "colModTrackFill", Colour::rgba(128, 128, 128, 255));
+        if !c.enabled {
+            p.fill_rect(RectF::new(0.0, 0.0, w, h), fill);
+            return;
+        }
+        p.fill_rect(RectF::new(inset, 0.0, main_w, centre.max(0.0)), fill);
+        p.fill_rect(RectF::new(inset, centre, main_w, (h - centre).max(0.0)), alt);
+        p.fill_rect(RectF::new(inset + main_w, 0.0, (w - main_w - 2.0 * inset).max(0.0), h), strip);
+        let depth = c.attr_f32("modDepth", 0.0);
+        if depth.abs() > 1e-4 {
+            let zone = s.colour(st, "colDepth", std_col("StandardControlHighlight"));
+            let y = |v: f32| (1.0 - v.clamp(0.0, 1.0)) * (h - hs) + hs / 2.0;
+            let (a, b) = (y(base), y(base + depth));
+            p.fill_rect(RectF::new(inset, a.min(b), w - 2.0 * inset, (a - b).abs()), zone);
+        }
+        let ring = s.colour(st, "colHandleBorder", Colour::WHITE);
+        let dot = s.colour(st, "colHandleFill", Colour::BLACK);
+        let r = RectF::new(0.0, hy, w - (w * mod_dim).round(), hs);
+        p.fill_ellipse(r, ring);
+        p.fill_ellipse(r.inset((w * 0.125).ceil()), dot);
+    }
+
     /// [re:0c57f8] + handle [re:a65320]. Opt-in: `enumHandleShape="Rect"`
     /// (a rectangular cap, see [`Renderer::handle`]) and `optFlipDirection`
     /// (vertical sliders grow downwards, horizontal ones leftwards).
@@ -1753,6 +1803,27 @@ mod tests {
         assert_eq!(at(&right, 45), [255, 0, 0]);
         assert_ne!(at(&right, 30), [255, 0, 0]);
         check(&s, ctrl("CtrlPanSlider", "PanRect", 73, 12, &[]), 0.2, 0.8);
+    }
+
+    #[test]
+    fn transmod_slider_strip_is_opt_in() {
+        let tm: &[(&str, &str)] = &[("colFill", "#808080"), ("colAltFill", "#202020"), ("colModTrackFill", "#00FF00"), ("colHandleBorder", "#FFFFFF"), ("colHandleFill", "#000000")];
+        let s = sheet(&[("Tm", "CtrlTransmodStyle", tm), ("TmStrip", "CtrlTransmodStyle", &[tm, &[("optModStrip", "true")]].concat())]);
+        let mut plain = ctrl("CtrlTransmodSlider", "Tm", 20, 100, &[("realModDim", "0.3")]);
+        plain.value = 0.5;
+        let mut strip = plain.clone();
+        strip.style = "TmStrip".into();
+        // Without the option the slider draws as a plain slider.
+        let mut sl = plain.clone();
+        sl.class = "CtrlSlider".into();
+        assert_eq!(draw(&s, &plain), draw(&s, &sl));
+        let px = draw(&s, &strip);
+        let at = |x: usize, y: usize| px[(y * 20 + x) * 4..(y * 20 + x) * 4 + 3].to_vec();
+        // The strip (right 6 px), the light track above the handle and the
+        // dark one below it.
+        assert_eq!(at(17, 2), vec![0, 255, 0]);
+        assert_eq!(at(5, 2), vec![128, 128, 128]);
+        assert_eq!(at(5, 97), vec![32, 32, 32]);
     }
 
     #[test]
