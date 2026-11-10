@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.3] - 2026-11-11
+
+A shared host crate (`dreist-host`) owns the apps' audio, MIDI, dialog and serialisation
+dependencies, so their versions are defined here only.
+
+### Features
+
+- **host:** Shared host crate owns the audio, MIDI and dialog dependencies
+
 ## [0.2.2] - 2026-11-10
 
 Dependency updates (tiny-skia 0.12 with pixel-identical rendering, roxmltree, fontdue, midir 0.11
