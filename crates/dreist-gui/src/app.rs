@@ -500,9 +500,28 @@ impl App {
     pub fn mouse_move(&mut self, x: f32, y: f32) -> Vec<UiEvent> {
         // Drags change controls: only those repaint.
         if self.pressed.is_some() || self.split_drag.is_some() {
-            return self.damage_only(|a| a.mouse_move_events(x, y));
+            return self.damage_only(|a| {
+                let out = a.mouse_move_events(x, y);
+                a.scroll_bar_drags(out)
+            });
         }
         self.mouse_move_events(x, y)
+    }
+
+    /// A dragged scroll container bar scrolls its container (the editor
+    /// does not see the bar's value).
+    fn scroll_bar_drags(&mut self, out: Vec<UiEvent>) -> Vec<UiEvent> {
+        out.into_iter()
+            .filter(|e| {
+                let UiEvent::ValueChanged { path, value, .. } = e else { return true };
+                let Some(axis) = self.ctrl(path).and_then(|c| c.attr(crate::scroll::BAR)).map(str::to_string) else { return true };
+                if let Some(c) = path.split_last().and_then(|(_, p)| self.ctrl_mut(p)) {
+                    crate::scroll::from_bar(c, &axis, *value);
+                }
+                self.dirty = true;
+                false
+            })
+            .collect()
     }
 
     /// Run an input handler; when it asks for a whole repaint, repaint only
@@ -718,6 +737,29 @@ impl App {
         self.damage_only(|a| a.mouse_wheel_events(dy))
     }
 
+    /// A wheel or trackpad scroll: `dx` / `dy` as the platform reports
+    /// them (positive = right / up), in lines or (`lines` false) pixels.
+    /// The innermost scroll container under the mouse (see
+    /// [`crate::scroll`]) takes it; else steppers and custom controls get
+    /// the dominant axis in lines, as [`App::mouse_wheel`].
+    pub fn mouse_scroll(&mut self, dx: f32, dy: f32, lines: bool) -> Vec<UiEvent> {
+        let hit = self.hit(self.mouse.0, self.mouse.1);
+        let container = self.stepper_at(&hit).is_none().then(|| (0..=hit.len()).rev().map(|n| hit[..n].to_vec()).find(|p| self.ctrl(p).is_some_and(crate::scroll::scrollable))).flatten();
+        if let Some(p) = container {
+            let shift = self.mods.shift;
+            return self.damage_only(|a| {
+                if let Some(c) = a.ctrl_mut(&p) {
+                    if crate::scroll::wheel(c, -dx, -dy, lines, shift) {
+                        a.dirty = true;
+                    }
+                }
+                Vec::new()
+            });
+        }
+        let d = if dy.abs() >= dx.abs() { dy } else { dx };
+        self.mouse_wheel(if lines { d } else { d / 18.0 })
+    }
+
     fn mouse_wheel_events(&mut self, dy: f32) -> Vec<UiEvent> {
         let hit = self.hit(self.mouse.0, self.mouse.1);
         if let Some(p) = self.stepper_at(&hit) {
@@ -925,6 +967,18 @@ impl App {
             return Vec::new();
         }
         let hit = self.hit(x, y);
+        // A press on a scroll container bar's track pages; the thumb drags.
+        if button == MouseButton::Left {
+            if let Some(axis) = self.ctrl(&hit).and_then(|c| c.attr(crate::scroll::BAR)).map(str::to_string) {
+                let (ox, oy) = self.origin(&hit);
+                let at = if axis == "h" { x as i32 - ox } else { y as i32 - oy };
+                let paged = hit.split_last().and_then(|(_, p)| self.ctrl_mut(p)).is_some_and(|c| crate::scroll::page(c, &axis, at));
+                if paged {
+                    self.dirty = true;
+                    return Vec::new();
+                }
+            }
+        }
         if let Some(p) = self.stepper_at(&hit).filter(|_| button == MouseButton::Left) {
             // Upper half steps up, lower half down.
             let (_, oy) = self.origin(&p);

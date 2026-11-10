@@ -164,7 +164,9 @@ pub fn restack(parent: &mut Ctrl) {
     };
     let gap = parent.attr_i32("stackGap", 0);
     let mut pos = 0;
-    for c in &mut parent.children {
+    // A scroll container's bars stay put; the content is stacked at
+    // content coordinates and then scrolled.
+    for c in parent.children.iter_mut().filter(|c| c.attr(crate::scroll::BAR).is_none()) {
         let mut r = c.rect;
         if vertical {
             r.y = pos;
@@ -175,6 +177,7 @@ pub fn restack(parent: &mut Ctrl) {
         }
         c.rect = r;
     }
+    crate::scroll::place(parent);
 }
 
 /// [re:ae924d]: t above 0.98 passes through,

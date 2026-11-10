@@ -15,6 +15,7 @@ pub mod meter;
 mod objc_class;
 pub mod paint;
 pub mod render;
+pub mod scroll;
 pub mod skin;
 pub mod splitter;
 pub mod style;

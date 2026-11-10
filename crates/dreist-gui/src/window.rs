@@ -198,19 +198,14 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 self.app.app().mouse_left();
             }
             Event::Mouse(MouseEvent::WheelScrolled { delta, .. }) => {
-                // The dominant axis: a sideways trackpad swipe scrolls too
+                // Both axes: scroll containers take a sideways trackpad
+                // swipe as such; other controls get the dominant axis
                 // (the mixer's channel scroller has no scroll bar).
-                let dy = match delta {
-                    baseview::ScrollDelta::Lines { x, y } => {
-                        if y.abs() >= x.abs() {
-                            y
-                        } else {
-                            x
-                        }
-                    }
-                    baseview::ScrollDelta::Pixels { x, y } => (if y.abs() >= x.abs() { y } else { x }) / 18.0,
+                let (dx, dy, lines) = match delta {
+                    baseview::ScrollDelta::Lines { x, y } => (x, y, true),
+                    baseview::ScrollDelta::Pixels { x, y } => (x, y, false),
                 };
-                let ev = self.app.app().mouse_wheel(dy);
+                let ev = self.app.app().mouse_scroll(dx, dy, lines);
                 self.dispatch(ev);
                 self.tooltip();
             }
