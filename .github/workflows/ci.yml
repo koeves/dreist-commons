@@ -50,7 +50,12 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - name: Clippy (window)
         run: cargo clippy --locked --workspace --all-targets --features dreist-gui/window -- -D warnings
+      - name: Clippy (host)
+        # cpal and rfd need the ALSA and GTK headers on Linux: macOS only.
+        run: cargo clippy --locked -p dreist-host --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace
       - name: Test (window)
         run: cargo test --locked -p dreist-gui --features window
+      - name: Test (host)
+        run: cargo test --locked -p dreist-host --all-features

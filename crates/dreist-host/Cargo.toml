@@ -1,0 +1,31 @@
+[package]
+name = "dreist-host"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "The apps' side of the system: audio devices, MIDI ports, file dialogs, session relaunch, local time; owns those third-party dependencies"
+
+[dependencies]
+libc.workspace = true
+cpal = { workspace = true, optional = true }
+midir = { workspace = true, optional = true }
+rfd = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+clap-sys = { workspace = true, optional = true }
+
+[features]
+# Audio devices (cpal) for the standalone app.
+audio = ["dep:cpal"]
+# MIDI ports and inputs (midir) for the standalone app.
+midi = ["dep:midir"]
+# Native file dialogs (rfd), re-exported as `rfd`.
+dialog = ["dep:rfd"]
+# serde and serde_json (re-exported) and the relaunch session file.
+session = ["dep:serde", "dep:serde_json"]
+# The CLAP bindings nih-plug builds on (re-exported as `clap_sys`), for
+# tests that host a plugin.
+clap-sys = ["dep:clap-sys"]
+
+[lints]
+workspace = true

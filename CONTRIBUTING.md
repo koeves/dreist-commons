@@ -14,8 +14,15 @@ Branches and CI: work goes to `dev`; at a release `dev` is merged into `main` wi
 the merge is tagged. GitHub Actions run only on release tags (commit-subject check, CI, release)
 and by hand (`workflow_dispatch`), never on branch pushes, so run the checks locally before
 pushing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (also
-with `--features dreist-gui/window`) and `cargo test --workspace`.
+with `--features dreist-gui/window`, and `-p dreist-host --all-features`) and `cargo test --workspace`
+(and `-p dreist-host --all-features`).
 
 Apps: Dreist and Einst include this repository as a submodule at `commons`. A change reaches
 them when they bump the submodule (`build: dreist-commons ...`); behaviour that one app needs
 belongs behind a hook, with the defaults unchanged.
+
+Dependencies: third-party versions live here only (`[workspace.dependencies]`, Dependabot's cargo
+updates run here). The apps take them through the commons crates: `dreist-host` owns the
+standalone's and editor's system-side crates (cpal, midir, rfd, serde / serde_json, libc,
+clap-sys) behind features and re-exports those the apps use directly. A bump reaches an app with
+the submodule bump and `cargo update -p <crate>` there.

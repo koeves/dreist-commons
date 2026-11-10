@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-testkit"]
+members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-testkit", "crates/dreist-host"]
 
 [workspace.package]
 edition = "2024"
@@ -23,9 +23,22 @@ neg_cmp_op_on_partial_ord = "allow"
 type_complexity = "allow"
 manual_range_contains = "allow"
 
+# Third-party versions for the commons crates; the apps declare none of
+# their own and take these through the commons crates (dreist-host
+# re-exports what they use directly).
 [workspace.dependencies]
 roxmltree = "0.21"
 thiserror = "2"
+libc = "0.2"
+# cpal and midir as nih-plug's standalone (vendor/nih-plug) resolves them,
+# so the app links one copy of each.
+cpal = "=0.15.3"
+midir = "=0.11.1"
+rfd = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The revision vendor/nih-plug builds on.
+clap-sys = { git = "https://github.com/micahrj/clap-sys.git", rev = "25d7f53fdb6363ad63fbd80049cb7a42a97ac156" }
 
 [profile.release]
 strip = false

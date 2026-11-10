@@ -11,6 +11,7 @@ family and effect nodes through an app profile, and brings its own editor.
 | `dreist-engine` | engine runtime: step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
 | `dreist-gui` | skin-driven GUI toolkit (tiny-skia, baseview) |
 | `dreist-testkit` | golden fingerprints and allocation counting for tests |
+| `dreist-host` | the system side: audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's relaunch session, local time; owns those dependencies (features `audio`, `midi`, `dialog`, `session`, `clap-sys`) |
 
 `vendor/` holds patched `baseview` (re-entrancy guard for modal dialogs) and
 `signalsmith-stretch` (fixed phase-randomisation seed). Apps add both as `[patch]` entries.
