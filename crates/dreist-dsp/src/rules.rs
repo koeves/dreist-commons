@@ -62,6 +62,13 @@ pub struct Rules {
     /// record modes (`startmode` Immediate / MIDI / Host / Threshold,
     /// `timedmode` Free / Timed / Loop).
     pub sampler_modes_v1: bool,
+    /// The original v1's sequencer window: each sub-block's play position
+    /// starts at `start − 1` samples ([re:01fcac]; v2 at `start`), so
+    /// sequenced notes and metronome clicks start one sample later.
+    pub sequencer_window_v1: bool,
+    /// Voices in the timestretch pool (the original v1: 8 [re:70951b]; at
+    /// most [`crate::voices::TIMESTRETCH_VOICES`]).
+    pub timestretch_voices: usize,
 }
 
 /// The reference behaviour.
@@ -80,6 +87,8 @@ pub const REFERENCE: Rules = Rules {
     slice_pads: 64,
     scene_snapshot_v1: false,
     sampler_modes_v1: false,
+    sequencer_window_v1: false,
+    timestretch_voices: crate::voices::TIMESTRETCH_VOICES,
 };
 
 static RULES: OnceLock<Rules> = OnceLock::new();

@@ -246,7 +246,9 @@ pub fn process_engine(
     let mult_bpm = timing.tempo_multiplier * clock.bpm;
     let to_16ths = mult_bpm * 4.0;
     let spb = clock.sample_rate as f64 / (mult_bpm * 0.06666666666666667);
-    let p0 = start * (1.0 / spb) + clock.ppq_block * to_16ths * (1.0 / clock.bpm);
+    // v1 [re:01fcac] reads the window from one sample before the sub-block.
+    let first = if dreist_dsp::rules::get().sequencer_window_v1 { start - 1.0 } else { start };
+    let p0 = first * (1.0 / spb) + clock.ppq_block * to_16ths * (1.0 / clock.bpm);
     let p1 = (len - 1.0) * (1.0 / spb) + p0;
     let sixteenth = round_half_away(p0);
     // [re:7f14b3] for the metronome (selected) engine on a new
