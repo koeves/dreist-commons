@@ -417,12 +417,25 @@ impl<'a> Painter<'a> {
         }
         let s = self.scale;
         let (w, h) = ((b.right() * s).ceil().max(1.0) as u32, (b.bottom() * s).ceil().max(1.0) as u32);
-        let Some(mut tex) = Pixmap::new(w, h) else { return };
+        // Only the texels that can land in the clip (and the pixmap) are
+        // made: a small repaint over a large panel stays cheap. Texel
+        // (i, j) lies at device (i + tx·s, j + ty·s) either way.
+        let (cx, cy, cw, ch) = self.clip;
+        let (ox, oy) = (self.tx * s, self.ty * s);
+        let lo = |c: i32, o: f32| ((c as f32 * s - o).floor() - 1.0).max(0.0) as u32;
+        let hi = |c: i32, o: f32, lim: u32| ((c as f32 * s).min(lim as f32) - o).ceil().max(0.0) as u32 + 1;
+        let (x0, y0) = (lo(cx.max(0), ox), lo(cy.max(0), oy));
+        let (x1, y1) = (hi(cx + cw, ox, self.pm.width()).min(w), hi(cy + ch, oy, self.pm.height()).min(h));
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let Some(mut tex) = Pixmap::new(x1 - x0, y1 - y0) else { return };
+        let tw = x1 - x0;
         let len = (streak * s).max(1.0);
         let data = tex.data_mut();
-        for y in 0..h {
+        for y in y0..y1 {
             let row = unit(seed, y, 0x0F0F);
-            for x in 0..w {
+            for x in x0..x1 {
                 let f = x as f32 / len;
                 let k = f.floor();
                 let t = f - k;
@@ -432,11 +445,12 @@ impl<'a> Painter<'a> {
                 let n = (0.45 * row + 0.55 * (a0 + (a1 - a0) * t)).clamp(-1.0, 1.0);
                 let a = (n.abs() * amount * 255.0).round() as u8;
                 let v = if n > 0.0 { a } else { 0 };
-                let i = ((y * w + x) * 4) as usize;
+                let i = (((y - y0) * tw + x - x0) * 4) as usize;
                 data[i..i + 4].copy_from_slice(&[v, v, v, a]);
             }
         }
-        let shader = tiny_skia::Pattern::new(tex.as_ref(), SpreadMode::Pad, tiny_skia::FilterQuality::Nearest, 1.0, Transform::from_scale(1.0 / s, 1.0 / s));
+        let place = Transform::from_translate(x0 as f32, y0 as f32).post_scale(1.0 / s, 1.0 / s);
+        let shader = tiny_skia::Pattern::new(tex.as_ref(), SpreadMode::Pad, tiny_skia::FilterQuality::Nearest, 1.0, place);
         let paint = Paint { anti_alias: true, shader, ..Default::default() };
         let t = self.transform();
         let db = self.device_bounds(path, 0.0);
@@ -761,6 +775,41 @@ mod mask_tests {
                         (cols.first().copied(), cols.last().copied(), rows.first().copied(), rows.last().copied())
                     };
                     panic!("scale {scale} clip {i}: {clip:?} ours {:?} raster {:?}", span(m.data()), span(r.data()));
+                }
+            }
+        }
+    }
+
+    /// Brushed noise drawn under a small clip gives the pixels the whole
+    /// texture gives there (only the clipped texels are made).
+    #[test]
+    fn clipped_noise_matches_the_whole_texture() {
+        let mut fonts = crate::text::Fonts::new(std::path::Path::new("/nonexistent"));
+        for scale in [1.0f32, 2.0, 1.5] {
+            let (w, h) = ((240.0 * scale) as u32, (160.0 * scale) as u32);
+            let path = rounded_rect_path(RectF::new(3.0, 2.0, 200.0, 140.0), 6.0, [true; 4]).unwrap();
+            let draw = |fonts: &mut crate::text::Fonts, clip: Option<(i32, i32, i32, i32)>| {
+                let mut pm = Pixmap::new(w, h).unwrap();
+                pm.fill(tiny_skia::Color::from_rgba8(40, 50, 60, 255));
+                let mut p = Painter::new(&mut pm, fonts, scale);
+                p.tx = 17.0;
+                p.ty = 9.0;
+                if let Some(c) = clip {
+                    p.clip = c;
+                }
+                p.fill_path_noise(&path, 0.4, 24.0, 7);
+                drop(p);
+                pm
+            };
+            let whole = draw(&mut fonts, None);
+            for clip in [(60, 40, 50, 30), (17, 9, 5, 200), (180, 120, 100, 100), (0, 0, 240, 160)] {
+                let part = draw(&mut fonts, Some(clip));
+                let (x0, y0) = ((clip.0 as f32 * scale).ceil() as u32, (clip.1 as f32 * scale).ceil() as u32);
+                let (x1, y1) = ((((clip.0 + clip.2) as f32 * scale).floor() as u32).min(w), (((clip.1 + clip.3) as f32 * scale).floor() as u32).min(h));
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        assert_eq!(whole.pixel(x, y), part.pixel(x, y), "scale {scale} clip {clip:?} at ({x}, {y})");
+                    }
                 }
             }
         }
