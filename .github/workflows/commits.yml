@@ -4,11 +4,18 @@ name: Commits
 # changelog and release notes are generated from them. Runs inside the
 # tag-triggered release (release.yml) and by hand.
 on:
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
+
+# A newer push to the same pull request cancels the older run.
+concurrency:
+  group: commits-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   conventional:

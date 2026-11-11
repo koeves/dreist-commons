@@ -10,10 +10,14 @@ config in `cliff.toml`), edit the new section by hand if needed, bump the versio
 commit as `chore(release): vX.Y.Z`, then tag `vX.Y.Z` and push the tag. The release workflow
 publishes the tag's `CHANGELOG.md` section as the release notes.
 
-Branches and CI: work goes to `dev`; at a release `dev` is merged into `main` with `--no-ff` and
-the merge is tagged. GitHub Actions run only on release tags (commit-subject check, CI, release)
-and by hand (`workflow_dispatch`), never on branch pushes, so run the checks locally before
-pushing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (also
+Branches and CI: work happens on `feature/<name>` branches (parallel threads: one worktree each,
+outside the checkout), pushed and merged into `dev` through a pull request with a merge commit
+once its checks pass (CI, the commit-subject check and CodeQL). Dependabot targets `dev`: patch
+and minor updates, GitHub Actions and submodule bumps merge on their own when the checks pass,
+major updates wait for a review. A release is a pull request from `dev` into `main`, merged with
+a merge commit; tagging that merge `vX.Y.Z` runs the release workflow. GitHub Actions run on pull
+requests into `dev` and `main`, on release tags and by hand (`workflow_dispatch`), never on plain
+branch pushes. Run the checks locally before pushing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (also
 with `--features dreist-gui/window`, and `-p dreist-host --all-features`) and `cargo test --workspace`
 (and `-p dreist-host --all-features`).
 
