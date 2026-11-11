@@ -309,10 +309,10 @@ impl<T: WindowApp> Handler<T> {
     }
 }
 
-fn options<T: WindowApp>(app: &mut T, title: &str) -> WindowOpenOptions {
+fn options<T: WindowApp>(app: &mut T, title: &str, scale: WindowScalePolicy) -> WindowOpenOptions {
     let (w, h) = app.app().size();
     let ui = app.app().ui_scale.max(0.25) as f64;
-    WindowOpenOptions { title: title.into(), size: Size::new(w as f64 * ui, h as f64 * ui), scale: WindowScalePolicy::SystemScaleFactor, gl_config: None }
+    WindowOpenOptions { title: title.into(), size: Size::new(w as f64 * ui, h as f64 * ui), scale, gl_config: None }
 }
 
 fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send + 'static {
@@ -333,14 +333,27 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
     }
 }
 
-/// Open the editor inside a host-provided parent view.
-pub fn open_parented<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut app: T) -> baseview::WindowHandle {
-    let opts = options(&mut app, dreist_formats::profile::get().product);
+/// Open the editor inside a host-provided parent view, at the host's scale
+/// factor 1 (see [`open_parented_scaled`]).
+pub fn open_parented<P: HasRawWindowHandle, T: WindowApp>(parent: &P, app: T) -> baseview::WindowHandle {
+    open_parented_scaled(parent, app, 1.0)
+}
+
+/// Open the editor inside a host-provided parent view. `scale` is the
+/// host's scale factor (nih-plug's `Editor::set_scale_factor`; 1 when the
+/// host gave none). On Windows and Linux the host sizes the parent view
+/// from the editor's size times that factor, so the window takes the same
+/// factor rather than the system's: at another system scale (an X11
+/// desktop at 192 dpi, say) the editor would otherwise be drawn larger or
+/// smaller than the view that holds it. macOS scales by itself.
+pub fn open_parented_scaled<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut app: T, scale: f64) -> baseview::WindowHandle {
+    let policy = if cfg!(target_os = "macos") { WindowScalePolicy::SystemScaleFactor } else { WindowScalePolicy::ScaleFactor(scale.max(0.25)) };
+    let opts = options(&mut app, dreist_formats::profile::get().product, policy);
     Window::open_parented(parent, opts, build(app))
 }
 
 /// Open a top-level window and run until it is closed.
 pub fn open_blocking<T: WindowApp>(mut app: T, title: &str) {
-    let opts = options(&mut app, title);
+    let opts = options(&mut app, title, WindowScalePolicy::SystemScaleFactor);
     Window::open_blocking(opts, build(app));
 }
