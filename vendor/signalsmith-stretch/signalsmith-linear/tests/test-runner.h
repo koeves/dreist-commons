@@ -176,7 +176,7 @@ struct RunData {
 			auto *otherVector = other.reals[vi];
 			for (size_t i = 0; i < size; ++i) {
 				auto diff = thisVector[i] - otherVector[i];
-				error2 += diff*diff;
+				error2 += double(diff)*diff;
 			}
 		}
 		for (size_t vi = 0; vi < positives.size(); ++vi) {
@@ -184,7 +184,7 @@ struct RunData {
 			auto *otherVector = other.positives[vi];
 			for (size_t i = 0; i < size; ++i) {
 				auto diff = thisVector[i] - otherVector[i];
-				error2 += diff*diff;
+				error2 += double(diff)*diff;
 			}
 		}
 		for (size_t vi = 0; vi < complexes.size(); ++vi) {
