@@ -1,7 +1,8 @@
 name: CodeQL
 
 # Code scanning on pull requests into dev and main (the branch rules require its
-# result), on release tags and by hand; never on plain branch pushes.
+# result), on release tags and by hand (release-on-main.yml dispatches it on the
+# follow-up changelog pull request's branch); never on plain branch pushes.
 on:
   push:
     tags: ["v*"]

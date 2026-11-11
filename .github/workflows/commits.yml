@@ -1,8 +1,9 @@
 name: Commits
 
 # Commit subjects follow Conventional Commits (see CONTRIBUTING.md): the
-# changelog and release notes are generated from them. Runs inside the
-# tag-triggered release (release.yml) and by hand.
+# version, changelog and release notes are generated from them. Runs on pull
+# requests, inside the release (release.yml) and by hand (release-on-main.yml
+# dispatches it on the follow-up changelog pull request's branch).
 on:
   pull_request:
     branches: [dev, main]
@@ -40,5 +41,5 @@ jobs:
               echo "::error::$sha: \"$subject\" is not a Conventional Commit subject"
               bad=1
             fi
-          done < <(git log --no-merges --format='%h %s' $range)
+          done < <(git log --no-merges --format='%h %s' "$range")
           exit $bad
