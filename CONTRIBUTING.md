@@ -20,11 +20,6 @@ releases even without a releasable commit. Release dreist-commons before the app
 the change. `release.yml` also runs on a tag pushed by hand, and by hand to republish the notes:
 `gh workflow run release.yml --ref <tag> -f tag=<tag> -f upload=true`.
 
-Security alerts: check the open code scanning and Dependabot alerts when starting and when
-finishing work on the repository (`gh api repos/koeves/dreist-commons/code-scanning/alerts?state=open`,
-`gh api repos/koeves/dreist-commons/dependabot/alerts?state=open`). Fix real findings through an issue and a
-pull request; dismiss false positives with the reason in the dismissal comment.
-
 Branches and CI: work happens on `feature/<name>` branches (parallel threads: one worktree each,
 outside the checkout), pushed and merged into `dev` through a pull request by squash only: the pull request title is
 a Conventional Commit subject and becomes the commit (checked by `conventional`). Merge once its
