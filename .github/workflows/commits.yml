@@ -1,12 +1,14 @@
 name: Commits
 
 # Commit subjects follow Conventional Commits (see CONTRIBUTING.md): the
-# version, changelog and release notes are generated from them. Runs on pull
+# pull request title on pull requests into dev (squash merges make it the commit),
+# the commits since the last release tag everywhere else; # version, changelog and release notes are generated from them. Runs on pull
 # requests, inside the release (release.yml) and by hand (release-on-main.yml
 # dispatches it on the follow-up changelog pull request's branch).
 on:
   pull_request:
     branches: [dev, main]
+    types: [opened, edited, synchronize, reopened]
   workflow_dispatch:
   workflow_call:
 
@@ -25,7 +27,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Check the pull request title (squashed into dev)
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          re='^(feat|fix|perf|refactor|docs|test|build|ci|chore|style|revert)(\([a-z0-9._/-]+\))?!?: [^ ].*'
+          if ! printf '%s' "$TITLE" | grep -Eq "$re"; then
+            echo "::error::The pull request title \"$TITLE\" is not a Conventional Commit subject (it becomes the squash commit)"
+            exit 1
+          fi
       - name: Check commit subjects
+        if: "!(github.event_name == 'pull_request' && github.base_ref == 'dev')"
         run: |
           # The commits since the previous release tag (all of them before the first).
           if prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null); then
