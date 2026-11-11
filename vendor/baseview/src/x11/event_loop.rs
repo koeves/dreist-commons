@@ -16,6 +16,8 @@ pub(super) struct EventLoop {
     parent_handle: Option<ParentHandle>,
 
     new_physical_size: Option<PhySize>,
+    /// Dreist: an Expose arrived (the window was mapped or uncovered).
+    exposed: bool,
     frame_interval: Duration,
     event_loop_running: bool,
 }
@@ -32,6 +34,7 @@ impl EventLoop {
             frame_interval: Duration::from_millis(15),
             event_loop_running: false,
             new_physical_size: None,
+            exposed: false,
         }
     }
 
@@ -56,7 +59,20 @@ impl EventLoop {
                 &mut crate::Window::new(Window { inner: &self.window }),
                 Event::Window(WindowEvent::Resized(window_info)),
             );
+        } else if std::mem::take(&mut self.exposed) {
+            // Dreist: X11 keeps no window contents. A frame drawn before the
+            // window was mapped, or under another window, is lost, and a
+            // handler that draws only what changed would leave it black:
+            // an Expose repeats the current size as a resize, which makes
+            // the handler draw everything again.
+            let window_info = self.window.window_info;
+
+            self.handler.on_event(
+                &mut crate::Window::new(Window { inner: &self.window }),
+                Event::Window(WindowEvent::Resized(window_info)),
+            );
         }
+        self.exposed = false;
 
         Ok(())
     }
@@ -160,6 +176,14 @@ impl EventLoop {
                         == self.window.xcb_connection.atoms.WM_DELETE_WINDOW
                 {
                     self.handle_close_requested();
+                }
+            }
+
+            // Dreist: the last of a series of Expose events (see
+            // `drain_xcb_events`).
+            XEvent::Expose(event) => {
+                if event.count == 0 {
+                    self.exposed = true;
                 }
             }
 
