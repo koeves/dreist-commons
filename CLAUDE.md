@@ -16,8 +16,10 @@ resources, IDs, menus, readers) in the apps, not here.
 - Git: Conventional Commits, changelog, releases and branches as in `CONTRIBUTING.md`; agent
   workflow notes are in the private `dreist-re` repository (`agents.md`).
 - Branches: `feature/<name>` (one worktree each, outside the checkout) -> pull request into
-  `dev` (merge commit, checks green) -> release pull request `dev` -> `main` (merge commit) -> tag
-  `vX.Y.Z` (CONTRIBUTING.md).
+  `dev` (merge commit, checks green) -> release pull request `dev` -> `main` (merge commit). The
+  merge releases: version from the commits (`Release-As: X.Y.Z` overrides), tag, GitHub release
+  and a follow-up changelog / version pull request into `dev` happen on their own; never tag
+  or bump by hand (CONTRIBUTING.md). Release commons before the apps.
 - After any change here, rebuild and reinstall both apps' VST3s (Dreist and Einst) and say which
   commits are installed.
 
