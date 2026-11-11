@@ -26,3 +26,5 @@ pub use window_open_options::*;
 
 #[cfg(target_os = "macos")]
 pub use macos::{background_gui, BACKGROUND_GUI_ENV};
+#[cfg(target_os = "linux")]
+pub use x11::{background_gui, BACKGROUND_GUI_ENV};
