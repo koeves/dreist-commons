@@ -13,8 +13,9 @@ family and effect nodes through an app profile, and brings its own editor.
 | `dreist-testkit` | golden fingerprints and allocation counting for tests |
 | `dreist-host` | the system side: audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's relaunch session, local time; owns those dependencies (features `audio`, `midi`, `dialog`, `session`, `clap-sys`) |
 
-`vendor/` holds patched `baseview` (re-entrancy guard for modal dialogs) and
-`signalsmith-stretch` (fixed phase-randomisation seed). Apps add both as `[patch]` entries.
+`vendor/` holds patched `baseview` (re-entrancy guard for modal dialogs; background mode for
+tests on macOS and X11), `softbuffer` (a per-library macOS observer class name), `nih-plug` and
+`signalsmith-stretch` (fixed phase-randomisation seed). Apps add them as `[patch]` entries.
 
 ## The app profile
 
@@ -39,6 +40,17 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
     cargo clippy --workspace --all-targets -- -D warnings
     cargo fmt --all --check
     UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
+
+Platforms: macOS (Apple Silicon), Windows (x64) and Linux (x86_64, X11). On Linux the window
+code uses X11 (baseview, softbuffer), the host crate ALSA (cpal, midir) and the XDG desktop
+portal for file dialogs (rfd, no GTK); settings folders are under `$XDG_CONFIG_HOME` (else
+`~/.config`). Building with `dreist-gui/window` or the `dreist-host` features there needs
+(Debian / Ubuntu names):
+
+    sudo apt-get install pkg-config libasound2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
+
+Native drags out of the window and the app-wide menu bar are macOS only; REX files load only on
+macOS (the REX helper).
 
 ## Contributing
 
