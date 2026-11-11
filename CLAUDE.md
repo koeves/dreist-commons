@@ -27,6 +27,13 @@ resources, IDs, menus, readers) in the apps, not here.
   `dependabot/alerts`); fix real findings through an issue and a PR, dismiss false positives
   with the reason.
 
+## Docs
+
+- Human docs (README, CONTRIBUTING, other `.md` for readers) follow the fzf README style: a centred title with release, build, CodeQL, licence and platform badges under it.
+- Short bullets of one sentence, two at most; no walls of text, and detail goes in its own section or file.
+- Describe the project as it is: no status updates, no "now", "previously", "since" or "next release" wording, and nothing the reader doesn't need.
+- Agent notes stay in this file or in dreist-re; CHANGELOG.md and THIRD_PARTY_NOTICES.md are left to their generators.
+
 ## Build
 
     export PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH

@@ -1,72 +1,101 @@
+<div align="center">
+
 # dreist-commons
 
-The shared crates of **Dreist** (a Rust rebuild of FXpansion Geist2) and **Einst** (a rebuild of
-Geist v1 on top of them). Each app depends on these crates, plugs in its names, resources, file
-family and effect nodes through an app profile, and brings its own editor.
+[![Release](https://img.shields.io/github/v/release/koeves/dreist-commons)](https://github.com/koeves/dreist-commons/releases/latest)
+[![CI](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml/badge.svg)](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml/badge.svg)](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#platforms)
+
+</div>
+
+The shared crates of [Dreist](https://github.com/koeves/dreist) (a Rust rebuild of FXpansion Geist2)
+and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
+
+## Highlights
+
+- **One engine, two apps**: each app plugs in its names, resources, file family and effect nodes through an app profile.
+- **Own editor per app**: panels, dialogs, settings and the effect menu live in each app.
+- **Opens every family**: `.geist*`, `.dreist*` and `.einst*` files load in both apps.
+
+## Contents
+
+- [Crates](#crates)
+- [App profile](#app-profile)
+- [Platforms](#platforms)
+- [Development](#development)
+- [Contributing](#contributing)
+- [Related projects](#related-projects)
+- [Licence](#licence)
+
+## Crates
 
 | Crate | Role |
 |---|---|
-| `dreist-formats` | document tree, project/kit/preset readers, effect tables, resource paths, the app profile (`profile`) and the legacy on-disk names (`legacy`) |
-| `dreist-dsp` | sampler voice DSP and the effect nodes; `fx::install_factory` lets an app supply its own nodes |
-| `dreist-engine` | engine runtime: step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
-| `dreist-gui` | skin-driven GUI toolkit (tiny-skia, baseview) |
-| `dreist-testkit` | golden fingerprints and allocation counting for tests |
-| `dreist-host` | the system side: audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's relaunch session, local time; owns those dependencies (features `audio`, `midi`, `dialog`, `session`, `clap-sys`) |
+| `dreist-formats` | Document tree, project / kit / preset readers, effect tables, resource paths, the app profile and the legacy on-disk names |
+| `dreist-dsp` | Sampler voice DSP and the effect nodes; `fx::install_factory` lets an app supply its own nodes |
+| `dreist-engine` | Step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
+| `dreist-gui` | Skin-driven GUI toolkit (tiny-skia, baseview) |
+| `dreist-testkit` | Golden fingerprints and allocation counting for tests |
+| `dreist-host` | Audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's session; features `audio`, `midi`, `dialog`, `session`, `clap-sys` |
 
-`vendor/` holds patched `baseview` (re-entrancy guard for modal dialogs; background mode for
-tests on macOS and X11), `softbuffer` (a per-library macOS observer class name), `nih-plug` and
-`signalsmith-stretch` (fixed phase-randomisation seed). Apps add them as `[patch]` entries.
+`vendor/` holds patched dependencies, added by the apps as `[patch]` entries:
 
-## The app profile
+- **`baseview`**: re-entrancy guard for modal dialogs, background mode for tests on macOS and X11.
+- **`softbuffer`**: a per-library macOS observer class name.
+- **`nih-plug`**: the plugin framework, with fixes for the standalone's audio setup.
+- **`signalsmith-stretch`**: a fixed phase-randomisation seed, the same on every platform.
 
-    dreist_formats::profile::install(&PROFILE);            // names, resources, files, logo
-    dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's own effect nodes
+## App profile
 
-`Profile` holds the product name, the default theme, the UI and icon font families, the
-header logo's mark, where the UI graphics and the factory data are found (environment override,
-bundle folder, development folders) and the extension family the app saves (`LEGACY` `.geist*`,
-`DREIST` `.dreist*`, `EINST` `.einst*`; every app opens all three). Without an installed
-profile, `BASE` (Dreist's) applies. The editor (panels, dialogs, settings, effect menu, document
-readers) is each app's own.
+```rust
+dreist_formats::profile::install(&PROFILE);            // names, resources, files, logo
+dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's own effect nodes
+```
+
+- **`Profile`**: product name, default theme, UI and icon fonts, header logo, resource locations and the saved file family.
+- **File families**: `LEGACY` (`.geist*`), `DREIST` (`.dreist*`), `EINST` (`.einst*`).
+- **Default**: without an installed profile, `BASE` (Dreist's) applies.
+
+## Platforms
+
+- **macOS**: 11 or newer, Apple Silicon.
+- **Windows**: 10 or newer, x64.
+- **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40); X11, Wayland through XWayland.
+- **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
+- **macOS only**: native drags out of the window, the app-wide menu bar and REX files.
+
+Linux build packages for `dreist-gui/window` and the `dreist-host` features (Debian / Ubuntu names):
+
+```bash
+sudo apt-get install pkg-config libasound2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
+```
 
 ## Development
 
-Tests and goldens here run under `BASE` and draw Dreist's UI from a Dreist checkout next to this
-repository (`../dreist`; `DREIST_UI` / `DREIST_RESOURCES` override); tests that need it are
-skipped without one, and Dreist's CI runs them against its assets. Demo-content tests are
-skipped without the factory content (`DREIST_CONTENT` overrides its location).
+```bash
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
+```
 
-    cargo test --workspace
-    cargo clippy --workspace --all-targets -- -D warnings
-    cargo fmt --all --check
-    UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
-
-Platforms: macOS 11 or newer (Apple Silicon), Windows 10 or newer (x64) and Linux (x86_64,
-glibc 2.39 or newer, such as Ubuntu 24.04 or Fedora 40; X11, Wayland through XWayland). On Linux
-the window code uses X11 (baseview, softbuffer), the host crate ALSA (cpal, midir) and the XDG desktop
-portal for file dialogs (rfd, no GTK); settings folders are under `$XDG_CONFIG_HOME` (else
-`~/.config`). Building with `dreist-gui/window` or the `dreist-host` features there needs
-(Debian / Ubuntu names):
-
-    sudo apt-get install pkg-config libasound2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
-
-Native drags out of the window and the app-wide menu bar are macOS only; REX files load only on
-macOS (the REX helper).
+- **UI for tests**: drawn from a Dreist checkout next to this one (`../dreist`; `DREIST_UI` / `DREIST_RESOURCES` override).
+- **Skipped tests**: those needing the UI skip without it; Dreist's CI runs them against its assets.
+- **Content tests**: skip without the factory content (`DREIST_CONTENT` sets its location).
 
 ## Contributing
 
-- Commits follow Conventional Commits (`feat(scope): ...`); the changelog and release notes
-  are generated from them ([CONTRIBUTING.md](CONTRIBUTING.md)).
-- Checks: the commands under Development.
+- Commits, checks, branches and releases: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Dreist and Einst include this repository as a submodule at `commons`.
 
 ## Related projects
 
-- [dreist-commons](https://github.com/koeves/dreist-commons): the shared library (formats, DSP,
-  engine, GUI toolkit) that both apps are built on.
-- [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild, an app on dreist-commons.
-- [Einst](https://github.com/koeves/einst): the Geist v1 rebuild, an app on dreist-commons.
+- [Dreist](https://github.com/koeves/dreist): the Geist2 rebuild on these crates.
+- [Einst](https://github.com/koeves/einst): the Geist v1 rebuild on these crates.
 
 ## Licence
 
-MIT OR Apache-2.0 (LICENSE). Not affiliated with or endorsed by FXpansion.
+- MIT OR Apache-2.0 ([LICENSE](LICENSE)).
+- Not affiliated with or endorsed by FXpansion.
