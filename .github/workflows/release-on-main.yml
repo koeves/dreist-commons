@@ -107,6 +107,6 @@ jobs:
           for wf in ci.yml commits.yml codeql.yml; do
             gh workflow run "$wf" --ref "$BRANCH"
           done
-          if ! gh pr merge "$url" --auto --merge; then
+          if ! gh pr merge "$url" --auto --squash; then
             echo "::warning::Auto-merge is not available: merge $url by hand once its checks pass."
           fi

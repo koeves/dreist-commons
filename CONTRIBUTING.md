@@ -21,8 +21,9 @@ the change. `release.yml` also runs on a tag pushed by hand, and by hand to repu
 `gh workflow run release.yml --ref <tag> -f tag=<tag> -f upload=true`.
 
 Branches and CI: work happens on `feature/<name>` branches (parallel threads: one worktree each,
-outside the checkout), pushed and merged into `dev` through a pull request with a merge commit
-once its checks pass (CI, the commit-subject check and CodeQL). Dependabot targets `dev`: patch
+outside the checkout), pushed and merged into `dev` through a pull request by squash only: the pull request title is
+a Conventional Commit subject and becomes the commit (checked by `conventional`). Merge once its
+checks pass (CI, `conventional`, CodeQL). Dependabot targets `dev`: patch
 and minor updates, GitHub Actions and submodule bumps merge on their own when the checks pass,
 major updates wait for a review. A release is a pull request from `dev` into `main`, merged with
 a merge commit (see Releases). GitHub Actions run on pull requests into `dev` and `main`, on
