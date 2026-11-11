@@ -507,6 +507,13 @@ impl<D: HasDisplayHandle + ?Sized, W: HasWindowHandle + ?Sized> BufferInterface
             }
         }
 
+        // Dreist: send the image now. The requests above sit in the
+        // connection's buffer until something flushes it, and nothing
+        // does until the next frame waits for this one: a window that
+        // draws only on change kept showing its previous frame (black on
+        // first open) until it drew again.
+        imp.display.connection().flush().swbuf_err("Failed to draw image to window")?;
+
         imp.buffer_presented = true;
 
         Ok(())
