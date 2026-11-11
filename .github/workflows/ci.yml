@@ -1,7 +1,8 @@
 name: CI
 
-# Runs on pull requests into dev and main, as part of the tag-triggered release
-# (release.yml) and by hand; never on plain branch pushes.
+# Runs on pull requests into dev and main, inside the release (release.yml)
+# and by hand (release-on-main.yml dispatches it on the follow-up changelog
+# pull request's branch); never on plain branch pushes.
 on:
   pull_request:
     branches: [dev, main]
