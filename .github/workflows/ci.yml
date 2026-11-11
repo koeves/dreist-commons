@@ -1,12 +1,20 @@
 name: CI
 
-# Runs only as part of the tag-triggered release (release.yml) and by hand.
+# Runs on pull requests into dev and main, as part of the tag-triggered release
+# (release.yml) and by hand; never on plain branch pushes.
 on:
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
+
+# A newer push to the same pull request cancels the older run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
