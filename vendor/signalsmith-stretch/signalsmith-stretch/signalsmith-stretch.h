@@ -88,13 +88,13 @@ struct SignalsmithStretch {
 		tmpBuffer.resize(blockSamples + intervalSamples);
 
 		bands = int(stft.bands());
-		channelBands.assign(bands*channels, Band());
+		channelBands.assign(size_t(bands)*size_t(channels), Band());
 		
 		peaks.reserve(bands/2);
 		energy.resize(bands);
 		smoothedEnergy.resize(bands);
 		outputMap.resize(bands);
-		channelPredictions.resize(channels*bands);
+		channelPredictions.resize(size_t(channels)*size_t(bands));
 
 		blockProcess = {};
 		formantMetric.resize(bands + 2);
