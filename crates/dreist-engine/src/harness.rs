@@ -162,7 +162,8 @@ pub fn engine(doc: &Node, samples: &Path, sr: f32) -> Dreist {
 /// stay sane and match the golden set `set` (in the calling crate's
 /// `tests/golden`; nothing to check without the factory content).
 pub fn check_scenarios(set: &str) {
-    let mut golden = dreist_testkit::Golden::open(set);
+    // The renders' bits depend on the maths library: compared on macOS.
+    let mut golden = dreist_testkit::Golden::open_macos(set);
     let mut failures = Vec::new();
     for p in presets() {
         let samples = dreist_formats::model::samples_dir(&p);
