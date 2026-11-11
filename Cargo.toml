@@ -34,7 +34,9 @@ libc = "0.2"
 # so the app links one copy of each.
 cpal = "=0.15.3"
 midir = "=0.11.1"
-rfd = "0.18"
+# Linux: the XDG desktop portal backend only (no GTK; no Wayland client,
+# the windows are X11).
+rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The revision vendor/nih-plug builds on.

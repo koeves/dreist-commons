@@ -18,6 +18,10 @@ keyboard-types = { version = "0.6.1", default-features = false, optional = true 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = { version = "0.2", optional = true }
 
+# softbuffer's X11 backend (libxcb / libX11 loaded at run time).
+[target.'cfg(target_os = "linux")'.dependencies]
+softbuffer = { version = "0.4", optional = true, default-features = false, features = ["x11", "x11-dlopen"] }
+
 [features]
 window = ["dep:baseview", "dep:softbuffer", "dep:raw-window-handle", "dep:raw-window-handle-05", "dep:keyboard-types", "dep:objc"]
 

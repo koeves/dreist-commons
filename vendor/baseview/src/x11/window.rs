@@ -29,6 +29,16 @@ use crate::gl::{platform, GlContext};
 use crate::x11::event_loop::EventLoop;
 use crate::x11::visual_info::WindowVisualConfig;
 
+/// The environment variable that turns on background mode.
+pub const BACKGROUND_GUI_ENV: &str = "DREIST_BACKGROUND_GUI";
+
+/// Background mode, for tests and harnesses on a desktop someone is using:
+/// `DREIST_BACKGROUND_GUI=1` keeps the top-level windows this crate opens
+/// from taking focus (see the macOS backend).
+pub fn background_gui() -> bool {
+    std::env::var_os(BACKGROUND_GUI_ENV).is_some_and(|v| !v.is_empty() && v != "0")
+}
+
 pub struct WindowHandle {
     raw_window_handle: Option<RawWindowHandle>,
     close_requested: Arc<AtomicBool>,
@@ -233,6 +243,17 @@ impl<'a> Window<'a> {
                 .colormap(visual_info.color_map)
                 .border_pixel(0),
         )?;
+        // Background mode: a user time of 0 asks the window manager not to
+        // focus or raise the new top-level window (EWMH `_NET_WM_USER_TIME`).
+        if parent.is_none() && background_gui() {
+            xcb_connection.conn.change_property32(
+                PropMode::REPLACE,
+                window_id,
+                xcb_connection.atoms._NET_WM_USER_TIME,
+                AtomEnum::CARDINAL,
+                &[0],
+            )?;
+        }
         xcb_connection.conn.map_window(window_id)?;
 
         // Change window title

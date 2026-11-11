@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use baseview::{Event, EventStatus, MouseEvent, Size, Window, WindowEvent, WindowHandler, WindowOpenOptions, WindowScalePolicy};
 use raw_window_handle as rwh;
 use raw_window_handle_05 as rwh05;
-use rwh05::HasRawWindowHandle;
+use rwh05::{HasRawDisplayHandle, HasRawWindowHandle};
 
 use crate::app::{App, MouseButton, UiEvent};
 
@@ -79,8 +79,12 @@ fn handles(window: &Window) -> Option<Handles> {
             Some(Handles { window: rwh::RawWindowHandle::Win32(rwh::Win32WindowHandle::new(hwnd)), display: rwh::RawDisplayHandle::Windows(rwh::WindowsDisplayHandle::new()) })
         }
         rwh05::RawWindowHandle::Xlib(h) => {
-            let mut d = rwh::XlibDisplayHandle::new(None, 0);
-            d.display = None;
+            // The window's own X connection (softbuffer opens one of its
+            // own without it).
+            let d = match window.raw_display_handle() {
+                rwh05::RawDisplayHandle::Xlib(d) => rwh::XlibDisplayHandle::new(NonNull::new(d.display), d.screen),
+                _ => rwh::XlibDisplayHandle::new(None, 0),
+            };
             Some(Handles { window: rwh::RawWindowHandle::Xlib(rwh::XlibWindowHandle::new(h.window)), display: rwh::RawDisplayHandle::Xlib(d) })
         }
         _ => None,
@@ -150,7 +154,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         self.physical = (w, h);
     }
 
-    fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
+    fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
         let set_mods = |app: &mut App, m: keyboard_types::Modifiers| {
             app.mods = crate::app::Mods {
                 shift: m.contains(keyboard_types::Modifiers::SHIFT),
@@ -174,7 +178,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 self.tooltip();
                 // A drag left the window with files to give: the OS drag.
                 if let Some(files) = self.app.app().drag_out.take() {
-                    let view = match _window.raw_window_handle() {
+                    let view = match window.raw_window_handle() {
                         rwh05::RawWindowHandle::AppKit(h) => h.ns_view,
                         _ => std::ptr::null_mut(),
                     };
@@ -264,7 +268,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 let ui = self.app.app().ui_scale.max(0.25);
                 let ev = self.app.app().files(position.x as f32 / ui, position.y as f32 / ui, files, false);
                 self.dispatch(ev);
-                self.apply_cursor();
+                self.apply_cursor(window);
                 return EventStatus::AcceptDrop(baseview::DropEffect::Copy);
             }
             Event::Mouse(MouseEvent::DragDropped { position, data, .. }) => {
@@ -273,7 +277,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 let ev = self.app.app().files(position.x as f32 / ui, position.y as f32 / ui, files, true);
                 self.dispatch(ev);
                 self.app.app().cursor = crate::cursor::Cursor::Arrow;
-                self.apply_cursor();
+                self.apply_cursor(window);
                 return EventStatus::AcceptDrop(baseview::DropEffect::Copy);
             }
             Event::Window(WindowEvent::Resized(info)) => {
@@ -286,16 +290,20 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             }
             _ => return EventStatus::Ignored,
         }
-        self.apply_cursor();
+        self.apply_cursor(window);
         EventStatus::Captured
     }
 }
 
 impl<T: WindowApp> Handler<T> {
-    fn apply_cursor(&mut self) {
+    fn apply_cursor(&mut self, window: &mut Window) {
         let want = self.app.app().cursor.clone();
         if want != self.cursor {
             crate::cursor::apply(&want, &dreist_formats::paths::ui_dir().join("Cursors"));
+            #[cfg(target_os = "linux")]
+            window.set_mouse_cursor(crate::cursor::x11(&want));
+            #[cfg(not(target_os = "linux"))]
+            let _ = window;
             self.cursor = want;
         }
     }
