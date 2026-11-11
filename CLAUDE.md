@@ -22,6 +22,10 @@ resources, IDs, menus, readers) in the apps, not here.
   or bump by hand (CONTRIBUTING.md). Release commons before the apps.
 - After any change here, rebuild and reinstall both apps' VST3s (Dreist and Einst) and say which
   commits are installed.
+- Security alerts: check the open code scanning and Dependabot alerts at the start and end of any
+  work here (`gh api repos/koeves/dreist-commons/code-scanning/alerts?state=open`, same for
+  `dependabot/alerts`); fix real findings through an issue and a PR, dismiss false positives
+  with the reason.
 
 ## Build
 
