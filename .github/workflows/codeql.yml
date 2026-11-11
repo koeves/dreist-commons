@@ -17,6 +17,10 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
+    # Full analysis every time: the cached incremental (overlay) database re-reads changed source
+    # files but not changed headers, so header fixes in vendor/ were never seen.
+    env:
+      CODEQL_ACTION_OVERLAY_ANALYSIS: false
     permissions:
       actions: read
       contents: read
