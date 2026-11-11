@@ -41,8 +41,9 @@ skipped without the factory content (`DREIST_CONTENT` overrides its location).
     cargo fmt --all --check
     UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
 
-Platforms: macOS (Apple Silicon), Windows (x64) and Linux (x86_64, X11). On Linux the window
-code uses X11 (baseview, softbuffer), the host crate ALSA (cpal, midir) and the XDG desktop
+Platforms: macOS 11 or newer (Apple Silicon), Windows 10 or newer (x64) and Linux (x86_64,
+glibc 2.39 or newer, such as Ubuntu 24.04 or Fedora 40; X11, Wayland through XWayland). On Linux
+the window code uses X11 (baseview, softbuffer), the host crate ALSA (cpal, midir) and the XDG desktop
 portal for file dialogs (rfd, no GTK); settings folders are under `$XDG_CONFIG_HOME` (else
 `~/.config`). Building with `dreist-gui/window` or the `dreist-host` features there needs
 (Debian / Ubuntu names):
