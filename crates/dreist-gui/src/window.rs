@@ -146,9 +146,11 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         let Ok(mut buf) = surface.buffer_mut() else { return };
         for (d, s) in buf.iter_mut().zip(pm.data().as_chunks::<4>().0) {
             // Opaque backdrop, so premultiplied == straight: RGBA bytes to
-            // 0RGB (a form the compiler vectorizes).
+            // ARGB with alpha 0xff (a form the compiler vectorizes). The
+            // alpha byte matters on X11, where the window has a 32-bit
+            // visual and a compositor would show alpha 0 as transparent.
             let v = u32::from_le_bytes(*s);
-            *d = (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
+            *d = 0xff00_0000 | (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
         }
         let _ = buf.present();
         self.physical = (w, h);
