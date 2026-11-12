@@ -10,7 +10,8 @@
 
 - **Work**: on `feature/<name>`, one worktree per branch in `.claude/worktrees/<name>`.
 - **Into `dev`**: a pull request, squash-merged; its title is the Conventional Commit.
-- **Issues**: one per task; the pull request body says `Closes #N`.
+- **Issues**: for features, bug reports and work spanning several pull requests or repos; the pull request links it with `Closes #N`.
+- **No issue**: small fixes, docs, chores and dependency bumps go straight to a pull request with a conventional title.
 - **Rules**: `dev` and `main` take changes only through pull requests with green checks.
 - **Dependabot**: targets `dev`; patch, minor and Actions updates merge on their own when green.
 
