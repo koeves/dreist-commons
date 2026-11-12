@@ -108,6 +108,8 @@ pub(crate) struct WindowInner {
     window_id: XWindow,
     pub(crate) window_info: WindowInfo,
     visual_id: Visualid,
+    /// A top-level window (no parent): its size is fixed, as on macOS.
+    toplevel: bool,
     mouse_cursor: Cell<MouseCursor>,
 
     pub(crate) close_requested: Cell<bool>,
@@ -241,8 +243,20 @@ impl<'a> Window<'a> {
                 // As mentioned above, these two values are needed to be able to create a window
                 // with a depth of 32-bits when the parent window has a different depth
                 .colormap(visual_info.color_map)
-                .border_pixel(0),
+                .border_pixel(0)
+                // Opaque black where nothing draws (the area around a child
+                // view, or after a resize): with a 32-bit visual the default
+                // background would show the desktop through the window.
+                .background_pixel(if visual_info.visual_depth == 32 {
+                    0xff00_0000
+                } else {
+                    screen.black_pixel
+                }),
         )?;
+        if parent.is_none() {
+            let size = window_info.physical_size();
+            set_fixed_size(&xcb_connection, window_id, size.width, size.height)?;
+        }
         // Background mode: a user time of 0 asks the window manager not to
         // focus or raise the new top-level window (EWMH `_NET_WM_USER_TIME`).
         if parent.is_none() && background_gui() {
@@ -297,6 +311,7 @@ impl<'a> Window<'a> {
             window_id,
             window_info,
             visual_id: visual_info.visual_id,
+            toplevel: parent.is_none(),
             mouse_cursor: Cell::new(MouseCursor::default()),
 
             close_requested: Cell::new(false),
@@ -354,6 +369,15 @@ impl<'a> Window<'a> {
         let scaling = self.inner.window_info.scale();
         let new_window_info = WindowInfo::from_logical_size(size, scaling);
 
+        if self.inner.toplevel {
+            let size = new_window_info.physical_size();
+            let _ = set_fixed_size(
+                &self.inner.xcb_connection,
+                self.inner.window_id,
+                size.width,
+                size.height,
+            );
+        }
         let _ = self.inner.xcb_connection.conn.configure_window(
             self.inner.window_id,
             &ConfigureWindowAux::new()
@@ -397,4 +421,18 @@ unsafe impl<'a> HasRawDisplayHandle for Window<'a> {
 
 pub fn copy_to_clipboard(_data: &str) {
     todo!()
+}
+
+/// Fix a top-level window's size (ICCCM `WM_NORMAL_HINTS` with equal minimum
+/// and maximum), so window managers do not offer to resize it: the content
+/// only changes size when the window handler asks, as on macOS.
+fn set_fixed_size(
+    connection: &XcbConnection, window: XWindow, width: u32, height: u32,
+) -> Result<(), Box<dyn Error>> {
+    let size = (width as i32, height as i32);
+    let mut hints = x11rb::properties::WmSizeHints::new();
+    hints.min_size = Some(size);
+    hints.max_size = Some(size);
+    hints.set_normal_hints(&connection.conn, window)?;
+    Ok(())
 }
