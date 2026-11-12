@@ -8,7 +8,7 @@
 
 ## Branches and pull requests
 
-- **Work**: on `feature/<name>`, one worktree per branch outside the checkout.
+- **Work**: on `feature/<name>`, one worktree per branch in `.claude/worktrees/<name>`.
 - **Into `dev`**: a pull request, squash-merged; its title is the Conventional Commit.
 - **Issues**: one per task; the pull request body says `Closes #N`.
 - **Rules**: `dev` and `main` take changes only through pull requests with green checks.
