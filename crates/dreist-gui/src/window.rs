@@ -133,10 +133,18 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         }
         let ui = self.app.app().ui_scale.max(0.25);
         self.app.render(scale * ui);
-        // The device pixels the frame changed, when not all of them.
+        // The device pixels the frame changed, when not all of them. A
+        // rectangle off the device pixel grid (a fractional scale) makes
+        // the whole frame go out instead; empty ones are left out.
         let damage: Option<Vec<(u32, u32, u32, u32)>> = {
             let app = self.app.app();
-            app.frame_damage.as_ref().map(|rs| rs.iter().filter_map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+            let root = app.root.rect;
+            app.frame_damage.as_ref().and_then(|rs| {
+                rs.iter()
+                    .filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h))
+                    .map(|&r| crate::device_rect(&app.root, scale * ui, r))
+                    .collect()
+            })
         };
         let Some(pm) = self.app.app().last_frame() else { return };
         let Some(surface) = self.surface.as_mut() else { return };
