@@ -139,12 +139,9 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         let damage: Option<Vec<(u32, u32, u32, u32)>> = {
             let app = self.app.app();
             let root = app.root.rect;
-            app.frame_damage.as_ref().and_then(|rs| {
-                rs.iter()
-                    .filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h))
-                    .map(|&r| crate::device_rect(&app.root, scale * ui, r))
-                    .collect()
-            })
+            app.frame_damage
+                .as_ref()
+                .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
         };
         let Some(pm) = self.app.app().last_frame() else { return };
         let Some(surface) = self.surface.as_mut() else { return };
