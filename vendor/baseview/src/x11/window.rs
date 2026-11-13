@@ -264,6 +264,26 @@ impl<'a> Window<'a> {
                 &[0],
             )?;
         }
+        if parent.is_none() {
+            xcb_connection.conn.change_property8(
+                PropMode::REPLACE,
+                window_id,
+                xcb_connection.atoms._NET_WM_NAME,
+                xcb_connection.atoms.UTF8_STRING,
+                options.title.as_bytes(),
+            )?;
+            // Desktops match a window to its launcher (name and icon) by the
+            // class: instance and class name, e.g. "dreist" and "Dreist" for
+            // a desktop entry with StartupWMClass=Dreist.
+            let class = format!("{}\0{}\0", options.title.to_lowercase(), options.title);
+            xcb_connection.conn.change_property8(
+                PropMode::REPLACE,
+                window_id,
+                AtomEnum::WM_CLASS,
+                AtomEnum::STRING,
+                class.as_bytes(),
+            )?;
+        }
         xcb_connection.conn.map_window(window_id)?;
 
         // Change window title
