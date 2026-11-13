@@ -3,10 +3,12 @@
 //! `dreist_formats::paths::ui_dir`). The skins' icon family names map to
 //! app's own font ([`icon_family`]).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use fontdue::{Font, FontSettings};
+use fontdue::{Font, FontSettings, Metrics};
 
 use crate::style::{FontSpec, Shorten};
 
@@ -34,6 +36,28 @@ pub struct Fonts {
     cache: HashMap<(String, bool), Option<Font>>,
     /// Size factors of substituted families (see [`Fonts::size`]).
     fit: HashMap<(String, bool), f32>,
+    /// Rasterised glyphs by font, character and pixel size: text redraws
+    /// every frame something near it changes.
+    glyphs: RefCell<HashMap<(usize, char, u32), Arc<(Metrics, Vec<u8>)>>>,
+}
+
+/// A font spec's font and the fallbacks, looked up once for a string.
+pub struct FontSet<'a> {
+    primary: Option<&'a Font>,
+    fallbacks: Vec<&'a Font>,
+}
+
+impl<'a> FontSet<'a> {
+    /// Font to draw `ch` with: the spec's own when it has the glyph, else
+    /// the first fallback that does.
+    pub fn pick(&self, ch: char) -> Option<&'a Font> {
+        if let Some(f) = self.primary {
+            if f.lookup_glyph_index(ch) != 0 || ch == ' ' {
+                return Some(f);
+            }
+        }
+        self.fallbacks.iter().copied().find(|f| f.lookup_glyph_index(ch) != 0).or(self.primary)
+    }
 }
 
 impl Fonts {
@@ -51,7 +75,7 @@ impl Fonts {
         if let Ok(home) = std::env::var("HOME") {
             dirs.push(PathBuf::from(home).join("Library/Fonts"));
         }
-        Fonts { dirs, cache: HashMap::new(), fit: HashMap::new() }
+        Fonts { dirs, cache: HashMap::new(), fit: HashMap::new(), glyphs: RefCell::new(HashMap::new()) }
     }
 
     fn load(&self, family: &str, bold: bool) -> Option<Font> {
@@ -106,13 +130,32 @@ impl Fonts {
 
     /// Font to draw `ch` with (after `prepare`).
     pub fn font_for(&self, spec: &FontSpec, ch: char) -> Option<&Font> {
-        let primary = self.cache.get(&(spec.family.clone(), spec.bold)).and_then(Option::as_ref);
-        if let Some(f) = primary {
-            if f.lookup_glyph_index(ch) != 0 || ch == ' ' {
-                return Some(f);
-            }
+        self.font_set(spec).pick(ch)
+    }
+
+    /// `spec`'s font and the fallbacks (after `prepare`), for picking the
+    /// font of each character of a string without looking them up again.
+    pub fn font_set(&self, spec: &FontSpec) -> FontSet<'_> {
+        FontSet {
+            primary: self.cache.get(&(spec.family.clone(), spec.bold)).and_then(Option::as_ref),
+            fallbacks: FALLBACKS.iter().filter_map(|fb| self.cache.get(&(fb.to_string(), false)).and_then(Option::as_ref)).collect(),
         }
-        FALLBACKS.iter().filter_map(|fb| self.cache.get(&(fb.to_string(), false)).and_then(Option::as_ref)).find(|f| f.lookup_glyph_index(ch) != 0).or(primary)
+    }
+
+    /// `ch` of `font` rasterised at `size` pixels, from the cache.
+    pub fn glyph(&self, font: &Font, ch: char, size: f32) -> Arc<(Metrics, Vec<u8>)> {
+        let key = (font.file_hash(), ch, size.to_bits());
+        if let Some(g) = self.glyphs.borrow().get(&key) {
+            return g.clone();
+        }
+        let g = Arc::new(font.rasterize(ch, size));
+        let mut glyphs = self.glyphs.borrow_mut();
+        // Bounded: sizes change with the UI scale.
+        if glyphs.len() >= 8192 {
+            glyphs.clear();
+        }
+        glyphs.insert(key, g.clone());
+        g
     }
 
     /// The size to draw `spec` at (after `prepare`): its own, or adjusted
@@ -124,7 +167,8 @@ impl Fonts {
     pub fn measure(&mut self, spec: &FontSpec, s: &str) -> (f32, f32) {
         self.prepare(spec);
         let size = self.size(spec);
-        let w = s.chars().map(|c| self.font_for(spec, c).map(|f| f.metrics(c, size).advance_width).unwrap_or(size * 0.55)).sum();
+        let set = self.font_set(spec);
+        let w = s.chars().map(|c| set.pick(c).map(|f| f.metrics(c, size).advance_width).unwrap_or(size * 0.55)).sum();
         let h = self.get(spec).and_then(|f| f.horizontal_line_metrics(size)).map(|m| m.ascent - m.descent).unwrap_or(size);
         (w, h)
     }

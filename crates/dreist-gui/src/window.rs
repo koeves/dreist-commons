@@ -132,7 +132,13 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             return;
         }
         let ui = self.app.app().ui_scale.max(0.25);
-        let pm = self.app.render(scale * ui);
+        self.app.render(scale * ui);
+        // The device pixels the frame changed, when not all of them.
+        let damage: Option<Vec<(u32, u32, u32, u32)>> = {
+            let app = self.app.app();
+            app.frame_damage.as_ref().map(|rs| rs.iter().filter_map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+        };
+        let Some(pm) = self.app.app().last_frame() else { return };
         let Some(surface) = self.surface.as_mut() else { return };
         // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
         if let Ok(p) = std::env::var("DREIST_GUI_DUMP") {
@@ -144,15 +150,43 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             return;
         }
         let Ok(mut buf) = surface.buffer_mut() else { return };
-        for (d, s) in buf.iter_mut().zip(pm.data().as_chunks::<4>().0) {
-            // Opaque backdrop, so premultiplied == straight: RGBA bytes to
-            // ARGB with alpha 0xff (a form the compiler vectorizes). The
-            // alpha byte matters on X11, where the window has a 32-bit
-            // visual and a compositor would show alpha 0 as transparent.
-            let v = u32::from_le_bytes(*s);
-            *d = 0xff00_0000 | (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
+        // Opaque backdrop, so premultiplied == straight: RGBA bytes to ARGB
+        // with alpha 0xff (a form the compiler vectorizes). The alpha byte
+        // matters on X11, where the window has a 32-bit visual and a
+        // compositor would show alpha 0 as transparent.
+        let convert = |d: &mut [u32], s: &[u8]| {
+            for (d, s) in d.iter_mut().zip(s.as_chunks::<4>().0) {
+                let v = u32::from_le_bytes(*s);
+                *d = 0xff00_0000 | (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
+            }
+        };
+        // A buffer that still holds the last frame only needs the changed
+        // pixels converted and sent (a moving playhead, a meter), not the
+        // whole window every frame.
+        let partial = damage.filter(|_| buf.age() == 1 && self.physical == (w, h));
+        match partial {
+            Some(rects) => {
+                let stride = w as usize;
+                let mut sent = Vec::with_capacity(rects.len());
+                for &(x, y, rw, rh) in &rects {
+                    let (x, rw) = (x as usize, rw as usize);
+                    for row in y as usize..(y + rh) as usize {
+                        let o = row * stride + x;
+                        convert(&mut buf[o..o + rw], &pm.data()[o * 4..(o + rw) * 4]);
+                    }
+                    if let (Some(rw), Some(rh)) = (NonZeroU32::new(rw as u32), NonZeroU32::new(rh)) {
+                        sent.push(softbuffer::Rect { x: x as u32, y, width: rw, height: rh });
+                    }
+                }
+                if !sent.is_empty() {
+                    let _ = buf.present_with_damage(&sent);
+                }
+            }
+            None => {
+                convert(&mut buf, pm.data());
+                let _ = buf.present();
+            }
         }
-        let _ = buf.present();
         self.physical = (w, h);
     }
 
