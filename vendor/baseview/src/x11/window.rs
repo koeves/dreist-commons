@@ -14,7 +14,7 @@ use raw_window_handle::{
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
     AtomEnum, ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
-    CreateWindowAux, EventMask, PropMode, Visualid, Window as XWindow, WindowClass,
+    CreateWindowAux, EventMask, Gravity, PropMode, Visualid, Window as XWindow, WindowClass,
 };
 use x11rb::wrapper::ConnectionExt as _;
 
@@ -244,14 +244,10 @@ impl<'a> Window<'a> {
                 // with a depth of 32-bits when the parent window has a different depth
                 .colormap(visual_info.color_map)
                 .border_pixel(0)
-                // Opaque black where nothing draws (the area around a child
-                // view, or after a resize): with a 32-bit visual the default
-                // background would show the desktop through the window.
-                .background_pixel(if visual_info.visual_depth == 32 {
-                    0xff00_0000
-                } else {
-                    screen.black_pixel
-                }),
+                // No background (the X default), so the server does not clear
+                // the window on every resize before the handler repaints it,
+                // and the old picture stays at the top left meanwhile.
+                .bit_gravity(Gravity::NORTH_WEST),
         )?;
         if parent.is_none() {
             let size = window_info.physical_size();
