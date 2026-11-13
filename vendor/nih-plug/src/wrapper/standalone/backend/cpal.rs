@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use cpal::{
     traits::*, Device, FromSample, InputCallbackInfo, OutputCallbackInfo, Sample, SampleFormat,
-    Stream, StreamConfig,
+    SizedSample, Stream, StreamConfig,
 };
 use crossbeam::sync::{Parker, Unparker};
 use midir::{
@@ -12,7 +12,10 @@ use rtrb::RingBuffer;
 use std::borrow::Borrow;
 use std::num::NonZeroU32;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::ScopedJoinHandle;
+use std::time::Duration;
 
 use super::super::config::WrapperConfig;
 use super::Backend;
@@ -277,39 +280,50 @@ impl<P: Plugin> Backend<P> for CpalMidir {
                 });
 
             // This thread needs to be blocked until audio processing ends as CPAL processes the
-            // streams on another thread instead of blocking
+            // streams on another thread instead of blocking. It also watches the output stream and
+            // rebuilds it when its callback stops (an xrun some ALSA plugins never recover from)
+            // or it reports an error.
             let parker = Parker::new();
             let unparker = parker.unparker().clone();
-            let error_cb = {
-                let unparker = unparker.clone();
-                move |err| {
-                    nih_error!("Error during playback: {err:#}");
-                    unparker.clone().unpark();
+            let exit = Arc::new(AtomicBool::new(false));
+            let mut cb = cb;
+            let cb = {
+                let exit = exit.clone();
+                move |buffer: &mut Buffer,
+                      aux: &mut AuxiliaryBuffers,
+                      transport: Transport,
+                      input_events: &[PluginNoteEvent<P>],
+                      output_events: &mut Vec<PluginNoteEvent<P>>| {
+                    let keep_going = cb(buffer, aux, transport, input_events, output_events);
+                    if !keep_going {
+                        exit.store(true, Ordering::Release);
+                    }
+                    keep_going
                 }
             };
 
-            macro_rules! build_output_streams {
+            macro_rules! run_output_streams {
                 ($sample_format:expr, $(($format:path, $primitive_type:ty)),*) => {
                     match $sample_format {
-                        $($format => self.output.device.build_output_stream(
-                            &self.output.config,
-                            self.build_output_data_callback::<P, $primitive_type>(
-                                unparker,
+                        $($format => self.run_output_stream::<$primitive_type>(
+                            Box::new(self.build_output_data_callback::<P, $primitive_type>(
+                                unparker.clone(),
                                 input_rb_consumer,
                                 midi_input_rb_consumer,
                                 // This is a MPMC crossbeam channel instead of an rtrb ringbuffer, and we
                                 // also need it to terminate the thread
                                 midi_output_rb_producer.clone(),
                                 cb,
-                            ),
-                            error_cb,
-                            None,
+                            )),
+                            &parker,
+                            &unparker,
+                            &exit,
                         ),)*
                         format => todo!("Unsupported sample format {format}"),
                     }
                 }
             }
-            let output_stream = build_output_streams!(
+            run_output_streams!(
                 self.output.sample_format,
                 (SampleFormat::I8, i8),
                 (SampleFormat::I16, i16),
@@ -321,16 +335,7 @@ impl<P: Plugin> Backend<P> for CpalMidir {
                 (SampleFormat::U64, u64),
                 (SampleFormat::F32, f32),
                 (SampleFormat::F64, f64)
-            )
-            .expect("Fatal error creating the output stream");
-
-            // TODO: Wait a period before doing this when also reading the input
-            output_stream
-                .play()
-                .expect("Fatal error trying to start the output stream");
-
-            // Wait for the audio thread to exit
-            parker.park();
+            );
 
             // The Midir API requires us to take things out of Options and transform between these
             // structs
@@ -666,6 +671,105 @@ impl CpalMidir {
                     nih_error!("The MIDI input event queue was full, dropping event");
                 }
             }
+        }
+    }
+
+    /// Play the output stream until the plugin asks to stop. The stream is rebuilt, keeping the
+    /// same data callback, when its callback stops arriving for a while or it reports an error.
+    fn run_output_stream<T>(
+        &self,
+        data_callback: Box<dyn FnMut(&mut [T], &OutputCallbackInfo) + Send + 'static>,
+        parker: &Parker,
+        unparker: &Unparker,
+        exit: &AtomicBool,
+    ) where
+        T: SizedSample + FromSample<f32> + 'static,
+    {
+        let data_callback = Arc::new(Mutex::new(data_callback));
+        let callbacks = Arc::new(AtomicU64::new(0));
+        let failed = Arc::new(AtomicBool::new(false));
+        let period =
+            Duration::from_secs_f64(self.config.period_size as f64 / self.config.sample_rate as f64);
+        // `NIH_AUDIO_WATCHDOG_MS` overrides how long the callback may stay away before the stream
+        // is rebuilt; 0 only logs the gaps.
+        let override_ms = std::env::var("NIH_AUDIO_WATCHDOG_MS").ok().and_then(|v| v.parse::<u64>().ok());
+        let restart = override_ms != Some(0);
+        let watch = match override_ms {
+            Some(ms) if ms > 0 => Duration::from_millis(ms),
+            _ => (period * 8).max(Duration::from_millis(2000)),
+        };
+        nih_log!(
+            "Audio output: '{}', {} Hz, {} samples per period",
+            self.output.device.name().unwrap_or_default(),
+            self.output.config.sample_rate.0,
+            self.config.period_size,
+        );
+
+        let mut first = true;
+        loop {
+            let stream = {
+                let data_callback = data_callback.clone();
+                let callbacks = callbacks.clone();
+                let failed = failed.clone();
+                let unparker = unparker.clone();
+                self.output.device.build_output_stream(
+                    &self.output.config,
+                    move |data: &mut [T], info: &OutputCallbackInfo| {
+                        callbacks.fetch_add(1, Ordering::Relaxed);
+                        match data_callback.try_lock() {
+                            Some(mut callback) => callback(data, info),
+                            None => data.fill(T::EQUILIBRIUM),
+                        }
+                    },
+                    move |err| {
+                        nih_error!("Error during playback: {err:#}");
+                        failed.store(true, Ordering::Release);
+                        unparker.unpark();
+                    },
+                    None,
+                )
+            };
+            let stream = match stream.map_err(anyhow::Error::from).and_then(|s| {
+                s.play()?;
+                Ok(s)
+            }) {
+                Ok(stream) => stream,
+                Err(err) if first => panic!("Fatal error starting the output stream: {err:#}"),
+                Err(err) => {
+                    nih_warn!("Could not restart the output stream, trying again: {err:#}");
+                    std::thread::sleep(watch);
+                    continue;
+                }
+            };
+            first = false;
+
+            let mut seen = callbacks.load(Ordering::Relaxed);
+            let mut running = false;
+            loop {
+                parker.park_timeout(watch);
+                if exit.load(Ordering::Acquire) {
+                    return;
+                }
+                if failed.swap(false, Ordering::AcqRel) {
+                    nih_warn!("The audio output stream failed; restarting it");
+                    break;
+                }
+                let now = callbacks.load(Ordering::Relaxed);
+                if now != seen {
+                    running = true;
+                } else if running && restart {
+                    nih_warn!(
+                        "The audio output stopped for {} ms (an xrun the device did not recover \
+                         from); restarting the stream",
+                        watch.as_millis()
+                    );
+                    break;
+                } else if running {
+                    nih_warn!("The audio output stopped for {} ms", watch.as_millis());
+                }
+                seen = now;
+            }
+            drop(stream);
         }
     }
 
