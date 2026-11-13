@@ -712,9 +712,13 @@ impl CpalMidir {
                 let callbacks = callbacks.clone();
                 let failed = failed.clone();
                 let unparker = unparker.clone();
+                let mut promoted = false;
                 self.output.device.build_output_stream(
                     &self.output.config,
                     move |data: &mut [T], info: &OutputCallbackInfo| {
+                        if !std::mem::replace(&mut promoted, true) {
+                            promote_audio_thread();
+                        }
                         callbacks.fetch_add(1, Ordering::Relaxed);
                         match data_callback.try_lock() {
                             Some(mut callback) => callback(data, info),
@@ -1029,3 +1033,37 @@ impl CpalMidir {
         }
     }
 }
+
+/// Give the calling (audio) thread realtime scheduling on Linux, where the
+/// ALSA backend leaves it at the default priority: SCHED_FIFO at up to 70,
+/// as far as `RLIMIT_RTPRIO` allows (the `audio` group's limits), else a
+/// higher nice level. Called once per stream from its first callback; a
+/// refusal only gets logged.
+#[cfg(target_os = "linux")]
+fn promote_audio_thread() {
+    // SAFETY: plain libc calls on the current thread with valid arguments.
+    unsafe {
+        let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        let allowed = if libc::getrlimit(libc::RLIMIT_RTPRIO, &mut limit) == 0 { limit.rlim_cur } else { 0 };
+        let rtprio = if allowed == libc::RLIM_INFINITY { 70 } else { allowed.min(70) as i32 };
+        if rtprio > 0 {
+            let param = libc::sched_param { sched_priority: rtprio };
+            if libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &param) == 0 {
+                nih_log!("Audio thread: realtime priority (SCHED_FIFO {rtprio})");
+                return;
+            }
+        }
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        if libc::setpriority(libc::PRIO_PROCESS, tid, -10) == 0 {
+            nih_log!("Audio thread: no realtime priority allowed; running at nice -10");
+        } else {
+            nih_log!(
+                "Audio thread: normal priority (no realtime rights: add the user to the audio \
+                 group with an rtprio limit, as JACK's setup does)"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn promote_audio_thread() {}
