@@ -23,6 +23,10 @@ pub struct Comb {
     delay_smooth: f32,
     damp: f32,
     denormal: f32,
+    /// The delay buffer still holds a previous note's samples: cleared at
+    /// the first `process`, so note starts that never use the comb do not
+    /// zero its 0.2 s buffer.
+    stale: bool,
 }
 
 impl Comb {
@@ -33,12 +37,14 @@ impl Comb {
     }
 
     /// Back to the state after `new`, keeping the delay buffer (no
-    /// allocation: voices reset their filters at every note start).
+    /// allocation: voices reset their filters at every note start). The
+    /// buffer is cleared when the comb next runs.
     pub fn reset(&mut self) {
         let (buf, sr) = (std::mem::take(&mut self.buf), self.sr);
         *self = Comb::blank();
         self.buf = buf;
-        self.set_sample_rate(sr);
+        self.set_rate(sr);
+        self.stale = true;
     }
 
     fn blank() -> Comb {
@@ -61,11 +67,21 @@ impl Comb {
             delay_smooth: 1.0,
             damp: 0.0,
             denormal: 1e-8,
+            stale: false,
         }
     }
 
     /// Sample-rate setup [re:07aa89]: power-of-two buffer of at least 0.2 s.
     pub fn set_sample_rate(&mut self, sr: f32) {
+        self.set_rate(sr);
+        let len = self.mask + 1;
+        self.buf.clear();
+        self.buf.resize(len, 0.0);
+        self.stale = false;
+    }
+
+    /// The rate's constants and buffer length, without touching the buffer.
+    fn set_rate(&mut self, sr: f32) {
         self.sr = sr;
         self.inv_sr = 1.0 / sr;
         let want = ((sr * 0.2 - 2.0).abs() + sr * 0.2 + 2.0) * 0.5;
@@ -78,8 +94,6 @@ impl Comb {
                 v >>= 1;
             }
         }
-        self.buf.clear();
-        self.buf.resize(len, 0.0);
         self.mask = len - 1;
         self.max_delay = (len as i32 - 2) as f32;
         let a = self.inv_sr * 376.99112;
@@ -98,6 +112,9 @@ impl Comb {
 
     /// `Process` [re:d1b1f2] (`inv_n` = 1/len, capped at 1/32).
     pub fn process(&mut self, inp: &[f32], out: &mut [f32], inv_n: f32) {
+        if std::mem::take(&mut self.stale) {
+            self.buf.fill(0.0);
+        }
         let r = (self.res.abs() + self.res) * 0.5;
         let r2 = r * r;
         let fb_amount = r2 * 1.025;
