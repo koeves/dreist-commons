@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crossbeam::sync::Parker;
 use jack::{
     AsyncClient, AudioIn, AudioOut, Client, ClientOptions, ClosureProcessHandler, Control, MidiIn,
-    MidiOut, Port,
+    MidiOut, Port, PortFlags,
 };
 use parking_lot::Mutex;
 
@@ -437,13 +437,20 @@ impl Jack {
         let client = async_client.as_client();
 
         // We don't connect the inputs automatically to avoid feedback loops, but this should be
-        // safe. And if this fails, then that's fine.
-        for (i, output) in self.main_outputs.lock().iter().enumerate() {
-            // The system ports are 1-indexed
-            let port_no = i + 1;
-
-            let system_playback_port_name = &format!("system:playback_{port_no}");
-            let _ = client.connect_ports_by_name(&output.name()?, system_playback_port_name);
+        // safe. The playback ports are the physical audio inputs, in the server's order: jackd
+        // names them `system:playback_N`, PipeWire after the device.
+        let playback_ports = client.ports(
+            None,
+            Some(jack::jack_sys::FLOAT_MONO_AUDIO),
+            PortFlags::IS_PHYSICAL | PortFlags::IS_INPUT,
+        );
+        if playback_ports.is_empty() {
+            nih_warn!("No physical JACK playback ports found; connect the outputs by hand");
+        }
+        for (output, playback_port) in self.main_outputs.lock().iter().zip(&playback_ports) {
+            if let Err(err) = client.connect_ports_by_name(&output.name()?, playback_port) {
+                nih_warn!("Could not connect to '{playback_port}': {err}");
+            }
         }
 
         // This option can either be set to a single port all inputs should be connected to, or a
