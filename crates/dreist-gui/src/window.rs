@@ -98,24 +98,45 @@ struct Handler<T: WindowApp> {
     physical: (u32, u32),
     /// The cursor last applied.
     cursor: crate::cursor::Cursor,
+    /// `DREIST_GUI_STATS=1`: frame counts and render time, printed each second.
+    stats: Option<FrameStats>,
+}
+
+/// What the window's frames did over the last second (a diagnostic).
+struct FrameStats {
+    since: std::time::Instant,
+    frames: u32,
+    idle: u32,
+    full: u32,
+    partial: u32,
+    resizes: u32,
+    busy: std::time::Duration,
+}
+
+impl FrameStats {
+    fn new() -> FrameStats {
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO }
+    }
+
+    fn report(&mut self) {
+        let t = self.since.elapsed();
+        if t.as_secs_f64() >= 1.0 {
+            eprintln!(
+                "gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core",
+                self.frames,
+                self.idle,
+                self.full,
+                self.partial,
+                self.resizes,
+                self.busy.as_secs_f64() * 100.0 / t.as_secs_f64()
+            );
+            *self = FrameStats::new();
+        }
+    }
 }
 
 impl<T: WindowApp> Handler<T> {
-    fn dispatch(&mut self, events: Vec<UiEvent>) {
-        for e in &events {
-            self.app.event(e);
-        }
-    }
-
-    /// Ask for the tooltip of the control under the pointer.
-    fn tooltip(&mut self) {
-        let path = self.app.app().tooltip_target();
-        self.app.event(&UiEvent::ToolTip { path });
-    }
-}
-
-impl<T: WindowApp> WindowHandler for Handler<T> {
-    fn on_frame(&mut self, window: &mut Window) {
+    fn frame(&mut self, window: &mut Window) {
         self.app.frame();
         // Live UI scale changes ([re:2fbdeb] + host resize).
         if std::mem::take(&mut self.app.app().resize_request) {
@@ -123,8 +144,14 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             let ui = self.app.app().ui_scale.max(0.25) as f64;
             window.resize(Size::new(w as f64 * ui, h as f64 * ui));
             self.app.app().dirty = true;
+            if let Some(st) = self.stats.as_mut() {
+                st.resizes += 1;
+            }
         }
         if !self.app.app().needs_redraw() {
+            if let Some(st) = self.stats.as_mut() {
+                st.idle += 1;
+            }
             return;
         }
         let scale = self.scale as f32;
@@ -143,6 +170,12 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 .as_ref()
                 .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
         };
+        if let Some(st) = self.stats.as_mut() {
+            match damage {
+                Some(_) => st.partial += 1,
+                None => st.full += 1,
+            }
+        }
         let Some(pm) = self.app.app().last_frame() else { return };
         let Some(surface) = self.surface.as_mut() else { return };
         // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
@@ -193,6 +226,30 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             }
         }
         self.physical = (w, h);
+    }
+
+    fn dispatch(&mut self, events: Vec<UiEvent>) {
+        for e in &events {
+            self.app.event(e);
+        }
+    }
+
+    /// Ask for the tooltip of the control under the pointer.
+    fn tooltip(&mut self) {
+        let path = self.app.app().tooltip_target();
+        self.app.event(&UiEvent::ToolTip { path });
+    }
+}
+
+impl<T: WindowApp> WindowHandler for Handler<T> {
+    fn on_frame(&mut self, window: &mut Window) {
+        let started = std::time::Instant::now();
+        self.frame(window);
+        if let Some(st) = self.stats.as_mut() {
+            st.frames += 1;
+            st.busy += started.elapsed();
+            st.report();
+        }
     }
 
     fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
@@ -370,7 +427,7 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow }
+        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: std::env::var_os("DREIST_GUI_STATS").map(|_| FrameStats::new()) }
     }
 }
 
