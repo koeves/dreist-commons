@@ -1054,6 +1054,14 @@ fn promote_audio_thread() {
             }
         }
         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        // No rtprio limit (the usual desktop): ask rtkit, as PulseAudio does.
+        match rtkit::make_realtime(tid as u64) {
+            Ok(prio) => {
+                nih_log!("Audio thread: realtime priority through rtkit (SCHED_RR {prio})");
+                return;
+            }
+            Err(e) => nih_log!("Audio thread: rtkit refused realtime priority ({e})"),
+        }
         if libc::setpriority(libc::PRIO_PROCESS, tid, -10) == 0 {
             nih_log!("Audio thread: no realtime priority allowed; running at nice -10");
         } else {
@@ -1067,3 +1075,113 @@ fn promote_audio_thread() {
 
 #[cfg(not(target_os = "linux"))]
 fn promote_audio_thread() {}
+
+/// rtkit (org.freedesktop.RealtimeKit1 on the system bus), reached through
+/// libdbus loaded at run time, so the build needs no D-Bus headers.
+#[cfg(target_os = "linux")]
+mod rtkit {
+    use std::ffi::{c_char, c_int, c_void, CStr};
+
+    #[repr(C)]
+    struct DBusError {
+        name: *const c_char,
+        message: *const c_char,
+        dummy: u32,
+        padding: *const c_void,
+    }
+
+    type Conn = c_void;
+    type Msg = c_void;
+    const DBUS_BUS_SYSTEM: c_int = 1;
+    const TYPE_UINT64: c_int = b't' as c_int;
+    const TYPE_UINT32: c_int = b'u' as c_int;
+    const TYPE_INVALID: c_int = 0;
+
+    /// Request SCHED_RR for thread `tid` at the highest priority rtkit grants
+    /// (its default maximum is 20); returns the priority.
+    pub fn make_realtime(tid: u64) -> Result<u32, String> {
+        // SAFETY: the symbols are libdbus's documented C API with these
+        // signatures; every object created here is released before return.
+        unsafe {
+            let lib = libc::dlopen(c"libdbus-1.so.3".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+            if lib.is_null() {
+                return Err("libdbus-1 not found".into());
+            }
+            macro_rules! sym {
+                ($name:literal, $ty:ty) => {{
+                    let p = libc::dlsym(lib, concat!($name, "\0").as_ptr() as *const c_char);
+                    if p.is_null() {
+                        return Err(concat!("libdbus-1 has no ", $name).into());
+                    }
+                    std::mem::transmute::<*mut c_void, $ty>(p)
+                }};
+            }
+            let error_init = sym!("dbus_error_init", unsafe extern "C" fn(*mut DBusError));
+            let error_free = sym!("dbus_error_free", unsafe extern "C" fn(*mut DBusError));
+            let is_set = sym!("dbus_error_is_set", unsafe extern "C" fn(*const DBusError) -> u32);
+            let bus_get = sym!("dbus_bus_get_private", unsafe extern "C" fn(c_int, *mut DBusError) -> *mut Conn);
+            let close = sym!("dbus_connection_close", unsafe extern "C" fn(*mut Conn));
+            let conn_unref = sym!("dbus_connection_unref", unsafe extern "C" fn(*mut Conn));
+            let new_call = sym!(
+                "dbus_message_new_method_call",
+                unsafe extern "C" fn(*const c_char, *const c_char, *const c_char, *const c_char) -> *mut Msg
+            );
+            let append = sym!("dbus_message_append_args", unsafe extern "C" fn(*mut Msg, c_int, ...) -> u32);
+            let send = sym!(
+                "dbus_connection_send_with_reply_and_block",
+                unsafe extern "C" fn(*mut Conn, *mut Msg, c_int, *mut DBusError) -> *mut Msg
+            );
+            let msg_unref = sym!("dbus_message_unref", unsafe extern "C" fn(*mut Msg));
+
+            // rtkit only serves threads with a CPU time limit (200 ms here,
+            // within its default maximum).
+            let limit = libc::rlimit { rlim_cur: 200_000, rlim_max: 200_000 };
+            libc::setrlimit(libc::RLIMIT_RTTIME, &limit);
+
+            let mut err: DBusError = std::mem::zeroed();
+            error_init(&mut err);
+            let conn = bus_get(DBUS_BUS_SYSTEM, &mut err);
+            if conn.is_null() || is_set(&err) != 0 {
+                let m = message(&err);
+                error_free(&mut err);
+                return Err(format!("no system bus: {m}"));
+            }
+            let mut result = Err(String::from("rtkit granted no priority"));
+            for prio in (1..=20u32).rev().step_by(5) {
+                let msg = new_call(
+                    c"org.freedesktop.RealtimeKit1".as_ptr(),
+                    c"/org/freedesktop/RealtimeKit1".as_ptr(),
+                    c"org.freedesktop.RealtimeKit1".as_ptr(),
+                    c"MakeThreadRealtime".as_ptr(),
+                );
+                if msg.is_null() {
+                    break;
+                }
+                let (t, p) = (tid, prio);
+                append(msg, TYPE_UINT64, &t as *const u64, TYPE_UINT32, &p as *const u32, TYPE_INVALID);
+                let reply = send(conn, msg, 1000, &mut err);
+                msg_unref(msg);
+                if !reply.is_null() {
+                    msg_unref(reply);
+                    result = Ok(prio);
+                    break;
+                }
+                result = Err(message(&err));
+                error_free(&mut err);
+                error_init(&mut err);
+            }
+            close(conn);
+            conn_unref(conn);
+            result
+        }
+    }
+
+    unsafe fn message(err: &DBusError) -> String {
+        if err.message.is_null() {
+            String::from("unknown error")
+        } else {
+            // SAFETY: libdbus sets a NUL-terminated message with the error.
+            unsafe { CStr::from_ptr(err.message) }.to_string_lossy().into_owned()
+        }
+    }
+}
