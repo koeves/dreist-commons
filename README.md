@@ -66,10 +66,10 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 - **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
 - **macOS only**: native drags out of the window, the app-wide menu bar and REX files.
 
-Linux build packages for `dreist-gui/window` and the `dreist-host` features (Debian / Ubuntu names):
+Linux build packages (Debian / Ubuntu names; Clang builds the time-stretch bindings, the rest serve `dreist-gui/window` and the `dreist-host` features):
 
 ```bash
-sudo apt-get install pkg-config libasound2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
+sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
 ```
 
 ## Development

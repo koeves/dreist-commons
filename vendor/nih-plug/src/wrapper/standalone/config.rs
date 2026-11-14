@@ -26,10 +26,11 @@ pub struct WrapperConfig {
     /// This setting is ignored when using the JACK backend.
     #[clap(value_parser, short = 'r', long, default_value = "48000")]
     pub sample_rate: f32,
-    /// The audio backend's period size.
+    /// The audio backend's period size: 512 by default, 1024 when PulseAudio is the sound server
+    /// on Linux (its ALSA plugin underruns at smaller periods).
     ///
     /// This setting is ignored when using the JACK backend.
-    #[clap(value_parser, short = 'p', long, default_value = "512")]
+    #[clap(value_parser, short = 'p', long, default_value = "0", hide_default_value = true)]
     pub period_size: u32,
 
     /// The input device for the ALSA, CoreAudio, and WASAPI backends. No input will be connected if

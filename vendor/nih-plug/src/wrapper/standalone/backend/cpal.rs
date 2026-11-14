@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use cpal::{
     traits::*, Device, FromSample, InputCallbackInfo, OutputCallbackInfo, Sample, SampleFormat,
-    Stream, StreamConfig,
+    SizedSample, Stream, StreamConfig,
 };
 use crossbeam::sync::{Parker, Unparker};
 use midir::{
@@ -12,7 +12,10 @@ use rtrb::RingBuffer;
 use std::borrow::Borrow;
 use std::num::NonZeroU32;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::thread::ScopedJoinHandle;
+use std::time::Duration;
 
 use super::super::config::WrapperConfig;
 use super::Backend;
@@ -277,39 +280,50 @@ impl<P: Plugin> Backend<P> for CpalMidir {
                 });
 
             // This thread needs to be blocked until audio processing ends as CPAL processes the
-            // streams on another thread instead of blocking
+            // streams on another thread instead of blocking. It also watches the output stream and
+            // rebuilds it when its callback stops (an xrun some ALSA plugins never recover from)
+            // or it reports an error.
             let parker = Parker::new();
             let unparker = parker.unparker().clone();
-            let error_cb = {
-                let unparker = unparker.clone();
-                move |err| {
-                    nih_error!("Error during playback: {err:#}");
-                    unparker.clone().unpark();
+            let exit = Arc::new(AtomicBool::new(false));
+            let mut cb = cb;
+            let cb = {
+                let exit = exit.clone();
+                move |buffer: &mut Buffer,
+                      aux: &mut AuxiliaryBuffers,
+                      transport: Transport,
+                      input_events: &[PluginNoteEvent<P>],
+                      output_events: &mut Vec<PluginNoteEvent<P>>| {
+                    let keep_going = cb(buffer, aux, transport, input_events, output_events);
+                    if !keep_going {
+                        exit.store(true, Ordering::Release);
+                    }
+                    keep_going
                 }
             };
 
-            macro_rules! build_output_streams {
+            macro_rules! run_output_streams {
                 ($sample_format:expr, $(($format:path, $primitive_type:ty)),*) => {
                     match $sample_format {
-                        $($format => self.output.device.build_output_stream(
-                            &self.output.config,
-                            self.build_output_data_callback::<P, $primitive_type>(
-                                unparker,
+                        $($format => self.run_output_stream::<$primitive_type>(
+                            Box::new(self.build_output_data_callback::<P, $primitive_type>(
+                                unparker.clone(),
                                 input_rb_consumer,
                                 midi_input_rb_consumer,
                                 // This is a MPMC crossbeam channel instead of an rtrb ringbuffer, and we
                                 // also need it to terminate the thread
                                 midi_output_rb_producer.clone(),
                                 cb,
-                            ),
-                            error_cb,
-                            None,
+                            )),
+                            &parker,
+                            &unparker,
+                            &exit,
                         ),)*
                         format => todo!("Unsupported sample format {format}"),
                     }
                 }
             }
-            let output_stream = build_output_streams!(
+            run_output_streams!(
                 self.output.sample_format,
                 (SampleFormat::I8, i8),
                 (SampleFormat::I16, i16),
@@ -321,16 +335,7 @@ impl<P: Plugin> Backend<P> for CpalMidir {
                 (SampleFormat::U64, u64),
                 (SampleFormat::F32, f32),
                 (SampleFormat::F64, f64)
-            )
-            .expect("Fatal error creating the output stream");
-
-            // TODO: Wait a period before doing this when also reading the input
-            output_stream
-                .play()
-                .expect("Fatal error trying to start the output stream");
-
-            // Wait for the audio thread to exit
-            parker.park();
+            );
 
             // The Midir API requires us to take things out of Options and transform between these
             // structs
@@ -669,6 +674,109 @@ impl CpalMidir {
         }
     }
 
+    /// Play the output stream until the plugin asks to stop. The stream is rebuilt, keeping the
+    /// same data callback, when its callback stops arriving for a while or it reports an error.
+    fn run_output_stream<T>(
+        &self,
+        data_callback: Box<dyn FnMut(&mut [T], &OutputCallbackInfo) + Send + 'static>,
+        parker: &Parker,
+        unparker: &Unparker,
+        exit: &AtomicBool,
+    ) where
+        T: SizedSample + FromSample<f32> + 'static,
+    {
+        let data_callback = Arc::new(Mutex::new(data_callback));
+        let callbacks = Arc::new(AtomicU64::new(0));
+        let failed = Arc::new(AtomicBool::new(false));
+        let period =
+            Duration::from_secs_f64(self.config.period_size as f64 / self.config.sample_rate as f64);
+        // `NIH_AUDIO_WATCHDOG_MS` overrides how long the callback may stay away before the stream
+        // is rebuilt; 0 only logs the gaps.
+        let override_ms = std::env::var("NIH_AUDIO_WATCHDOG_MS").ok().and_then(|v| v.parse::<u64>().ok());
+        let restart = override_ms != Some(0);
+        let watch = match override_ms {
+            Some(ms) if ms > 0 => Duration::from_millis(ms),
+            _ => (period * 8).max(Duration::from_millis(2000)),
+        };
+        nih_log!(
+            "Audio output: '{}', {} Hz, {} samples per period",
+            self.output.device.name().unwrap_or_default(),
+            self.output.config.sample_rate.0,
+            self.config.period_size,
+        );
+
+        let mut first = true;
+        loop {
+            let stream = {
+                let data_callback = data_callback.clone();
+                let callbacks = callbacks.clone();
+                let failed = failed.clone();
+                let unparker = unparker.clone();
+                let mut promoted = false;
+                self.output.device.build_output_stream(
+                    &self.output.config,
+                    move |data: &mut [T], info: &OutputCallbackInfo| {
+                        if !std::mem::replace(&mut promoted, true) {
+                            promote_audio_thread();
+                        }
+                        callbacks.fetch_add(1, Ordering::Relaxed);
+                        match data_callback.try_lock() {
+                            Some(mut callback) => callback(data, info),
+                            None => data.fill(T::EQUILIBRIUM),
+                        }
+                    },
+                    move |err| {
+                        nih_error!("Error during playback: {err:#}");
+                        failed.store(true, Ordering::Release);
+                        unparker.unpark();
+                    },
+                    None,
+                )
+            };
+            let stream = match stream.map_err(anyhow::Error::from).and_then(|s| {
+                s.play()?;
+                Ok(s)
+            }) {
+                Ok(stream) => stream,
+                Err(err) if first => panic!("Fatal error starting the output stream: {err:#}"),
+                Err(err) => {
+                    nih_warn!("Could not restart the output stream, trying again: {err:#}");
+                    std::thread::sleep(watch);
+                    continue;
+                }
+            };
+            first = false;
+
+            let mut seen = callbacks.load(Ordering::Relaxed);
+            let mut running = false;
+            loop {
+                parker.park_timeout(watch);
+                if exit.load(Ordering::Acquire) {
+                    return;
+                }
+                if failed.swap(false, Ordering::AcqRel) {
+                    nih_warn!("The audio output stream failed; restarting it");
+                    break;
+                }
+                let now = callbacks.load(Ordering::Relaxed);
+                if now != seen {
+                    running = true;
+                } else if running && restart {
+                    nih_warn!(
+                        "The audio output stopped for {} ms (an xrun the device did not recover \
+                         from); restarting the stream",
+                        watch.as_millis()
+                    );
+                    break;
+                } else if running {
+                    nih_warn!("The audio output stopped for {} ms", watch.as_millis());
+                }
+                seen = now;
+            }
+            drop(stream);
+        }
+    }
+
     fn build_output_data_callback<P, T>(
         &self,
         unparker: Unparker,
@@ -922,6 +1030,158 @@ impl CpalMidir {
             }
 
             num_processed_samples += buffer_size;
+        }
+    }
+}
+
+/// Give the calling (audio) thread realtime scheduling on Linux, where the
+/// ALSA backend leaves it at the default priority: SCHED_FIFO at up to 70,
+/// as far as `RLIMIT_RTPRIO` allows (the `audio` group's limits), else a
+/// higher nice level. Called once per stream from its first callback; a
+/// refusal only gets logged.
+#[cfg(target_os = "linux")]
+fn promote_audio_thread() {
+    // SAFETY: plain libc calls on the current thread with valid arguments.
+    unsafe {
+        let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        let allowed = if libc::getrlimit(libc::RLIMIT_RTPRIO, &mut limit) == 0 { limit.rlim_cur } else { 0 };
+        let rtprio = if allowed == libc::RLIM_INFINITY { 70 } else { allowed.min(70) as i32 };
+        if rtprio > 0 {
+            let param = libc::sched_param { sched_priority: rtprio };
+            if libc::pthread_setschedparam(libc::pthread_self(), libc::SCHED_FIFO, &param) == 0 {
+                nih_log!("Audio thread: realtime priority (SCHED_FIFO {rtprio})");
+                return;
+            }
+        }
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        // No rtprio limit (the usual desktop): ask rtkit, as PulseAudio does.
+        match rtkit::make_realtime(tid as u64) {
+            Ok(prio) => {
+                nih_log!("Audio thread: realtime priority through rtkit (SCHED_RR {prio})");
+                return;
+            }
+            Err(e) => nih_log!("Audio thread: rtkit refused realtime priority ({e})"),
+        }
+        if libc::setpriority(libc::PRIO_PROCESS, tid, -10) == 0 {
+            nih_log!("Audio thread: no realtime priority allowed; running at nice -10");
+        } else {
+            nih_log!(
+                "Audio thread: normal priority (no realtime rights: add the user to the audio \
+                 group with an rtprio limit, as JACK's setup does)"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn promote_audio_thread() {}
+
+/// rtkit (org.freedesktop.RealtimeKit1 on the system bus), reached through
+/// libdbus loaded at run time, so the build needs no D-Bus headers.
+#[cfg(target_os = "linux")]
+mod rtkit {
+    use std::ffi::{c_char, c_int, c_void, CStr};
+
+    #[repr(C)]
+    struct DBusError {
+        name: *const c_char,
+        message: *const c_char,
+        dummy: u32,
+        padding: *const c_void,
+    }
+
+    type Conn = c_void;
+    type Msg = c_void;
+    const DBUS_BUS_SYSTEM: c_int = 1;
+    const TYPE_UINT64: c_int = b't' as c_int;
+    const TYPE_UINT32: c_int = b'u' as c_int;
+    const TYPE_INVALID: c_int = 0;
+
+    /// Request SCHED_RR for thread `tid` at the highest priority rtkit grants
+    /// (its default maximum is 20); returns the priority.
+    pub fn make_realtime(tid: u64) -> Result<u32, String> {
+        // SAFETY: the symbols are libdbus's documented C API with these
+        // signatures; every object created here is released before return.
+        unsafe {
+            let lib = libc::dlopen(c"libdbus-1.so.3".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+            if lib.is_null() {
+                return Err("libdbus-1 not found".into());
+            }
+            macro_rules! sym {
+                ($name:literal, $ty:ty) => {{
+                    let p = libc::dlsym(lib, concat!($name, "\0").as_ptr() as *const c_char);
+                    if p.is_null() {
+                        return Err(concat!("libdbus-1 has no ", $name).into());
+                    }
+                    std::mem::transmute::<*mut c_void, $ty>(p)
+                }};
+            }
+            let error_init = sym!("dbus_error_init", unsafe extern "C" fn(*mut DBusError));
+            let error_free = sym!("dbus_error_free", unsafe extern "C" fn(*mut DBusError));
+            let is_set = sym!("dbus_error_is_set", unsafe extern "C" fn(*const DBusError) -> u32);
+            let bus_get = sym!("dbus_bus_get_private", unsafe extern "C" fn(c_int, *mut DBusError) -> *mut Conn);
+            let close = sym!("dbus_connection_close", unsafe extern "C" fn(*mut Conn));
+            let conn_unref = sym!("dbus_connection_unref", unsafe extern "C" fn(*mut Conn));
+            let new_call = sym!(
+                "dbus_message_new_method_call",
+                unsafe extern "C" fn(*const c_char, *const c_char, *const c_char, *const c_char) -> *mut Msg
+            );
+            let append = sym!("dbus_message_append_args", unsafe extern "C" fn(*mut Msg, c_int, ...) -> u32);
+            let send = sym!(
+                "dbus_connection_send_with_reply_and_block",
+                unsafe extern "C" fn(*mut Conn, *mut Msg, c_int, *mut DBusError) -> *mut Msg
+            );
+            let msg_unref = sym!("dbus_message_unref", unsafe extern "C" fn(*mut Msg));
+
+            // rtkit only serves threads with a CPU time limit (200 ms here,
+            // within its default maximum).
+            let limit = libc::rlimit { rlim_cur: 200_000, rlim_max: 200_000 };
+            libc::setrlimit(libc::RLIMIT_RTTIME, &limit);
+
+            let mut err: DBusError = std::mem::zeroed();
+            error_init(&mut err);
+            let conn = bus_get(DBUS_BUS_SYSTEM, &mut err);
+            if conn.is_null() || is_set(&err) != 0 {
+                let m = message(&err);
+                error_free(&mut err);
+                return Err(format!("no system bus: {m}"));
+            }
+            let mut result = Err(String::from("rtkit granted no priority"));
+            for prio in (1..=20u32).rev().step_by(5) {
+                let msg = new_call(
+                    c"org.freedesktop.RealtimeKit1".as_ptr(),
+                    c"/org/freedesktop/RealtimeKit1".as_ptr(),
+                    c"org.freedesktop.RealtimeKit1".as_ptr(),
+                    c"MakeThreadRealtime".as_ptr(),
+                );
+                if msg.is_null() {
+                    break;
+                }
+                let (t, p) = (tid, prio);
+                append(msg, TYPE_UINT64, &t as *const u64, TYPE_UINT32, &p as *const u32, TYPE_INVALID);
+                let reply = send(conn, msg, 1000, &mut err);
+                msg_unref(msg);
+                if !reply.is_null() {
+                    msg_unref(reply);
+                    result = Ok(prio);
+                    break;
+                }
+                result = Err(message(&err));
+                error_free(&mut err);
+                error_init(&mut err);
+            }
+            close(conn);
+            conn_unref(conn);
+            result
+        }
+    }
+
+    unsafe fn message(err: &DBusError) -> String {
+        if err.message.is_null() {
+            String::from("unknown error")
+        } else {
+            // SAFETY: libdbus sets a NUL-terminated message with the error.
+            unsafe { CStr::from_ptr(err.message) }.to_string_lossy().into_owned()
         }
     }
 }

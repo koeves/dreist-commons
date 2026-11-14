@@ -63,19 +63,23 @@ pub fn nih_export_standalone_with_args<P: Plugin, Args: IntoIterator<Item = Stri
     // Instead of parsing this directly, we need to take a bit of a roundabout approach to get the
     // plugin's name and vendor in here since they'd otherwise be taken from NIH-plug's own
     // `Cargo.toml` file.
-    let config = WrapperConfig::from_arg_matches(
+    let mut config = WrapperConfig::from_arg_matches(
         &WrapperConfig::command()
             .name(P::NAME)
             .author(P::VENDOR)
             .get_matches_from(args),
     )
     .unwrap_or_else(|err| err.exit());
+    if config.period_size == 0 {
+        config.period_size = if pulseaudio_is_running() { 1024 } else { 512 };
+    }
 
     match config.backend {
         config::BackendType::Auto => {
             let result = backend::Jack::new::<P>(config.clone()).map(|backend| {
                 nih_log!("Using the JACK backend");
-                run_wrapper::<P, _>(backend, config.clone())
+                let config = backend.config().clone();
+                run_wrapper::<P, _>(backend, config)
             });
 
             #[cfg(target_os = "linux")]
@@ -133,7 +137,10 @@ pub fn nih_export_standalone_with_args<P: Plugin, Args: IntoIterator<Item = Stri
             })
         }
         config::BackendType::Jack => match backend::Jack::new::<P>(config.clone()) {
-            Ok(backend) => run_wrapper::<P, _>(backend, config),
+            Ok(backend) => {
+                let config = backend.config().clone();
+                run_wrapper::<P, _>(backend, config)
+            }
             Err(err) => {
                 nih_error!("Could not initialize the JACK backend: {:#}", err);
                 false
@@ -200,4 +207,17 @@ fn print_error(error: WrapperError) {
             nih_error!("The plugin failed to initialize");
         }
     }
+}
+
+/// Whether PulseAudio (not PipeWire's replacement for it) is the sound server, so that ALSA's
+/// default device goes through PulseAudio's ALSA plugin.
+fn pulseaudio_is_running() -> bool {
+    if !cfg!(target_os = "linux") {
+        return false;
+    }
+    std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "pulseaudio"))
 }
