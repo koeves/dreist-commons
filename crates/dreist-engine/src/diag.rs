@@ -33,6 +33,8 @@ pub struct Monitor {
     ui: AtomicU32,
     /// A start of playback asked for (taken by the audio thread).
     play: AtomicBool,
+    /// The main output's peak since the last stats line (`f32` bits).
+    out_peak: AtomicU32,
     /// Late blocks: (nanoseconds since the monitor started, position bits),
     /// written at `head % EVENTS`.
     events: [(AtomicU64, AtomicU64); EVENTS],
@@ -50,6 +52,7 @@ pub fn enable() -> &'static Monitor {
         playing: AtomicBool::new(false),
         ui: AtomicU32::new(0),
         play: AtomicBool::new(false),
+        out_peak: AtomicU32::new(0),
         events: std::array::from_fn(|_| (AtomicU64::new(0), AtomicU64::new(0))),
         head: AtomicU64::new(0),
         started: Instant::now(),
@@ -106,6 +109,17 @@ impl Monitor {
 
     pub fn playing(&self) -> bool {
         self.playing.load(Relaxed)
+    }
+
+    /// The audio thread: the main output of a block.
+    pub fn output(&self, left: &[f32], right: &[f32]) {
+        let peak = left.iter().chain(right).fold(0.0f32, |m, s| m.max(s.abs()));
+        self.out_peak.fetch_max(peak.to_bits(), Relaxed);
+    }
+
+    /// The main output's peak since the last call (dBFS; `-inf` silent).
+    pub fn take_output_db(&self) -> f32 {
+        20.0 * f32::from_bits(self.out_peak.swap(0, Relaxed)).log10()
     }
 
     /// The editor: its window's share of a core.
@@ -453,7 +467,8 @@ impl Recorder {
             .with("dsp", r.average * 100.0)
             .with("peak", r.peak * 100.0)
             .with("late", r.late)
-            .with("rss_mb", rss as f64 / (1 << 20) as f64);
+            .with("rss_mb", rss as f64 / (1 << 20) as f64)
+            .with("out_db", m.take_output_db().max(-120.0));
         if let Some(u) = m.ui_load() {
             e = e.with("ui", u * 100.0);
         }
@@ -550,7 +565,8 @@ pub struct DebugArgs {
     pub play: Option<PathBuf>,
     /// `--duration <seconds>`: quit after this long.
     pub duration: Option<f64>,
-    /// `--until-end`: quit when playback stops.
+    /// `--until-end`: quit when playback stops or a looping song jumps
+    /// back to its start.
     pub until_end: bool,
     /// `--fail-on-late <n>`: exit with status 3 after more late blocks.
     pub fail_on_late: Option<u64>,
@@ -622,15 +638,23 @@ pub fn start_run(app: &str, version: &str, args: DebugArgs, launch: &[String]) -
         .spawn(|| {
             let Some((rec, args)) = RUN.get() else { return };
             let started = Instant::now();
-            let mut was_playing = false;
+            let (mut was_playing, mut last) = (false, 0.0f64);
+            signals::catch();
             loop {
                 std::thread::sleep(Duration::from_millis(100));
                 if let Ok(mut r) = rec.lock() {
                     r.poll();
                 }
-                let playing = monitor.playing();
-                let ended = args.until_end && was_playing && !playing;
-                was_playing |= playing;
+                let (playing, pos) = (monitor.playing(), monitor.position());
+                let ended = args.until_end && was_playing && (!playing || pos < last - 1.0);
+                (was_playing, last) = (was_playing || playing, pos);
+                if let Some(sig) = signals::caught() {
+                    if let Ok(mut r) = rec.lock() {
+                        r.log().write(&Event::new("signal").with("signal", sig));
+                    }
+                    let _ = end_run();
+                    std::process::exit(128 + sig as i32);
+                }
                 if ended || args.duration.is_some_and(|d| started.elapsed().as_secs_f64() >= d) {
                     std::process::exit(end_run().unwrap_or(0));
                 }
@@ -646,6 +670,38 @@ pub fn end_run() -> Option<i32> {
     let (rec, args) = RUN.get()?;
     let s = rec.lock().ok()?.summary();
     Some(args.status(&s))
+}
+
+/// SIGINT and SIGTERM end a debug run with its summary (Unix).
+mod signals {
+    use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+
+    static CAUGHT: AtomicU32 = AtomicU32::new(0);
+
+    #[cfg(unix)]
+    extern "C" fn on_signal(sig: i32) {
+        CAUGHT.store(sig as u32, Relaxed);
+    }
+
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+    }
+
+    pub fn catch() {
+        #[cfg(unix)]
+        for sig in [2, 15] {
+            // SAFETY: the handler only stores an atomic.
+            unsafe { signal(sig, on_signal) };
+        }
+    }
+
+    pub fn caught() -> Option<u32> {
+        match CAUGHT.load(Relaxed) {
+            0 => None,
+            s => Some(s),
+        }
+    }
 }
 
 #[cfg(test)]
