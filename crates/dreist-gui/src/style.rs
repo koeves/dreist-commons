@@ -7,7 +7,7 @@
 //! `ApplicationStyle` holds every base attribute at its default and
 //! `InvisibleStyle` clears fill and border ([re:307020], [re:3b7e9c]).
 
-use std::collections::HashMap;
+use crate::ctrl::FxMap;
 
 use dreist_formats::Node;
 
@@ -34,7 +34,7 @@ pub struct Style {
     /// Element class ([re:1756ae], [re:7065b8], ...).
     pub class: String,
     pub parents: Vec<String>,
-    pub attrs: HashMap<String, String>,
+    pub attrs: FxMap<String, String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,9 +87,9 @@ fn base_default(name: &str) -> Option<&'static str> {
 
 #[derive(Clone, Debug, Default)]
 pub struct StyleSheet {
-    pub colours: HashMap<String, Colour>,
-    pub fonts: HashMap<String, FontSpec>,
-    pub styles: HashMap<String, Style>,
+    pub colours: FxMap<String, Colour>,
+    pub fonts: FxMap<String, FontSpec>,
+    pub styles: FxMap<String, Style>,
 }
 
 impl StyleSheet {
