@@ -246,6 +246,13 @@ impl<'s> Renderer<'s> {
             self.in_layer.set(self.in_layer.get() - 1);
             return;
         }
+        // Outside the area being drawn (a partial repaint): nothing to do,
+        // and no layer to allocate, fill and composite.
+        let (cx, cy, cw, ch) = p.clip;
+        let (ix, iy) = (p.tx as i32 + c.rect.x, p.ty as i32 + c.rect.y);
+        if ix >= cx + cw || iy >= cy + ch || ix + c.rect.w <= cx || iy + c.rect.h <= cy {
+            return;
+        }
         let s = p.scale;
         let (ax, ay) = (p.tx + c.rect.x as f32, p.ty + c.rect.y as f32);
         let (lw, lh) = (((c.rect.w as f32) * s).ceil() as u32, ((c.rect.h as f32) * s).ceil() as u32);
