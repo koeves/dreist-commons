@@ -582,6 +582,7 @@ dependencies = [
  "dreist-dsp",
  "dreist-formats",
  "dreist-testkit",
+ "libc",
  "symphonia",
 ]
 
