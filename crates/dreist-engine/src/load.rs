@@ -72,15 +72,17 @@ impl DspLoad {
         self.start.store(now, Relaxed);
     }
 
-    /// The audio thread, as the block of `samples` at `rate` ends.
-    pub fn end(&self, samples: usize, rate: f32) {
+    /// The audio thread, as the block of `samples` at `rate` ends; true
+    /// when the block started late.
+    pub fn end(&self, samples: usize, rate: f32) -> bool {
         let (start, prev) = (self.start.load(Relaxed), self.prev_start.load(Relaxed));
         if start == 0 || samples == 0 || rate <= 0.0 {
-            return;
+            return false;
         }
         let busy = self.now().saturating_sub(start);
         let audio = (samples as f64 * 1e9 / rate as f64) as u64;
-        if prev != 0 && start - prev > audio * 3 / 2 + 2_000_000 {
+        let late = prev != 0 && start - prev > audio * 3 / 2 + 2_000_000;
+        if late {
             self.late.fetch_add(1, Relaxed);
         }
         let share = (busy as f64 / audio.max(1) as f64 * 1e6).min(u32::MAX as f64) as u32;
@@ -94,6 +96,7 @@ impl DspLoad {
             self.audio.store(0, Relaxed);
             self.seconds.fetch_add(1, Relaxed);
         }
+        late
     }
 
     /// [`DspLoad::begin`] now and [`DspLoad::end`] when the guard drops (a
@@ -126,7 +129,7 @@ pub struct LoadScope<'a> {
 
 impl Drop for LoadScope<'_> {
     fn drop(&mut self) {
-        self.load.end(self.samples, self.rate);
+        let _ = self.load.end(self.samples, self.rate);
     }
 }
 
