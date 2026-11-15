@@ -211,7 +211,7 @@ fn print_error(error: WrapperError) {
 
 /// Whether PulseAudio (not PipeWire's replacement for it) is the sound server, so that ALSA's
 /// default device goes through PulseAudio's ALSA plugin.
-fn pulseaudio_is_running() -> bool {
+pub(crate) fn pulseaudio_is_running() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }

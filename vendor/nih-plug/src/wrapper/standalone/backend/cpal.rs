@@ -434,7 +434,8 @@ impl CpalMidir {
         };
 
         let requested_sample_rate = cpal::SampleRate(config.sample_rate as u32);
-        let requested_buffer_size = cpal::BufferSize::Fixed(config.period_size);
+        let buffer_frames = alsa_buffer_frames(config.period_size, super::super::pulseaudio_is_running());
+        let requested_buffer_size = cpal::BufferSize::Fixed(buffer_frames);
         let num_input_channels = audio_io_layout
             .main_input_channels
             .map(NonZeroU32::get)
@@ -449,7 +450,7 @@ impl CpalMidir {
                             c.channels() as usize == num_input_channels
                                 && (c.min_sample_rate()..=c.max_sample_rate())
                                     .contains(&requested_sample_rate)
-                                && (min..=max).contains(&&config.period_size)
+                                && (min..=max).contains(&&buffer_frames)
                         }
                         cpal::SupportedBufferSize::Unknown => false,
                     })
@@ -497,7 +498,7 @@ impl CpalMidir {
                         c.channels() as usize == num_output_channels
                             && (c.min_sample_rate()..=c.max_sample_rate())
                                 .contains(&requested_sample_rate)
-                            && (min..=max).contains(&&config.period_size)
+                            && (min..=max).contains(&&buffer_frames)
                     }
                     cpal::SupportedBufferSize::Unknown => false,
                 })
@@ -699,10 +700,14 @@ impl CpalMidir {
             _ => (period * 8).max(Duration::from_millis(2000)),
         };
         nih_log!(
-            "Audio output: '{}', {} Hz, {} samples per period",
+            "Audio output: '{}', {} Hz, {} samples per period, {} frames of buffer requested",
             self.output.device.name().unwrap_or_default(),
             self.output.config.sample_rate.0,
             self.config.period_size,
+            match self.output.config.buffer_size {
+                cpal::BufferSize::Fixed(n) => n,
+                cpal::BufferSize::Default => 0,
+            },
         );
 
         let mut first = true;
@@ -713,11 +718,14 @@ impl CpalMidir {
                 let failed = failed.clone();
                 let unparker = unparker.clone();
                 let mut promoted = false;
+                let data_channels = self.output.config.channels as usize;
                 self.output.device.build_output_stream(
                     &self.output.config,
                     move |data: &mut [T], info: &OutputCallbackInfo| {
                         if !std::mem::replace(&mut promoted, true) {
                             promote_audio_thread();
+                            let channels = data_channels.max(1);
+                            nih_log!("Audio output callbacks: {} frames each", data.len() / channels);
                         }
                         callbacks.fetch_add(1, Ordering::Relaxed);
                         match data_callback.try_lock() {
@@ -1183,5 +1191,37 @@ mod rtkit {
             // SAFETY: libdbus sets a NUL-terminated message with the error.
             unsafe { CStr::from_ptr(err.message) }.to_string_lossy().into_owned()
         }
+    }
+}
+
+/// How many engine periods the ALSA buffer holds when PulseAudio serves the default device:
+/// its ALSA plugin is fed by a client thread at normal priority, and a buffer of one period
+/// (cpal asks ALSA for the requested size, in four periods of a quarter) drains whenever that
+/// thread is held up. At most 4, so cpal's periods stay within the engine's.
+pub const PULSE_BUFFER_PERIODS: u32 = 2;
+
+/// The ALSA buffer (frames) to ask cpal for: `period_size`, or [`PULSE_BUFFER_PERIODS`] times
+/// that on Linux with PulseAudio running.
+fn alsa_buffer_frames(period_size: u32, pulseaudio: bool) -> u32 {
+    if cfg!(target_os = "linux") && pulseaudio {
+        period_size * PULSE_BUFFER_PERIODS.clamp(1, 4)
+    } else {
+        period_size
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    #[test]
+    fn pulseaudio_gets_a_longer_alsa_buffer() {
+        let n = super::alsa_buffer_frames(1024, true);
+        if cfg!(target_os = "linux") {
+            assert_eq!(n, 1024 * super::PULSE_BUFFER_PERIODS);
+            // cpal's periods (a quarter of the buffer) fit the engine's block.
+            assert!(n / 4 <= 1024);
+        } else {
+            assert_eq!(n, 1024);
+        }
+        assert_eq!(super::alsa_buffer_frames(1024, false), 1024);
     }
 }
