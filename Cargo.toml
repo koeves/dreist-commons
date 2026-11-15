@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/dreist-formats", "crates/dreist-dsp", "crates/dreist-engine", "crates/dreist-gui", "crates/dreist-testkit", "crates/dreist-host"]
+# Vendored crates are dependencies, not members (not built or linted on their own).
+exclude = ["vendor"]
 
 [workspace.package]
 edition = "2024"
