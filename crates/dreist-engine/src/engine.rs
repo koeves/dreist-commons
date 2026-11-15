@@ -804,6 +804,11 @@ impl Dreist {
     }
 
     /// Song position in quarter notes (internal loop applied).
+    /// Voices sounding (not idle), and how many of them timestretch.
+    pub fn voice_counts(&self) -> (usize, usize) {
+        self.voices.iter().filter(|v| v.state != VoiceState::Idle).fold((0, 0), |(n, s), v| (n + 1, s + usize::from(v.voice.stretching())))
+    }
+
     pub fn song_position(&self) -> f64 {
         self.song.effective_ppq(self.ppq)
     }

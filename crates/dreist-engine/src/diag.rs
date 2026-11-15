@@ -19,8 +19,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::load::{DspLoad, LoadReading, rss_bytes};
 
-/// Late-block events kept until the recorder takes them.
+/// Late or slow blocks kept until the recorder takes them.
 const EVENTS: usize = 256;
+
+/// A block is slow (and recorded in detail) above this share of its time.
+pub const SLOW: f32 = 0.8;
+
+/// Fields of a recorded block (see [`BlockEvent`]).
+const FIELDS: usize = 13;
 
 /// The process's diagnostics state, shared by the audio thread, the editor
 /// and the [`Recorder`].
@@ -35,9 +41,12 @@ pub struct Monitor {
     play: AtomicBool,
     /// The main output's peak since the last stats line (`f32` bits).
     out_peak: AtomicU32,
-    /// Late blocks: (nanoseconds since the monitor started, position bits),
-    /// written at `head % EVENTS`.
-    events: [(AtomicU64, AtomicU64); EVENTS],
+    /// Late or slow blocks ([`BlockEvent`] fields), written at
+    /// `head % EVENTS`.
+    events: [[AtomicU64; FIELDS]; EVENTS],
+    /// Voices sounding and timestretching (set by the audio thread).
+    voices: AtomicU32,
+    stretch_voices: AtomicU32,
     head: AtomicU64,
     started: Instant,
 }
@@ -53,7 +62,9 @@ pub fn enable() -> &'static Monitor {
         ui: AtomicU32::new(0),
         play: AtomicBool::new(false),
         out_peak: AtomicU32::new(0),
-        events: std::array::from_fn(|_| (AtomicU64::new(0), AtomicU64::new(0))),
+        events: std::array::from_fn(|_| std::array::from_fn(|_| AtomicU64::new(0))),
+        voices: AtomicU32::new(0),
+        stretch_voices: AtomicU32::new(0),
         head: AtomicU64::new(0),
         started: Instant::now(),
     })
@@ -69,24 +80,130 @@ pub struct BlockScope<'a> {
     monitor: &'a Monitor,
     samples: usize,
     rate: f32,
+    wall: Instant,
+    thread: thread::Stats,
 }
 
 impl Drop for BlockScope<'_> {
     fn drop(&mut self) {
-        if self.monitor.load.end(self.samples, self.rate) {
-            let m = self.monitor;
-            let i = m.head.fetch_add(1, Relaxed) as usize % EVENTS;
-            m.events[i].0.store(m.started.elapsed().as_nanos() as u64, Relaxed);
-            m.events[i].1.store(m.position.load(Relaxed), Relaxed);
+        let m = self.monitor;
+        let wall = self.wall.elapsed();
+        let late = m.load.end(self.samples, self.rate);
+        let share = wall.as_secs_f64() * self.rate as f64 / self.samples.max(1) as f64;
+        if !late && share < SLOW as f64 {
+            return;
+        }
+        let t = thread::Stats::now().since(&self.thread);
+        let i = m.head.fetch_add(1, Relaxed) as usize % EVENTS;
+        let fields = [
+            m.started.elapsed().as_nanos() as u64,
+            m.position.load(Relaxed),
+            self.samples as u64,
+            wall.as_nanos() as u64,
+            t.cpu_ns.map_or(0, |v| v + 1),
+            t.minflt.map_or(0, |v| v + 1),
+            t.majflt.map_or(0, |v| v + 1),
+            t.nvcsw.map_or(0, |v| v + 1),
+            t.nivcsw.map_or(0, |v| v + 1),
+            thread::cpu().map_or(0, |c| c as u64 + 1),
+            m.voices.load(Relaxed) as u64,
+            m.stretch_voices.load(Relaxed) as u64,
+            late as u64,
+        ];
+        for (slot, v) in m.events[i].iter().zip(fields) {
+            slot.store(v, Relaxed);
         }
     }
 }
 
-/// A late block: when (since the monitor started) and where in the song.
+/// A late or slow block: when (since the monitor started) and where in the
+/// song, its length, its wall and thread CPU time, the audio thread's page
+/// faults and context switches during it, the CPU it ran on, and the voices
+/// sounding. `None`: the platform does not tell.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Late {
+pub struct BlockEvent {
     pub at: Duration,
     pub position: f64,
+    pub frames: u64,
+    pub wall: Duration,
+    pub cpu: Option<Duration>,
+    pub minflt: Option<u64>,
+    pub majflt: Option<u64>,
+    pub nvcsw: Option<u64>,
+    pub nivcsw: Option<u64>,
+    pub cpu_number: Option<u32>,
+    pub voices: u32,
+    pub stretch_voices: u32,
+    pub late: bool,
+}
+
+/// The audio thread's own counters (Linux; CPU time also on macOS).
+mod thread {
+    #[derive(Clone, Copy, Default)]
+    pub struct Stats {
+        pub cpu_ns: Option<u64>,
+        pub minflt: Option<u64>,
+        pub majflt: Option<u64>,
+        pub nvcsw: Option<u64>,
+        pub nivcsw: Option<u64>,
+    }
+
+    impl Stats {
+        pub fn now() -> Stats {
+            let mut s = Stats::default();
+            #[cfg(unix)]
+            {
+                let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+                // SAFETY: `ts` is a valid timespec for the call to fill.
+                if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut ts) } == 0 {
+                    s.cpu_ns = Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64);
+                }
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // SAFETY: `ru` is a valid rusage for the call to fill.
+                let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+                if unsafe { libc::getrusage(libc::RUSAGE_THREAD, &mut ru) } == 0 {
+                    s.minflt = Some(ru.ru_minflt as u64);
+                    s.majflt = Some(ru.ru_majflt as u64);
+                    s.nvcsw = Some(ru.ru_nvcsw as u64);
+                    s.nivcsw = Some(ru.ru_nivcsw as u64);
+                }
+            }
+            s
+        }
+
+        /// What changed since `before`.
+        pub fn since(&self, before: &Stats) -> Stats {
+            let d = |a: Option<u64>, b: Option<u64>| Some(a?.saturating_sub(b?));
+            Stats {
+                cpu_ns: d(self.cpu_ns, before.cpu_ns),
+                minflt: d(self.minflt, before.minflt),
+                majflt: d(self.majflt, before.majflt),
+                nvcsw: d(self.nvcsw, before.nvcsw),
+                nivcsw: d(self.nivcsw, before.nivcsw),
+            }
+        }
+    }
+
+    /// The CPU this thread runs on (Linux).
+    pub fn cpu() -> Option<u32> {
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: no arguments; returns -1 on failure.
+            let c = unsafe { libc::sched_getcpu() };
+            if c >= 0 {
+                return Some(c as u32);
+            }
+        }
+        None
+    }
+}
+
+/// A CPU's current frequency in MHz (Linux), read off the audio thread.
+pub fn cpu_mhz(cpu: u32) -> Option<u64> {
+    let khz: u64 = std::fs::read_to_string(format!("/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_cur_freq")).ok()?.trim().parse().ok()?;
+    Some(khz / 1000)
 }
 
 impl Monitor {
@@ -94,7 +211,13 @@ impl Monitor {
     /// block ends when the guard drops.
     pub fn block(&self, samples: usize, rate: f32) -> BlockScope<'_> {
         self.load.begin();
-        BlockScope { monitor: self, samples, rate }
+        BlockScope { monitor: self, samples, rate, wall: Instant::now(), thread: thread::Stats::now() }
+    }
+
+    /// The audio thread: voices sounding and timestretching.
+    pub fn set_voices(&self, voices: usize, stretching: usize) {
+        self.voices.store(voices as u32, Relaxed);
+        self.stretch_voices.store(stretching as u32, Relaxed);
     }
 
     /// The audio thread: the song position (quarter notes) and transport.
@@ -144,19 +267,58 @@ impl Monitor {
         self.play.swap(false, Relaxed)
     }
 
-    /// Late blocks from number `from` on (the next `from` is returned);
-    /// older ones than the queue holds are skipped.
-    pub fn late_since(&self, from: u64) -> (Vec<Late>, u64) {
+    /// Late or slow blocks from number `from` on (the next `from` is
+    /// returned); older ones than the queue holds are skipped.
+    pub fn blocks_since(&self, from: u64) -> (Vec<BlockEvent>, u64) {
         let head = self.head.load(Relaxed);
         let first = from.max(head.saturating_sub(EVENTS as u64));
+        let opt = |v: u64| v.checked_sub(1);
         let out = (first..head)
             .map(|n| {
-                let e = &self.events[n as usize % EVENTS];
-                Late { at: Duration::from_nanos(e.0.load(Relaxed)), position: f64::from_bits(e.1.load(Relaxed)) }
+                let e: [u64; FIELDS] = std::array::from_fn(|k| self.events[n as usize % EVENTS][k].load(Relaxed));
+                BlockEvent {
+                    at: Duration::from_nanos(e[0]),
+                    position: f64::from_bits(e[1]),
+                    frames: e[2],
+                    wall: Duration::from_nanos(e[3]),
+                    cpu: opt(e[4]).map(Duration::from_nanos),
+                    minflt: opt(e[5]),
+                    majflt: opt(e[6]),
+                    nvcsw: opt(e[7]),
+                    nivcsw: opt(e[8]),
+                    cpu_number: opt(e[9]).map(|c| c as u32),
+                    voices: e[10] as u32,
+                    stretch_voices: e[11] as u32,
+                    late: e[12] != 0,
+                }
             })
             .collect();
         (out, head)
     }
+}
+
+/// A `late` or `slow` line for block `b`: position, length, wall and
+/// thread CPU time (ms), faults, context switches, CPU (and its MHz),
+/// voices; fields the platform does not tell are left out.
+fn block_event(b: &BlockEvent) -> Event {
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    let mut e =
+        Event::new(if b.late { "late" } else { "slow" }).with("pos", bar_beat(b.position)).with("qn", b.position).with("at", b.at.as_secs_f64()).with("frames", b.frames).with("wall_ms", ms(b.wall));
+    if let Some(c) = b.cpu {
+        e = e.with("cpu_ms", ms(c));
+    }
+    for (k, v) in [("minflt", b.minflt), ("majflt", b.majflt), ("nvcsw", b.nvcsw), ("nivcsw", b.nivcsw)] {
+        if let Some(v) = v {
+            e = e.with(k, v);
+        }
+    }
+    if let Some(c) = b.cpu_number {
+        e = e.with("cpu", c);
+        if let Some(mhz) = cpu_mhz(c) {
+            e = e.with("mhz", mhz);
+        }
+    }
+    e.with("voices", b.voices).with("stretch", b.stretch_voices)
 }
 
 /// A song position (quarter notes) as bar.beat (4/4, from 1.1).
@@ -399,6 +561,8 @@ pub fn system_info() -> Event {
 pub struct Summary {
     pub seconds: f64,
     pub late: u64,
+    /// Blocks over [`SLOW`] of their time that were not late.
+    pub slow: u64,
     /// Where the first late blocks fell (bar.beat).
     pub late_at: Vec<String>,
     pub worst_second: f32,
@@ -431,15 +595,18 @@ impl Recorder {
     /// Write what is new (call about every 100 ms).
     pub fn poll(&mut self) {
         let m = self.monitor;
-        let (late, next) = m.late_since(self.late_from);
+        let (blocks, next) = m.blocks_since(self.late_from);
         self.late_from = next;
-        for l in late {
-            self.summary.late += 1;
-            if self.summary.late_at.len() < 32 {
-                self.summary.late_at.push(bar_beat(l.position));
+        for b in blocks {
+            if b.late {
+                self.summary.late += 1;
+                if self.summary.late_at.len() < 32 {
+                    self.summary.late_at.push(bar_beat(b.position));
+                }
+            } else {
+                self.summary.slow += 1;
             }
-            let e = Event::new("late").with("pos", bar_beat(l.position)).with("qn", l.position).with("at", l.at.as_secs_f64());
-            self.log.write(&e);
+            self.log.write(&block_event(&b));
         }
         let second = m.load.seconds();
         if second != self.seen_second {
@@ -483,6 +650,7 @@ impl Recorder {
         let e = Event::new("summary")
             .with("seconds", s.seconds)
             .with("late", s.late)
+            .with("slow", s.slow)
             .with("late_at", s.late_at.join(","))
             .with("worst_second", s.worst_second * 100.0)
             .with("worst_second_at", bar_beat(s.worst_second_at))
@@ -517,19 +685,34 @@ mod tests {
     #[test]
     fn late_blocks_queue_with_their_position() {
         let m = enable();
-        let (_, from) = m.late_since(0);
+        let (_, from) = m.blocks_since(0);
         m.set_transport(16.0, true);
         // Past the first second of audio (the stream starting).
         for _ in 0..50 {
             drop(m.block(1024, 48_000.0));
         }
-        let (_, from) = m.late_since(from);
+        let (_, from) = m.blocks_since(from);
+        m.set_voices(12, 3);
         drop(m.block(64, 48_000.0));
         std::thread::sleep(Duration::from_millis(10));
         drop(m.block(64, 48_000.0));
-        let (late, _) = m.late_since(from);
+        // A slow block: 5 ms of work in a 1.3 ms slot.
+        {
+            let _b = m.block(64, 48_000.0);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (blocks, _) = m.blocks_since(from);
+        let late: Vec<_> = blocks.iter().filter(|b| b.late).collect();
         assert_eq!(late.len(), 1);
         assert_eq!(bar_beat(late[0].position), "5.1");
+        let slow = blocks.last().unwrap();
+        assert!(slow.wall >= Duration::from_millis(5) && slow.frames == 64 && slow.voices == 12 && slow.stretch_voices == 3);
+        // Sleeping is not computing: the thread CPU time stays well below.
+        if let Some(cpu) = slow.cpu {
+            assert!(cpu < slow.wall / 2, "{slow:?}");
+        }
+        let line = block_event(slow).text(SystemTime::UNIX_EPOCH, Duration::ZERO);
+        assert!(line.contains("frames=64") && line.contains("voices=12") && line.contains("stretch=3"), "{line}");
         assert!(!m.take_play());
         m.request_play();
         assert!(m.take_play() && !m.take_play());

@@ -14,8 +14,8 @@ pub struct LoadReading {
     pub average: f32,
     /// The slowest block's time over its own duration.
     pub peak: f32,
-    /// Blocks that started later than 1.5 periods (plus 2 ms) after the
-    /// previous one, since the start.
+    /// Blocks that started later than 1.5 of the previous block's length
+    /// (plus 2 ms) after it, since the start (not in the first second).
     pub late: u32,
 }
 
@@ -33,6 +33,9 @@ pub struct DspLoad {
     audio: AtomicU64,
     worst: AtomicU32,
     late: AtomicU32,
+    /// The previous block's audio time (ns): a block is late when it
+    /// starts more than 1.5 of those (+ 2 ms) after the previous one.
+    prev_audio: AtomicU64,
     /// Audio time processed so far (ns): the first second's callback gaps
     /// (the stream starting) are not late blocks.
     total: AtomicU64,
@@ -59,6 +62,7 @@ impl DspLoad {
             worst: AtomicU32::new(0),
             late: AtomicU32::new(0),
             total: AtomicU64::new(0),
+            prev_audio: AtomicU64::new(0),
             average_out: AtomicU32::new(0),
             peak_out: AtomicU32::new(0),
             seconds: AtomicU32::new(0),
@@ -86,7 +90,8 @@ impl DspLoad {
         let busy = self.now().saturating_sub(start);
         let audio = (samples as f64 * 1e9 / rate as f64) as u64;
         let warm = self.total.fetch_add(audio, Relaxed) >= 1_000_000_000;
-        let late = warm && prev != 0 && start - prev > audio * 3 / 2 + 2_000_000;
+        let prev_audio = self.prev_audio.swap(audio, Relaxed);
+        let late = warm && prev != 0 && prev_audio != 0 && start - prev > prev_audio * 3 / 2 + 2_000_000;
         if late {
             self.late.fetch_add(1, Relaxed);
         }
@@ -252,6 +257,18 @@ mod tests {
         l.begin();
         l.end(64, 48000.0);
         assert_eq!(l.late.load(Relaxed), 1);
+    }
+
+    #[test]
+    fn lateness_follows_the_previous_block() {
+        let l = DspLoad::new();
+        l.total.store(1_000_000_000, Relaxed);
+        // A long block (85 ms), then the next 50 ms later: within 1.5 of it.
+        l.begin();
+        l.end(4096, 48000.0);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        l.begin();
+        assert!(!l.end(64, 48000.0));
     }
 
     #[test]
