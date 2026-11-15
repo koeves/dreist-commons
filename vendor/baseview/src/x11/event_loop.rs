@@ -108,9 +108,13 @@ impl EventLoop {
             // before going to sleep:
             self.drain_xcb_events()?;
 
+            // Round the wait up: truncated, the last millisecond before a
+            // frame polled with a zero timeout and spun (several % of a core
+            // with nothing to draw).
+            let wait = next_frame.saturating_duration_since(Instant::now());
+            let timeout = wait.as_micros().div_ceil(1000).min(i32::MAX as u128) as i32;
             // FIXME: handle errors
-            poll(&mut fds, next_frame.duration_since(Instant::now()).subsec_millis() as i32)
-                .unwrap();
+            poll(&mut fds, timeout).unwrap();
 
             if let Some(revents) = fds[0].revents() {
                 if revents.contains(PollFlags::POLLERR) {

@@ -866,8 +866,9 @@ impl<'a> Painter<'a> {
         self.fonts.prepare(font);
         let fonts = &*self.fonts;
         let size = fonts.size(font) * scale;
-        let Some(primary) = fonts.font_for(font, 'A') else { return };
-        let mut width: f32 = s.chars().map(|ch| fonts.font_for(font, ch).map(|f| f.metrics(ch, size).advance_width).unwrap_or(0.0)).sum();
+        let set = fonts.font_set(font);
+        let Some(primary) = set.pick('A') else { return };
+        let mut width: f32 = s.chars().map(|ch| set.pick(ch).map(|f| fonts.glyph(f, ch, size).0.advance_width).unwrap_or(0.0)).sum();
         let gap = spacing * scale;
         if gap != 0.0 {
             width += gap * s.chars().count().saturating_sub(1) as f32;
@@ -895,9 +896,10 @@ impl<'a> Painter<'a> {
         let baseline = baseline.round();
         let mut glyphs = Vec::new();
         for ch in s.chars() {
-            let Some(f) = fonts.font_for(font, ch) else { continue };
-            let (m, bmp) = f.rasterize(ch, size);
-            glyphs.push((pen.floor() as i32 + m.xmin, baseline as i32 - m.height as i32 - m.ymin, m.width, m.height, bmp));
+            let Some(f) = set.pick(ch) else { continue };
+            let g = fonts.glyph(f, ch, size);
+            let m = g.0;
+            glyphs.push((pen.floor() as i32 + m.xmin, baseline as i32 - m.height as i32 - m.ymin, m.width, m.height, g));
             pen += m.advance_width + gap;
         }
         debug_assert!(self.record.is_none(), "a recording painter drew");
@@ -913,7 +915,7 @@ impl<'a> Painter<'a> {
                     if px < cx0.max(0) || px >= cx1.min(pw) {
                         continue;
                     }
-                    let cov = bmp[yy * gw + xx] as u32;
+                    let cov = bmp.1[yy * gw + xx] as u32;
                     if cov == 0 {
                         continue;
                     }

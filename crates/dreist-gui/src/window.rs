@@ -98,9 +98,136 @@ struct Handler<T: WindowApp> {
     physical: (u32, u32),
     /// The cursor last applied.
     cursor: crate::cursor::Cursor,
+    /// `DREIST_GUI_STATS=1`: frame counts and render time, printed each second.
+    stats: Option<FrameStats>,
+}
+
+/// What the window's frames did over the last second (a diagnostic).
+struct FrameStats {
+    since: std::time::Instant,
+    frames: u32,
+    idle: u32,
+    full: u32,
+    partial: u32,
+    resizes: u32,
+    busy: std::time::Duration,
+}
+
+impl FrameStats {
+    fn new() -> FrameStats {
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO }
+    }
+
+    fn report(&mut self) {
+        let t = self.since.elapsed();
+        if t.as_secs_f64() >= 1.0 {
+            eprintln!(
+                "gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core",
+                self.frames,
+                self.idle,
+                self.full,
+                self.partial,
+                self.resizes,
+                self.busy.as_secs_f64() * 100.0 / t.as_secs_f64()
+            );
+            *self = FrameStats::new();
+        }
+    }
 }
 
 impl<T: WindowApp> Handler<T> {
+    fn frame(&mut self, window: &mut Window) {
+        self.app.frame();
+        // Live UI scale changes ([re:2fbdeb] + host resize).
+        if std::mem::take(&mut self.app.app().resize_request) {
+            let (w, h) = self.app.app().size();
+            let ui = self.app.app().ui_scale.max(0.25) as f64;
+            window.resize(Size::new(w as f64 * ui, h as f64 * ui));
+            self.app.app().dirty = true;
+            if let Some(st) = self.stats.as_mut() {
+                st.resizes += 1;
+            }
+        }
+        if !self.app.app().needs_redraw() {
+            if let Some(st) = self.stats.as_mut() {
+                st.idle += 1;
+            }
+            return;
+        }
+        let scale = self.scale as f32;
+        if self.surface.is_none() {
+            return;
+        }
+        let ui = self.app.app().ui_scale.max(0.25);
+        self.app.render(scale * ui);
+        // The device pixels the frame changed, when not all of them. A
+        // rectangle off the device pixel grid (a fractional scale) makes
+        // the whole frame go out instead; empty ones are left out.
+        let damage: Option<Vec<(u32, u32, u32, u32)>> = {
+            let app = self.app.app();
+            let root = app.root.rect;
+            app.frame_damage
+                .as_ref()
+                .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+        };
+        if let Some(st) = self.stats.as_mut() {
+            match damage {
+                Some(_) => st.partial += 1,
+                None => st.full += 1,
+            }
+        }
+        let Some(pm) = self.app.app().last_frame() else { return };
+        let Some(surface) = self.surface.as_mut() else { return };
+        // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
+        if let Ok(p) = std::env::var("DREIST_GUI_DUMP") {
+            let _ = pm.save_png(p);
+        }
+        let (w, h) = (pm.width(), pm.height());
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
+        if surface.resize(nw, nh).is_err() {
+            return;
+        }
+        let Ok(mut buf) = surface.buffer_mut() else { return };
+        // Opaque backdrop, so premultiplied == straight: RGBA bytes to ARGB
+        // with alpha 0xff (a form the compiler vectorizes). The alpha byte
+        // matters on X11, where the window has a 32-bit visual and a
+        // compositor would show alpha 0 as transparent.
+        let convert = |d: &mut [u32], s: &[u8]| {
+            for (d, s) in d.iter_mut().zip(s.as_chunks::<4>().0) {
+                let v = u32::from_le_bytes(*s);
+                *d = 0xff00_0000 | (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
+            }
+        };
+        // A buffer that still holds the last frame only needs the changed
+        // pixels converted and sent (a moving playhead, a meter), not the
+        // whole window every frame.
+        let partial = damage.filter(|_| buf.age() == 1 && self.physical == (w, h));
+        match partial {
+            Some(rects) => {
+                let stride = w as usize;
+                let mut sent = Vec::with_capacity(rects.len());
+                for &(x, y, rw, rh) in &rects {
+                    let (x, rw) = (x as usize, rw as usize);
+                    for row in y as usize..(y + rh) as usize {
+                        let o = row * stride + x;
+                        convert(&mut buf[o..o + rw], &pm.data()[o * 4..(o + rw) * 4]);
+                    }
+                    if let (Some(rw), Some(rh)) = (NonZeroU32::new(rw as u32), NonZeroU32::new(rh)) {
+                        sent.push(softbuffer::Rect { x: x as u32, y, width: rw, height: rh });
+                    }
+                }
+                if !sent.is_empty() {
+                    let _ = buf.present_with_damage(&sent);
+                }
+            }
+            None => {
+                convert(&mut buf, pm.data());
+                let _ = buf.present();
+            }
+        }
+        self.physical = (w, h);
+    }
+
     fn dispatch(&mut self, events: Vec<UiEvent>) {
         for e in &events {
             self.app.event(e);
@@ -116,42 +243,13 @@ impl<T: WindowApp> Handler<T> {
 
 impl<T: WindowApp> WindowHandler for Handler<T> {
     fn on_frame(&mut self, window: &mut Window) {
-        self.app.frame();
-        // Live UI scale changes ([re:2fbdeb] + host resize).
-        if std::mem::take(&mut self.app.app().resize_request) {
-            let (w, h) = self.app.app().size();
-            let ui = self.app.app().ui_scale.max(0.25) as f64;
-            window.resize(Size::new(w as f64 * ui, h as f64 * ui));
-            self.app.app().dirty = true;
+        let started = std::time::Instant::now();
+        self.frame(window);
+        if let Some(st) = self.stats.as_mut() {
+            st.frames += 1;
+            st.busy += started.elapsed();
+            st.report();
         }
-        if !self.app.app().needs_redraw() {
-            return;
-        }
-        let scale = self.scale as f32;
-        if self.surface.is_none() {
-            return;
-        }
-        let ui = self.app.app().ui_scale.max(0.25);
-        let pm = self.app.render(scale * ui);
-        let Some(surface) = self.surface.as_mut() else { return };
-        // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
-        if let Ok(p) = std::env::var("DREIST_GUI_DUMP") {
-            let _ = pm.save_png(p);
-        }
-        let (w, h) = (pm.width(), pm.height());
-        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
-        if surface.resize(nw, nh).is_err() {
-            return;
-        }
-        let Ok(mut buf) = surface.buffer_mut() else { return };
-        for (d, s) in buf.iter_mut().zip(pm.data().as_chunks::<4>().0) {
-            // Opaque backdrop, so premultiplied == straight: RGBA bytes to
-            // 0RGB (a form the compiler vectorizes).
-            let v = u32::from_le_bytes(*s);
-            *d = (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
-        }
-        let _ = buf.present();
-        self.physical = (w, h);
     }
 
     fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
@@ -329,7 +427,7 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow }
+        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: std::env::var_os("DREIST_GUI_STATS").map(|_| FrameStats::new()) }
     }
 }
 

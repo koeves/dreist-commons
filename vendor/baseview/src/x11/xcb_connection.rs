@@ -19,6 +19,8 @@ x11rb::atom_manager! {
         WM_PROTOCOLS,
         WM_DELETE_WINDOW,
         _NET_WM_USER_TIME,
+        _NET_WM_NAME,
+        UTF8_STRING,
     }
 }
 

@@ -124,6 +124,9 @@ pub struct App {
     pub fonts: Fonts,
     /// The whole window needs drawing.
     pub dirty: bool,
+    /// What the last [`App::render_frame_with`] changed in its frame (root
+    /// coordinates); `None` when it drew the whole frame.
+    pub frame_damage: Option<Vec<crate::ctrl::Rect>>,
     /// Rectangles (root coordinates) that need drawing when `dirty` is
     /// not set: continuous updates (meters) repaint only their controls.
     damage: Vec<crate::ctrl::Rect>,
@@ -253,6 +256,7 @@ impl App {
             root,
             fonts,
             dirty: true,
+            frame_damage: None,
             damage: Vec::new(),
             frame: None,
             custom_rects: Vec::new(),
@@ -1917,6 +1921,11 @@ impl App {
         &self.damage
     }
 
+    /// The frame the last [`App::render_frame_with`] drew.
+    pub fn last_frame(&self) -> Option<&tiny_skia::Pixmap> {
+        self.frame.as_ref().map(|(_, pm)| pm)
+    }
+
     /// Something needs drawing.
     pub fn needs_redraw(&self) -> bool {
         self.dirty || !self.damage.is_empty() || self.menu != self.menu_drawn
@@ -1939,7 +1948,10 @@ impl App {
         });
         // Where a partial repaint drew.
         let mut repainted = Vec::new();
-        if self.dirty || !reusable {
+        // Everything the frame shows differently, for presenting.
+        let mut changed = Vec::new();
+        let full = self.dirty || !reusable;
+        if full {
             let drawn = std::cell::RefCell::new(Vec::new());
             let paths = std::cell::RefCell::new(Vec::new());
             let tip = self.tooltip.as_ref().filter(|t| t.visible());
@@ -1980,6 +1992,7 @@ impl App {
                     match (kept, d) {
                         (Some((_, _, mut under)), Some(d)) if menu_rect.is_none_or(|r| !r.intersects(&old)) && !damage.iter().any(|r| r.intersects(&old)) => {
                             crate::copy_device_rect(pm, &mut under, d, true);
+                            changed.push(old);
                         }
                         _ => damage.push(old),
                     }
@@ -1997,6 +2010,7 @@ impl App {
             for &r in &damage_rects {
                 crate::render_region(&self.skin, &mut self.fonts, &self.root, scale, custom, self.menu.as_ref(), self.tooltip.as_ref().filter(|t| t.visible()), pm, r);
             }
+            changed.extend_from_slice(&damage_rects);
             repainted = damage_rects;
             if let (true, Some((r, d)), Some(m)) = (menu_changed, menu_at, self.menu.as_ref()) {
                 let kept = self.menu_under.take().filter(|(s, u, _)| *s == scale && *u == r);
@@ -2020,8 +2034,10 @@ impl App {
                     crate::render_menu_over(&self.skin, &mut self.fonts, scale, m, &under, pm, r, d);
                     self.menu_under = Some((scale, r, under));
                 }
+                changed.push(r);
             }
         }
+        self.frame_damage = if full { None } else { Some(changed) };
         self.menu_drawn = self.menu.clone();
         if !repainted.is_empty() {
             self.refresh_custom_marks(scale, custom, Some(&repainted));
