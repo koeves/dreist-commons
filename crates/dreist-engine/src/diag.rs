@@ -240,7 +240,7 @@ impl Event {
         for (k, v) in &self.fields {
             let v = match v {
                 Value::Text(t) => json_str(t),
-                Value::Number(n) if n.is_finite() => format!("{n}"),
+                Value::Number(n) if n.is_finite() => format!("{}", (n * 1000.0).round() / 1000.0),
                 Value::Number(_) => "null".to_string(),
                 Value::Int(i) => i.to_string(),
             };
