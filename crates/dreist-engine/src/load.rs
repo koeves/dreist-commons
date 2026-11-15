@@ -33,6 +33,9 @@ pub struct DspLoad {
     audio: AtomicU64,
     worst: AtomicU32,
     late: AtomicU32,
+    /// Audio time processed so far (ns): the first second's callback gaps
+    /// (the stream starting) are not late blocks.
+    total: AtomicU64,
     /// The last finished second (millionths), and how many seconds finished.
     average_out: AtomicU32,
     peak_out: AtomicU32,
@@ -55,6 +58,7 @@ impl DspLoad {
             audio: AtomicU64::new(0),
             worst: AtomicU32::new(0),
             late: AtomicU32::new(0),
+            total: AtomicU64::new(0),
             average_out: AtomicU32::new(0),
             peak_out: AtomicU32::new(0),
             seconds: AtomicU32::new(0),
@@ -81,7 +85,8 @@ impl DspLoad {
         }
         let busy = self.now().saturating_sub(start);
         let audio = (samples as f64 * 1e9 / rate as f64) as u64;
-        let late = prev != 0 && start - prev > audio * 3 / 2 + 2_000_000;
+        let warm = self.total.fetch_add(audio, Relaxed) >= 1_000_000_000;
+        let late = warm && prev != 0 && start - prev > audio * 3 / 2 + 2_000_000;
         if late {
             self.late.fetch_add(1, Relaxed);
         }
@@ -239,6 +244,8 @@ mod tests {
     #[test]
     fn a_late_block_counts() {
         let l = DspLoad::new();
+        // Past the first second of audio (the stream starting).
+        l.total.store(1_000_000_000, Relaxed);
         l.begin();
         l.end(64, 48000.0);
         std::thread::sleep(std::time::Duration::from_millis(10));

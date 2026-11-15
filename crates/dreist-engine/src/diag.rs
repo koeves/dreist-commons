@@ -519,6 +519,11 @@ mod tests {
         let m = enable();
         let (_, from) = m.late_since(0);
         m.set_transport(16.0, true);
+        // Past the first second of audio (the stream starting).
+        for _ in 0..50 {
+            drop(m.block(1024, 48_000.0));
+        }
+        let (_, from) = m.late_since(from);
         drop(m.block(64, 48_000.0));
         std::thread::sleep(Duration::from_millis(10));
         drop(m.block(64, 48_000.0));
