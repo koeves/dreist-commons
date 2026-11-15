@@ -534,3 +534,149 @@ mod tests {
         assert!(d.ends_with("Dreist") || d.ends_with("Dreist/Logs") || d.ends_with("Dreist\\Logs"), "{d:?}");
     }
 }
+
+/// The standalone launcher's debug options (taken out of the command line
+/// before the audio wrapper reads it).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DebugArgs {
+    /// `--debug`: diagnostics on, events to stderr and the log file.
+    pub debug: bool,
+    /// `--debug-json`: JSON lines instead of text.
+    pub json: bool,
+    /// `--debug-log <path>`: the log file (default: the platform's log
+    /// folder, `<app>-debug.log`).
+    pub log: Option<PathBuf>,
+    /// `--play <file>`: open this project and start playback.
+    pub play: Option<PathBuf>,
+    /// `--duration <seconds>`: quit after this long.
+    pub duration: Option<f64>,
+    /// `--until-end`: quit when playback stops.
+    pub until_end: bool,
+    /// `--fail-on-late <n>`: exit with status 3 after more late blocks.
+    pub fail_on_late: Option<u64>,
+}
+
+impl DebugArgs {
+    /// Split `args` (with the program name first) into the debug options
+    /// and the rest; an option missing its value or with a bad one is an
+    /// error. Any of them implies `--debug`.
+    pub fn split(args: Vec<String>) -> Result<(DebugArgs, Vec<String>), String> {
+        let mut d = DebugArgs::default();
+        let mut rest = Vec::with_capacity(args.len());
+        let mut it = args.into_iter();
+        while let Some(a) = it.next() {
+            let (flag, inline) = match a.split_once('=') {
+                Some((f, v)) if f.starts_with("--") => (f.to_string(), Some(v.to_string())),
+                _ => (a.clone(), None),
+            };
+            let mut value = |name: &str| inline.clone().or_else(|| it.next()).ok_or_else(|| format!("{name} needs a value"));
+            match flag.as_str() {
+                "--debug" => d.debug = true,
+                "--debug-json" => d.json = true,
+                "--debug-log" => d.log = Some(PathBuf::from(value("--debug-log")?)),
+                "--play" => d.play = Some(PathBuf::from(value("--play")?)),
+                "--duration" => d.duration = Some(value("--duration")?.parse().map_err(|_| "--duration takes seconds".to_string())?),
+                "--until-end" => d.until_end = true,
+                "--fail-on-late" => d.fail_on_late = Some(value("--fail-on-late")?.parse().map_err(|_| "--fail-on-late takes a count".to_string())?),
+                _ => {
+                    rest.push(a);
+                    continue;
+                }
+            }
+            d.debug = true;
+        }
+        Ok((d, rest))
+    }
+
+    /// The exit status a run with `s` ends with.
+    pub fn status(&self, s: &Summary) -> i32 {
+        if self.fail_on_late.is_some_and(|n| s.late > n) { 3 } else { 0 }
+    }
+}
+
+/// A debug run's recorder, shared by its thread and the end of `main`.
+static RUN: OnceLock<(std::sync::Mutex<Recorder>, DebugArgs)> = OnceLock::new();
+
+/// Start a debug run for `app` (`args` from [`DebugArgs::split`], `launch`
+/// the remaining command line for the start-up line): the monitor, the log
+/// and a thread that records every 100 ms and ends the process after
+/// `--duration` or, with `--until-end`, once playback stopped.
+pub fn start_run(app: &str, version: &str, args: DebugArgs, launch: &[String]) -> &'static Monitor {
+    let monitor = enable();
+    let path = args.log.clone().or_else(|| log_dir(app).map(|d| d.join(format!("{}-debug.log", app.to_lowercase()))));
+    let mut log = Log::open(path.as_deref(), true, args.json);
+    let mut e = system_info().with("app", app).with("version", version).with("args", launch.get(1..).unwrap_or_default().join(" "));
+    if let Some(p) = log.path() {
+        e = e.with("log", p.display().to_string());
+    }
+    if let Some(p) = &args.play {
+        e = e.with("play", p.display().to_string());
+    }
+    log.write(&e);
+    if args.play.is_some() {
+        monitor.request_play();
+    }
+    let _ = RUN.set((std::sync::Mutex::new(Recorder::new(log, monitor)), args));
+    std::thread::Builder::new()
+        .name("diagnostics".into())
+        .spawn(|| {
+            let Some((rec, args)) = RUN.get() else { return };
+            let started = Instant::now();
+            let mut was_playing = false;
+            loop {
+                std::thread::sleep(Duration::from_millis(100));
+                if let Ok(mut r) = rec.lock() {
+                    r.poll();
+                }
+                let playing = monitor.playing();
+                let ended = args.until_end && was_playing && !playing;
+                was_playing |= playing;
+                if ended || args.duration.is_some_and(|d| started.elapsed().as_secs_f64() >= d) {
+                    std::process::exit(end_run().unwrap_or(0));
+                }
+            }
+        })
+        .ok();
+    monitor
+}
+
+/// End the debug run: write the summary; its exit status (`None` without
+/// a run).
+pub fn end_run() -> Option<i32> {
+    let (rec, args) = RUN.get()?;
+    let s = rec.lock().ok()?.summary();
+    Some(args.status(&s))
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    fn split(a: &[&str]) -> Result<(DebugArgs, Vec<String>), String> {
+        DebugArgs::split(a.iter().map(|s| s.to_string()).collect())
+    }
+
+    #[test]
+    fn debug_options_come_out_of_the_command_line() {
+        let (d, rest) = split(&["dreist", "-p", "1024", "--play", "song.geist", "--until-end", "--fail-on-late=0", "--backend", "alsa", "--debug-json"]).unwrap();
+        assert_eq!(rest, ["dreist", "-p", "1024", "--backend", "alsa"]);
+        assert!(d.debug && d.json && d.until_end);
+        assert_eq!(d.play.as_deref(), Some(Path::new("song.geist")));
+        assert_eq!(d.fail_on_late, Some(0));
+        let (d, rest) = split(&["dreist", "--duration", "90", "--debug-log=/tmp/x.log"]).unwrap();
+        assert_eq!(rest, ["dreist"]);
+        assert_eq!((d.duration, d.log.as_deref()), (Some(90.0), Some(Path::new("/tmp/x.log"))));
+        let (d, rest) = split(&["dreist", "--sample-rate", "44100"]).unwrap();
+        assert!(!d.debug && rest.len() == 3);
+        assert!(split(&["dreist", "--play"]).is_err());
+        assert!(split(&["dreist", "--duration", "soon"]).is_err());
+    }
+
+    #[test]
+    fn too_many_late_blocks_fail_the_run() {
+        let d = DebugArgs { fail_on_late: Some(2), ..DebugArgs::default() };
+        assert_eq!(d.status(&Summary { late: 2, ..Summary::default() }), 0);
+        assert_eq!(d.status(&Summary { late: 3, ..Summary::default() }), 3);
+        assert_eq!(DebugArgs::default().status(&Summary { late: 9, ..Summary::default() }), 0);
+    }
+}
