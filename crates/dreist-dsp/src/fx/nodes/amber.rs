@@ -45,6 +45,11 @@ fn diode_shaper(x: f32) -> f32 {
 
 /// The six [re:5c92ec] tables (1025 entries, domain [0, 1)),
 /// normalised the way the original does it: `(v + min)/(max − min)`.
+/// Build the tables ahead of the audio thread ([`crate::warm_tables`]).
+pub(crate) fn warm() {
+    let _ = tables();
+}
+
 fn tables() -> &'static [Vec<f32>; 6] {
     static T: OnceLock<[Vec<f32>; 6]> = OnceLock::new();
     T.get_or_init(|| {

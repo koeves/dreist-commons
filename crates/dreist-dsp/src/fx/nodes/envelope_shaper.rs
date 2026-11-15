@@ -219,14 +219,22 @@ impl Node for EnvelopeShaper {
         }
     }
 
-    fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
-        if self.sr != ctx.sample_rate {
+    /// Stream setup ahead of the audio thread (the effect is created with
+    /// the rate; the first block would otherwise do it).
+    fn prepare_rate(&mut self, sr: f32) {
+        if self.sr != sr {
             // Stream setup: configure for (sr, 2), then reset.
-            self.sr = ctx.sample_rate;
+            self.sr = sr;
             for c in &mut self.ch {
                 c.configure(self.sr as f64, &self.values);
             }
             self.reset();
+        }
+    }
+
+    fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
+        if self.sr != ctx.sample_rate {
+            self.prepare_rate(ctx.sample_rate);
         }
         for i in 0..6 {
             let v = self.ports[i].value;

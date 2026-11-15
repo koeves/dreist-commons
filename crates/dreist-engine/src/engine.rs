@@ -880,6 +880,8 @@ impl Dreist {
 
     /// [[re:9f37ad]] reusing already decoded samples.
     pub fn from_project_cached(project: &Project, samples: &Path, sr: f32, options: RenderOptions, cache: &mut SampleCache) -> Dreist {
+        // Lookup tables before the audio thread needs them.
+        dreist_dsp::warm_tables();
         dreist_dsp::fx::nodes::reset_shared_rng();
         // Shared lookup tables: built here, not on the audio thread.
         dreist_dsp::analog::warm();
