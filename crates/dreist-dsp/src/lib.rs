@@ -8,6 +8,7 @@
 pub mod analog;
 pub mod comb;
 pub mod convert;
+pub mod denormal;
 pub mod envelope;
 pub mod filter;
 pub mod fx;

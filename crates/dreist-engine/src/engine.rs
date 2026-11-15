@@ -1457,6 +1457,8 @@ impl Dreist {
     /// As `process_multi`, with the host's audio input for the sampler
     /// ([re:37bdbe]; its thru signal goes to the main output).
     pub fn process_with_input(&mut self, left: &mut [f32], right: &mut [f32], subs: &mut [[&mut [f32]; 2]], input: Option<[&[f32]; 2]>) {
+        // Tails decaying into denormals cost many times more on x86.
+        let _flush = dreist_dsp::denormal::FlushDenormals::new();
         let n = left.len();
         left.fill(0.0);
         right.fill(0.0);
