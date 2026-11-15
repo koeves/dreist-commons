@@ -89,7 +89,9 @@ impl Drop for BlockScope<'_> {
         let m = self.monitor;
         let wall = self.wall.elapsed();
         let late = m.load.end(self.samples, self.rate);
-        let share = wall.as_secs_f64() * self.rate as f64 / self.samples.max(1) as f64;
+        // Of the stream's period (short callbacks come between full ones).
+        let audio = self.samples as f64 / self.rate as f64;
+        let share = wall.as_secs_f64() / audio.max(m.load.period_ns() as f64 * 1e-9).max(1e-9);
         if !late && share < SLOW as f64 {
             return;
         }
@@ -693,20 +695,22 @@ mod tests {
         }
         let (_, from) = m.blocks_since(from);
         m.set_voices(12, 3);
+        // The period is 21 ms (the warm-up blocks): a short callback, then
+        // the next block 40 ms later is late.
         drop(m.block(64, 48_000.0));
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(40));
         drop(m.block(64, 48_000.0));
-        // A slow block: 5 ms of work in a 1.3 ms slot.
+        // A slow block: 25 ms of a 21 ms period.
         {
             let _b = m.block(64, 48_000.0);
-            std::thread::sleep(Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(25));
         }
         let (blocks, _) = m.blocks_since(from);
         let late: Vec<_> = blocks.iter().filter(|b| b.late).collect();
         assert_eq!(late.len(), 1);
         assert_eq!(bar_beat(late[0].position), "5.1");
         let slow = blocks.last().unwrap();
-        assert!(slow.wall >= Duration::from_millis(5) && slow.frames == 64 && slow.voices == 12 && slow.stretch_voices == 3);
+        assert!(slow.wall >= Duration::from_millis(25) && slow.frames == 64 && slow.voices == 12 && slow.stretch_voices == 3);
         // Sleeping is not computing: the thread CPU time stays well below.
         if let Some(cpu) = slow.cpu {
             assert!(cpu < slow.wall / 2, "{slow:?}");
