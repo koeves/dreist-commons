@@ -91,26 +91,32 @@ fn path(app: &App) -> Option<usize> {
 pub const STRIP: i32 = 2 * ROW + 2 * INSET;
 
 /// Make room for the readout under the control at `path` (a list area):
-/// with `on` it is [`STRIP`] shorter (once; its anchors keep the margin
-/// through later resizes) and the strip below it is returned (root
-/// coordinates) for [`place`]; without, it gets its height back. `None`
-/// when the control is missing, hidden or too short to give up the strip.
+/// with `on` it is [`STRIP`] shorter and the strip below it is returned
+/// (root coordinates) for [`place`]; without, it gets its height back.
+/// Called every frame: when a layout gave the area another height, it is
+/// shortened again from that. `None` when the control is missing, hidden or
+/// too short to give up the strip.
 pub fn reserve_below(app: &mut App, path: &[usize], on: bool) -> Option<Rect> {
-    const MARK: &str = "perfStrip";
+    // The height the area was shortened to.
+    const MARK: &str = "perfStripHeight";
     let c = app.ctrl_mut(path)?;
-    let marked = c.attr(MARK).is_some();
     let r = c.rect;
-    if on && !marked && r.h > 3 * STRIP {
+    let shortened = c.attr(MARK).and_then(|v| v.parse::<i32>().ok()) == Some(r.h);
+    if on && !shortened && r.h > 3 * STRIP {
         c.set_rect(Rect::new(r.x, r.y, r.w, r.h - STRIP));
-        c.set_attr(MARK, "1".into());
+        c.set_attr(MARK, (r.h - STRIP).to_string());
         app.dirty = true;
-    } else if !on && marked {
+    } else if !on && shortened {
         c.set_rect(Rect::new(r.x, r.y, r.w, r.h + STRIP));
         c.attrs.remove(MARK);
         app.dirty = true;
+    } else if !on || !shortened {
+        if c.attrs.remove(MARK).is_some() {
+            app.dirty = true;
+        }
     }
-    let marked = app.ctrl(path)?.attr(MARK).is_some();
-    if !on || !marked || !app.shown(path) {
+    let c = app.ctrl(path)?;
+    if !on || c.attr(MARK).and_then(|v| v.parse::<i32>().ok()) != Some(c.rect.h) || !app.shown(path) {
         return None;
     }
     let (a, root) = (app.abs_rect(path), app.root.rect);
