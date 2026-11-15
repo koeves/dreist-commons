@@ -1,7 +1,7 @@
-//! The CPU and memory readout: a line in the window's top-right corner
-//! ("DSP 31% · peak 58% · UI 14% · 351 MB · 0 late"), over everything else
-//! and passing clicks through. Apps add it with [`show`] and feed it once a
-//! second with [`update`].
+//! The CPU and memory readout: a line ("DSP 31% · peak 58% · UI 14% ·
+//! 351 MB · 0 late") over everything else, passing clicks through, where
+//! the app puts it ([`Place`]). Apps add it with [`show`] and feed it once
+//! a second with [`update`].
 
 use crate::app::App;
 use crate::paint::{Painter, RectF};
@@ -11,8 +11,25 @@ use crate::{Colour, Ctrl, Rect};
 /// The readout control's name and overload (drawn by the renderer).
 pub const NAME: &str = "PerfReadout";
 
-const W: i32 = 300;
 const H: i32 = 16;
+
+/// Where the readout goes in the root: `x` / `y` from the left / top, or
+/// from the right / bottom edge when negative; `w` wide, text right-aligned
+/// (left-aligned when `x` is from the left).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+}
+
+impl Place {
+    fn rect(&self, root: Rect) -> Rect {
+        let x = if self.x < 0 { root.w + self.x - self.w } else { self.x };
+        let y = if self.y < 0 { root.h + self.y - H } else { self.y };
+        Rect::new(x, y, self.w, H)
+    }
+}
 
 /// What the readout shows; `None` parts are left out.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -65,21 +82,14 @@ fn path(app: &App) -> Option<usize> {
     app.root.children.iter().position(|c| c.name == NAME)
 }
 
-/// Add or remove the readout.
-pub fn show(app: &mut App, on: bool) {
+/// Add the readout at `at`, or remove it.
+pub fn show(app: &mut App, on: bool, at: Place) {
     match (path(app), on) {
         (None, true) => {
-            let w = app.root.rect.w;
-            app.root.children.push(Ctrl {
-                class: "CtrlPanel".into(),
-                name: NAME.into(),
-                overload: NAME.into(),
-                rect: Rect::new(w - W - 4, 2, W, H),
-                visible: true,
-                passive: true,
-                zorder: i16::MAX,
-                ..Ctrl::default()
-            });
+            let rect = at.rect(app.root.rect);
+            let mut c = Ctrl { class: "CtrlPanel".into(), name: NAME.into(), overload: NAME.into(), rect, visible: true, passive: true, zorder: i16::MAX, ..Ctrl::default() };
+            c.set_attr("place", format!("{} {} {}", at.x, at.y, at.w));
+            app.root.children.push(c);
             app.dirty = true;
         }
         (Some(i), false) => {
@@ -93,10 +103,12 @@ pub fn show(app: &mut App, on: bool) {
 /// Show `r` (when the readout is on); repaints only the readout.
 pub fn update(app: &mut App, r: &Reading) {
     let Some(i) = path(app) else { return };
-    let w = app.root.rect.w;
+    let root = app.root.rect;
     let (text, level) = (r.text(), r.level().to_string());
     let c = &mut app.root.children[i];
-    let rect = Rect::new(w - W - 4, 2, W, H);
+    let at = c.attr("place").map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect::<Vec<i32>>()).filter(|v| v.len() == 3).map(|v| Place { x: v[0], y: v[1], w: v[2] });
+    let Some(at) = at else { return };
+    let rect = at.rect(root);
     if c.text == text && c.attr("level") == Some(level.as_str()) && c.rect == rect {
         return;
     }
@@ -109,8 +121,8 @@ pub fn update(app: &mut App, r: &Reading) {
     app.invalidate_rect(Rect::new(rect.x + ox, rect.y + oy, rect.w, rect.h));
 }
 
-/// Draw the readout control: its text right-aligned on a dark strip,
-/// amber or red near the limit.
+/// Draw the readout control: its text on a dark strip, amber or red near
+/// the limit.
 pub fn draw(p: &mut Painter, c: &Ctrl) {
     if c.text.is_empty() {
         return;
@@ -119,14 +131,15 @@ pub fn draw(p: &mut Painter, c: &Ctrl) {
     p.fonts.prepare(&font);
     let tw = p.fonts.measure(&font, &c.text).0.ceil() + 10.0;
     let (w, h) = (c.rect.w as f32, c.rect.h as f32);
-    let bg = RectF::new((w - tw).max(0.0), 0.0, tw.min(w), h);
-    p.fill_rounded(bg, 4.0, [true; 4], Colour::rgba(16, 18, 24, 200));
+    let left = c.attr("place").is_some_and(|v| !v.starts_with('-'));
+    let bg = RectF::new(if left { 0.0 } else { (w - tw).max(0.0) }, 0.0, tw.min(w), h);
+    p.fill_rounded(bg, 4.0, [true; 4], Colour::rgba(16, 18, 24, 235));
     let col = match c.attr("level") {
         Some("2") => Colour::rgba(255, 92, 80, 255),
         Some("1") => Colour::rgba(255, 190, 60, 255),
         _ => Colour::rgba(220, 226, 236, 255),
     };
-    p.text(RectF::new(bg.x + 5.0, 0.0, bg.w - 10.0, h), &c.text, col, &font, HAlign::Right, VAlign::Center);
+    p.text(RectF::new(bg.x + 5.0, 0.0, bg.w - 10.0, h), &c.text, col, &font, HAlign::Center, VAlign::Center);
 }
 
 #[cfg(test)]
