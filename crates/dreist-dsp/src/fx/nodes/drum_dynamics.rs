@@ -62,10 +62,18 @@ impl Node for DrumDynamics {
         &mut self.ports
     }
 
+    /// Stream setup ahead of the audio thread (the effect is created with
+    /// the rate; the first block would otherwise do it).
+    fn prepare_rate(&mut self, sr: f32) {
+        if self.sr != sr {
+            self.sr = sr;
+            self.dd.set_sample_rate(self.sr);
+        }
+    }
+
     fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
         if self.sr != ctx.sample_rate {
-            self.sr = ctx.sample_rate;
-            self.dd.set_sample_rate(self.sr);
+            self.prepare_rate(ctx.sample_rate);
         }
         let p = [self.ports[0].value, self.ports[1].value, self.ports[2].value];
         if p != self.last {
