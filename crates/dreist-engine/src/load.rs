@@ -270,13 +270,14 @@ mod tests {
     fn short_callbacks_between_full_ones_are_not_late() {
         let l = DspLoad::new();
         l.total.store(1_000_000_000, Relaxed);
-        // A full period (21 ms), a 5-frame callback, the next full period
-        // a period later: none late, and the short one's share is of the period.
+        // A full period (21 ms), a 5-frame callback, the next full block
+        // 10 ms later: not late (judged against the 5 frames it would be),
+        // and the short one's share is of the period.
         l.begin();
         l.end(1024, 48000.0);
         l.begin();
         assert!(!l.end(5, 48000.0));
-        std::thread::sleep(std::time::Duration::from_millis(21));
+        std::thread::sleep(std::time::Duration::from_millis(10));
         l.begin();
         assert!(!l.end(1024, 48000.0));
         assert!(l.worst.load(Relaxed) < 500_000, "{}", l.worst.load(Relaxed));
