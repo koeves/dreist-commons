@@ -127,6 +127,9 @@ pub struct App {
     /// What the last [`App::render_frame_with`] changed in its frame (root
     /// coordinates); `None` when it drew the whole frame.
     pub frame_damage: Option<Vec<crate::ctrl::Rect>>,
+    /// The share of a core this window's frames took over the last second
+    /// (set by the window; `None` before the first second or without one).
+    pub ui_load: Option<f32>,
     /// Rectangles (root coordinates) that need drawing when `dirty` is
     /// not set: continuous updates (meters) repaint only their controls.
     damage: Vec<crate::ctrl::Rect>,
@@ -257,6 +260,7 @@ impl App {
             fonts,
             dirty: true,
             frame_damage: None,
+            ui_load: None,
             damage: Vec::new(),
             frame: None,
             custom_rects: Vec::new(),

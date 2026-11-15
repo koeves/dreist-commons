@@ -98,8 +98,9 @@ struct Handler<T: WindowApp> {
     physical: (u32, u32),
     /// The cursor last applied.
     cursor: crate::cursor::Cursor,
-    /// `DREIST_GUI_STATS=1`: frame counts and render time, printed each second.
-    stats: Option<FrameStats>,
+    /// Frame counts and render time over each second: [`App::ui_load`],
+    /// printed with `DREIST_GUI_STATS=1`.
+    stats: FrameStats,
 }
 
 /// What the window's frames did over the last second (a diagnostic).
@@ -111,27 +112,27 @@ struct FrameStats {
     partial: u32,
     resizes: u32,
     busy: std::time::Duration,
+    print: bool,
 }
 
 impl FrameStats {
-    fn new() -> FrameStats {
-        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO }
+    fn new(print: bool) -> FrameStats {
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
     }
 
-    fn report(&mut self) {
+    /// Each second: the share of a core the frames took (and the counts
+    /// printed when asked for).
+    fn report(&mut self) -> Option<f32> {
         let t = self.since.elapsed();
-        if t.as_secs_f64() >= 1.0 {
-            eprintln!(
-                "gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core",
-                self.frames,
-                self.idle,
-                self.full,
-                self.partial,
-                self.resizes,
-                self.busy.as_secs_f64() * 100.0 / t.as_secs_f64()
-            );
-            *self = FrameStats::new();
+        if t.as_secs_f64() < 1.0 {
+            return None;
         }
+        let share = (self.busy.as_secs_f64() / t.as_secs_f64()) as f32;
+        if self.print {
+            eprintln!("gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core", self.frames, self.idle, self.full, self.partial, self.resizes, share * 100.0);
+        }
+        *self = FrameStats::new(self.print);
+        Some(share)
     }
 }
 
@@ -144,14 +145,10 @@ impl<T: WindowApp> Handler<T> {
             let ui = self.app.app().ui_scale.max(0.25) as f64;
             window.resize(Size::new(w as f64 * ui, h as f64 * ui));
             self.app.app().dirty = true;
-            if let Some(st) = self.stats.as_mut() {
-                st.resizes += 1;
-            }
+            self.stats.resizes += 1;
         }
         if !self.app.app().needs_redraw() {
-            if let Some(st) = self.stats.as_mut() {
-                st.idle += 1;
-            }
+            self.stats.idle += 1;
             return;
         }
         let scale = self.scale as f32;
@@ -170,11 +167,9 @@ impl<T: WindowApp> Handler<T> {
                 .as_ref()
                 .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
         };
-        if let Some(st) = self.stats.as_mut() {
-            match damage {
-                Some(_) => st.partial += 1,
-                None => st.full += 1,
-            }
+        match damage {
+            Some(_) => self.stats.partial += 1,
+            None => self.stats.full += 1,
         }
         let Some(pm) = self.app.app().last_frame() else { return };
         let Some(surface) = self.surface.as_mut() else { return };
@@ -245,10 +240,10 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
     fn on_frame(&mut self, window: &mut Window) {
         let started = std::time::Instant::now();
         self.frame(window);
-        if let Some(st) = self.stats.as_mut() {
-            st.frames += 1;
-            st.busy += started.elapsed();
-            st.report();
+        self.stats.frames += 1;
+        self.stats.busy += started.elapsed();
+        if let Some(share) = self.stats.report() {
+            self.app.app().ui_load = Some(share);
         }
     }
 
@@ -427,7 +422,7 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: std::env::var_os("DREIST_GUI_STATS").map(|_| FrameStats::new()) }
+        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()) }
     }
 }
 

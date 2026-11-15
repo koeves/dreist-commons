@@ -285,6 +285,8 @@ impl<'s> Renderer<'s> {
             let custom = if c.overload.is_empty() { None } else { self.custom };
             if c.overload == LOGO_OVERLOAD {
                 self.logo_meter(p, c);
+            } else if c.overload == crate::perf::NAME {
+                crate::perf::draw(p, c);
             } else if custom.is_some_and(|cd| cd.draw(self, p, c)) {
                 if let Some(d) = self.custom_drawn.filter(|_| self.in_layer.get() == 0) {
                     match self.custom_paths {
