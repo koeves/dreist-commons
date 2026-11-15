@@ -87,6 +87,36 @@ fn path(app: &App) -> Option<usize> {
     app.root.children.iter().position(|c| c.name == NAME)
 }
 
+/// The strip the readout takes below an area: two rows and the insets.
+pub const STRIP: i32 = 2 * ROW + 2 * INSET;
+
+/// Make room for the readout under the control at `path` (a list area):
+/// with `on` it is [`STRIP`] shorter (once; its anchors keep the margin
+/// through later resizes) and the strip below it is returned (root
+/// coordinates) for [`place`]; without, it gets its height back. `None`
+/// when the control is missing, hidden or too short to give up the strip.
+pub fn reserve_below(app: &mut App, path: &[usize], on: bool) -> Option<Rect> {
+    const MARK: &str = "perfStrip";
+    let c = app.ctrl_mut(path)?;
+    let marked = c.attr(MARK).is_some();
+    let r = c.rect;
+    if on && !marked && r.h > 3 * STRIP {
+        c.set_rect(Rect::new(r.x, r.y, r.w, r.h - STRIP));
+        c.set_attr(MARK, "1".into());
+        app.dirty = true;
+    } else if !on && marked {
+        c.set_rect(Rect::new(r.x, r.y, r.w, r.h + STRIP));
+        c.attrs.remove(MARK);
+        app.dirty = true;
+    }
+    let marked = app.ctrl(path)?.attr(MARK).is_some();
+    if !on || !marked || !app.shown(path) {
+        return None;
+    }
+    let (a, root) = (app.abs_rect(path), app.root.rect);
+    Some(Rect::new(a.x - root.x, a.y - root.y + a.h, a.w, STRIP))
+}
+
 /// Add the readout (placed by [`place`]), or remove it.
 pub fn show(app: &mut App, on: bool) {
     match (path(app), on) {
