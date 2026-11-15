@@ -699,10 +699,15 @@ impl CpalMidir {
             _ => (period * 8).max(Duration::from_millis(2000)),
         };
         nih_log!(
-            "Audio output: '{}', {} Hz, {} samples per period",
+            "Audio output: '{}', {} Hz, {} samples per period{}",
             self.output.device.name().unwrap_or_default(),
             self.output.config.sample_rate.0,
             self.config.period_size,
+            if cfg!(target_os = "linux") {
+                format!(", ALSA buffer of {} periods", cpal::ALSA_FIXED_PERIODS)
+            } else {
+                String::new()
+            },
         );
 
         let mut first = true;
@@ -713,15 +718,25 @@ impl CpalMidir {
                 let failed = failed.clone();
                 let unparker = unparker.clone();
                 let mut promoted = false;
+                // At most one period per call into the plugin: cpal hands over all the free space
+                // (the whole buffer at the start and after a stall), more than the plugin's
+                // maximum block.
+                let chunk = self.config.period_size as usize * self.output.config.channels as usize;
+                let channels = self.output.config.channels as usize;
                 self.output.device.build_output_stream(
                     &self.output.config,
                     move |data: &mut [T], info: &OutputCallbackInfo| {
                         if !std::mem::replace(&mut promoted, true) {
                             promote_audio_thread();
+                            nih_log!("Audio output callbacks: {} frames", data.len() / channels.max(1));
                         }
                         callbacks.fetch_add(1, Ordering::Relaxed);
                         match data_callback.try_lock() {
-                            Some(mut callback) => callback(data, info),
+                            Some(mut callback) => {
+                                for part in data.chunks_mut(chunk.max(1)) {
+                                    callback(part, info);
+                                }
+                            }
                             None => data.fill(T::EQUILIBRIUM),
                         }
                     },

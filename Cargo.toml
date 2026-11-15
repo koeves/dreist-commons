@@ -61,5 +61,8 @@ baseview = { path = "vendor/baseview" }
 # the library (vendor/softbuffer/src/backends/cg.rs): two plugins in one
 # host aborted it when the second opened its editor.
 [patch.crates-io]
+# cpal with ALSA periods of the requested size, two in the buffer
+# (vendor/cpal/src/host/alsa/mod.rs); apps patch it too.
+cpal = { path = "vendor/cpal" }
 signalsmith-stretch = { path = "vendor/signalsmith-stretch" }
 softbuffer = { path = "vendor/softbuffer" }
