@@ -15,19 +15,22 @@ const H: i32 = 16;
 
 /// Where the readout goes in the root: `x` / `y` from the left / top, or
 /// from the right / bottom edge when negative; `w` wide, text right-aligned
-/// (left-aligned when `x` is from the left).
+/// (left-aligned when `x` is from the left), in one or two `rows` (DSP
+/// over UI, memory and late blocks).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Place {
     pub x: i32,
     pub y: i32,
     pub w: i32,
+    pub rows: i32,
 }
 
 impl Place {
     fn rect(&self, root: Rect) -> Rect {
+        let h = H * self.rows.clamp(1, 2);
         let x = if self.x < 0 { root.w + self.x - self.w } else { self.x };
-        let y = if self.y < 0 { root.h + self.y - H } else { self.y };
-        Rect::new(x, y, self.w, H)
+        let y = if self.y < 0 { root.h + self.y - h } else { self.y };
+        Rect::new(x, y, self.w, h)
     }
 }
 
@@ -48,14 +51,22 @@ pub struct Reading {
 
 impl Reading {
     pub fn text(&self) -> String {
+        let [a, b] = self.rows();
+        [a, b].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
+    }
+
+    /// The text in two rows: the audio load, then UI, memory and late
+    /// blocks.
+    pub fn rows(&self) -> [String; 2] {
         let pc = |v: f32| format!("{:.0}%", v * 100.0);
-        let mut parts = Vec::new();
+        let mut dsp = Vec::new();
         if let Some(d) = self.dsp {
-            parts.push(format!("DSP {}", pc(d)));
+            dsp.push(format!("DSP {}", pc(d)));
         }
         if let Some(p) = self.peak {
-            parts.push(format!("peak {}", pc(p)));
+            dsp.push(format!("peak {}", pc(p)));
         }
+        let mut parts = Vec::new();
         if let Some(u) = self.ui {
             parts.push(format!("UI {}", pc(u)));
         }
@@ -65,7 +76,7 @@ impl Reading {
         if let Some(l) = self.late {
             parts.push(format!("{l} late"));
         }
-        parts.join(" · ")
+        [dsp.join(" · "), parts.join(" · ")]
     }
 
     /// 0 fine, 1 close to the limit (peak 70 %), 2 at it (90 %).
@@ -88,7 +99,7 @@ pub fn show(app: &mut App, on: bool, at: Place) {
         (None, true) => {
             let rect = at.rect(app.root.rect);
             let mut c = Ctrl { class: "CtrlPanel".into(), name: NAME.into(), overload: NAME.into(), rect, visible: true, passive: true, zorder: i16::MAX, ..Ctrl::default() };
-            c.set_attr("place", format!("{} {} {}", at.x, at.y, at.w));
+            c.set_attr("place", format!("{} {} {} {}", at.x, at.y, at.w, at.rows));
             app.root.children.push(c);
             app.dirty = true;
         }
@@ -104,10 +115,11 @@ pub fn show(app: &mut App, on: bool, at: Place) {
 pub fn update(app: &mut App, r: &Reading) {
     let Some(i) = path(app) else { return };
     let root = app.root.rect;
-    let (text, level) = (r.text(), r.level().to_string());
     let c = &mut app.root.children[i];
-    let at = c.attr("place").map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect::<Vec<i32>>()).filter(|v| v.len() == 3).map(|v| Place { x: v[0], y: v[1], w: v[2] });
+    let at = c.attr("place").map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect::<Vec<i32>>()).filter(|v| v.len() == 4).map(|v| Place { x: v[0], y: v[1], w: v[2], rows: v[3] });
     let Some(at) = at else { return };
+    let text = if at.rows >= 2 { r.rows().join("\n") } else { r.text() };
+    let level = r.level().to_string();
     let rect = at.rect(root);
     if c.text == text && c.attr("level") == Some(level.as_str()) && c.rect == rect {
         return;
@@ -129,7 +141,8 @@ pub fn draw(p: &mut Painter, c: &Ctrl) {
     }
     let font = FontSpec { family: crate::text::ui_family().into(), size: 11.0, bold: false };
     p.fonts.prepare(&font);
-    let tw = p.fonts.measure(&font, &c.text).0.ceil() + 10.0;
+    let lines: Vec<&str> = c.text.split('\n').collect();
+    let tw = lines.iter().map(|l| p.fonts.measure(&font, l).0).fold(0.0, f32::max).ceil() + 10.0;
     let (w, h) = (c.rect.w as f32, c.rect.h as f32);
     let left = c.attr("place").is_some_and(|v| !v.starts_with('-'));
     let bg = RectF::new(if left { 0.0 } else { (w - tw).max(0.0) }, 0.0, tw.min(w), h);
@@ -139,7 +152,10 @@ pub fn draw(p: &mut Painter, c: &Ctrl) {
         Some("1") => Colour::rgba(255, 190, 60, 255),
         _ => Colour::rgba(220, 226, 236, 255),
     };
-    p.text(RectF::new(bg.x + 5.0, 0.0, bg.w - 10.0, h), &c.text, col, &font, HAlign::Center, VAlign::Center);
+    let row = h / lines.len() as f32;
+    for (k, l) in lines.iter().enumerate() {
+        p.text(RectF::new(bg.x + 5.0, k as f32 * row, bg.w - 10.0, row), l, col, &font, HAlign::Center, VAlign::Center);
+    }
 }
 
 #[cfg(test)]
@@ -150,6 +166,7 @@ mod tests {
     fn the_text_lists_what_is_known() {
         let r = Reading { dsp: Some(0.312), peak: Some(0.58), ui: Some(0.14), memory: Some(351 << 20), late: Some(0) };
         assert_eq!(r.text(), "DSP 31% · peak 58% · UI 14% · 351 MB · 0 late");
+        assert_eq!(r.rows(), ["DSP 31% · peak 58%".to_string(), "UI 14% · 351 MB · 0 late".to_string()]);
         assert_eq!(r.level(), 0);
         assert_eq!(Reading { ui: Some(0.2), ..Reading::default() }.text(), "UI 20%");
         assert_eq!(Reading { peak: Some(0.75), ..Reading::default() }.level(), 1);
