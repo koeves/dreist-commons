@@ -10,6 +10,7 @@
 
 - **Work**: on `feature/<name>`, one worktree per branch in `.claude/worktrees/<name>`.
 - **Into `dev`**: a pull request, squash-merged; its title is the Conventional Commit.
+- **Drafts**: longer work opens as a draft pull request, marked ready once its testing is done; short work goes from a local branch straight to a ready pull request.
 - **Issues**: for features, bug reports and work spanning several pull requests or repos; the pull request links it with `Closes #N`.
 - **No issue**: small fixes, docs, chores and dependency bumps go straight to a pull request with a conventional title.
 - **Board**: features and larger work for all three repos are tracked on [Dreist & Einst](https://github.com/users/koeves/projects/1).

@@ -20,6 +20,8 @@ resources, IDs, menus, readers) in the apps, not here.
   merge releases: version from the commits (`Release-As: X.Y.Z` overrides), tag, GitHub release
   and a follow-up changelog / version pull request into `dev` happen on their own; never tag
   or bump by hand (CONTRIBUTING.md). Release commons before the apps.
+- Pull requests: a draft while longer work is in progress, marked ready once its testing is done; short
+  work goes from a local branch straight to a ready pull request.
 - After any change here, rebuild and reinstall both apps' VST3s (Dreist and Einst) and say which
   commits are installed.
 - Security alerts: check the open code scanning and Dependabot alerts at the start and end of any
