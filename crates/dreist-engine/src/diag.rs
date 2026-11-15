@@ -856,6 +856,16 @@ pub fn start_run(app: &str, version: &str, args: DebugArgs, launch: &[String]) -
     monitor
 }
 
+/// Write a `kind` line with `text` to the debug run's log, when one runs
+/// (e.g. the power profile held while playing).
+pub fn note(kind: &str, text: &str) {
+    if let Some((rec, _)) = RUN.get() {
+        if let Ok(mut r) = rec.lock() {
+            r.log().write(&Event::new(kind).with("text", text));
+        }
+    }
+}
+
 /// End the debug run: write the summary; its exit status (`None` without
 /// a run).
 pub fn end_run() -> Option<i32> {
