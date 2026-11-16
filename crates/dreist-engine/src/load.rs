@@ -277,8 +277,11 @@ mod tests {
         l.end(1024, 48000.0);
         l.begin();
         assert!(!l.end(5, 48000.0));
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // The next block's start set 10 ms after the short one's (no
+        // sleeping: a busy test machine would stretch the gap).
         l.begin();
+        let short = l.prev_start.load(Relaxed);
+        l.start.store(short + 10_000_000, Relaxed);
         assert!(!l.end(1024, 48000.0));
         assert!(l.worst.load(Relaxed) < 500_000, "{}", l.worst.load(Relaxed));
     }
