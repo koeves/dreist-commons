@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The version a release pull request (dev -> main) releases: the one
 # prepare.sh wrote into the workspace Cargo.toml, with its CHANGELOG.md
-# section. Fails when that version is already tagged (nothing prepared), has
-# no changelog section, or when releasable commits came into dev after the
-# release was prepared (run prepare.sh again).
+# section. Passes without a version when no releasable commit came since the
+# last tag (the pull request only brings main up to date). Fails when
+# releasable commits came but no release was prepared, the version has no
+# changelog section, or releasable commits came after the release was
+# prepared (run prepare.sh again).
 #
 #   .github/release/release-version.sh            check (release pull request)
 #   .github/release/release-version.sh --release  on main: no release when nothing is prepared
@@ -23,11 +25,17 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 prev=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
 
 if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
-  if [ "$mode" = --release ]; then
-    say "Nothing to release: v$version is tagged already and no release was prepared."
+  pending=$(git log --no-merges --format=%s "${prev:+$prev..}HEAD" | grep -E "$RELEASABLE" || true)
+  if [ -z "$pending" ]; then
+    say "Nothing to release: no releasable commit since ${prev:-the first commit}; merging only brings main up to date with dev."
     exit 0
   fi
-  say "No release prepared: Cargo.toml has $version, released as v$version. Run .github/release/prepare.sh and merge its pull request into dev first."
+  if [ "$mode" = --release ]; then
+    say "Nothing released: v$version is tagged already and no release was prepared for the releasable commits since ${prev:-the first commit}."
+    exit 0
+  fi
+  say "No release prepared: Cargo.toml has $version, released as v$version, but releasable commits came since. Run .github/release/prepare.sh and merge its pull request into dev first:"
+  printf '%s\n' "$pending" | sed 's/^/- /' | tee -a "$summary" >&2
   exit 1
 fi
 if ! grep -q "^## \[$version\]" CHANGELOG.md; then
