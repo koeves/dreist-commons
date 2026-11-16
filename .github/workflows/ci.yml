@@ -23,8 +23,37 @@ env:
 
 # Tests that need an app's UI or factory assets skip without them; Dreist's
 # CI runs this suite against its assets.
+# Pull requests into dev run the fast checks (Linux); macOS and Windows run
+# on the release pull request (into main) and in the release. A skipped job
+# counts as passed for the branch rules.
 jobs:
+  changes:
+    # Whether a pull request changes more than Markdown: a docs-only pull
+    # request skips the build and test jobs. Anything but a pull request runs
+    # them all.
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          code=true
+          if [ "$EVENT" = pull_request ] && files=$(git diff --name-only "$BASE" "$HEAD") && [ -n "$files" ] \
+            && ! printf '%s\n' "$files" | grep -qvE '\.md$'; then
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   linux:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # Engine, DSP, editor and GUI tests run headless on Linux; the X11
     # window code and the host crate (ALSA audio and MIDI, portal file
     # dialogs) build and lint here too.
@@ -64,6 +93,8 @@ jobs:
         run: cargo test --locked -p dreist-dsp --test fx_harness effects_match_fingerprints
 
   macos:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
     # The full suite, effect fingerprints included, and the AppKit window code.
     runs-on: macos-15
     steps:
@@ -86,11 +117,14 @@ jobs:
         run: cargo test --locked -p dreist-host --all-features
 
   packaging:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     # The apps' install scripts (packaging/), with a fake app on every system.
+    # Linux only on pull requests into dev.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-latest]
+        os: ${{ (github.event_name != 'pull_request' || github.base_ref == 'main') && fromJSON('["ubuntu-24.04", "macos-15", "windows-latest"]') || fromJSON('["ubuntu-24.04"]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
