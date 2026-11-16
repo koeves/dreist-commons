@@ -31,16 +31,17 @@ cargo test -p dreist-gui --features window
 cargo test -p dreist-host --all-features
 ```
 
-- **CI**: `macos` and `linux` (both required).
+- **CI**: pull requests into `dev` run `linux` and the Linux `packaging` test; the release pull request and the release also run `macos` and the macOS and Windows `packaging` tests.
+- **Docs only**: a pull request that changes only Markdown skips the build and test jobs; a skipped job counts as passed.
 - **CodeQL**: runs on every pull request into `dev` and `main`.
 
 ## Releases
 
-- **Release**: a pull request from `dev` into `main`, merged with a merge commit.
-- **Automatic**: the merge computes the version from the commits, tags `vX.Y.Z` and publishes the GitHub release.
-- **Follow-up**: a changelog and version pull request into `dev` merges itself once green.
-- **Version**: fix → patch, feat → minor, breaking → major (minor while on 0.x); `Release-As: X.Y.Z` in the release pull request overrides it.
-- **Releasable**: feat, fix, perf, refactor, revert, breaking and dependency commits; without one nothing is released.
+- **Prepare**: `.github/release/prepare.sh` cuts `release/vX.Y.Z` from `dev` with the version and its CHANGELOG section in one commit and opens its pull request into `dev`; `--dry-run` tries it locally.
+- **Version**: from the commits since the last tag: fix → patch, feat → minor, breaking → major (minor while on 0.x); `--as X.Y.Z` or a `Release-As: X.Y.Z` line in a commit sets it.
+- **Releasable**: feat, fix, perf, refactor, revert, breaking and dependency commits; `ci`, `docs`, `test`, `style` and other commits alone release nothing.
+- **Release**: `prepare.sh --open` opens the pull request from `dev` into `main`, merged with a merge commit; its `release-version` check needs the prepared version and changelog and no releasable commit after them.
+- **Automatic**: the merge tags `vX.Y.Z` and publishes the GitHub release; the changelog and version are already in `dev`.
 - **Order**: release dreist-commons before the apps that need the change.
 
 ## Apps
