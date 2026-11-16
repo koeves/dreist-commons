@@ -3,7 +3,8 @@
 //! midir), native file dialogs (`rfd`, re-exported), the session file a
 //! relaunched standalone starts from ([`session`]; serde and serde_json
 //! re-exported), local civil time ([`time`], the C library) and the file
-//! manager and clipboard ([`shell`], the system's tools).
+//! manager and clipboard ([`shell`], the system's tools), and the
+//! performance profile held while the standalone plays ([`power`], Linux).
 //!
 //! This crate owns those third-party dependencies and their versions, so
 //! the apps declare none of their own. Each group is behind a feature
@@ -11,6 +12,7 @@
 //! [`shell`] and [`time`] are always there.
 
 pub mod devices;
+pub mod power;
 pub mod shell;
 pub mod time;
 
