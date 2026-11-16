@@ -85,3 +85,25 @@ jobs:
         run: cargo test --locked -p dreist-gui --features window
       - name: Test (host)
         run: cargo test --locked -p dreist-host --all-features
+
+  packaging:
+    # The apps' install scripts (packaging/), with a fake app on every system.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shellcheck
+        if: runner.os != 'Windows'
+        run: |
+          command -v shellcheck >/dev/null || brew install shellcheck
+          shellcheck packaging/install.sh packaging/test-install.sh
+      - name: Test (install.sh)
+        if: runner.os != 'Windows'
+        run: sh packaging/test-install.sh
+      - name: Test (install.ps1)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/test-install.ps1
