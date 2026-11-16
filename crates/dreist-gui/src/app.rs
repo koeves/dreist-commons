@@ -2104,7 +2104,7 @@ mod tests {
     /// only that one and keeps it on its side of the other.
     #[test]
     fn range_sliders_drag_the_nearer_handle() {
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let mut slider = Ctrl { class: "CtrlRangeSlider".into(), name: "Cut".into(), rect: crate::ctrl::Rect::new(10, 10, 119, 19), visible: true, enabled: true, ..Ctrl::default() };
         slider.set_attr("valueLow", "0.2".into());
         slider.set_attr("valueHigh", "0.8".into());
@@ -2130,12 +2130,34 @@ mod tests {
         app.mouse_up(MouseButton::Left);
     }
 
+    /// Controls that draw the same twice are kept as pixels: later frames
+    /// composite them and come out the same as the first.
+    #[test]
+    fn kept_drawings_render_the_same_frames() {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
+        let mut button = Ctrl { class: "CtrlButton".into(), name: "B".into(), text: "Go".into(), rect: crate::ctrl::Rect::new(10, 10, 60, 24), visible: true, enabled: true, ..Ctrl::default() };
+        button.set_attr("fillColour", "#4060a0".into());
+        let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 120, 60), visible: true, enabled: true, children: vec![button], ..Ctrl::default() };
+        let mut app = App::new(skin, root);
+        let first = app.render(1.0).clone();
+        assert!(app.skin.cache.is_empty(), "kept only once seen twice");
+        let second = app.render(1.0).clone();
+        assert!(!app.skin.cache.is_empty());
+        let third = app.render(1.0).clone();
+        assert_eq!(first.data(), second.data());
+        assert_eq!(first.data(), third.data());
+        // A change draws anew.
+        app.root.children[0].on = true;
+        let on = app.render(1.0).clone();
+        assert_ne!(on.data(), first.data());
+    }
+
     /// A menu's hover repaints the menu over the kept pixels beneath it:
     /// the same frame as a full render, also after other repaints under
     /// and beside the menu.
     #[test]
     fn menu_hover_frames_match_full_renders() {
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let panel = |name: &str, r: crate::ctrl::Rect, col: &str| {
             let mut c = Ctrl { class: "CtrlPanel".into(), name: name.into(), rect: r, visible: true, enabled: true, ..Ctrl::default() };
             c.set_attr("fillColour", col.into());
@@ -2177,7 +2199,7 @@ mod tests {
     /// render.
     #[test]
     fn clicks_repaint_only_what_they_change() {
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let mut back = Ctrl { class: "CtrlPanel".into(), name: "Back".into(), rect: crate::ctrl::Rect::new(0, 30, 200, 130), visible: true, enabled: true, ..Ctrl::default() };
         back.set_attr("fillColour", "#335577".into());
         let button = |name: &str, x: i32, momentary: bool| {
@@ -2261,7 +2283,7 @@ mod tests {
                 true
             }
         }
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let bar = |o: &str, y: i32| Ctrl { class: "CtrlPanel".into(), overload: o.into(), rect: crate::ctrl::Rect::new(10, y, 100, 10), visible: true, enabled: true, ..Ctrl::default() };
         let mut label = Ctrl { class: "CtrlPanel".into(), name: "Plain".into(), rect: crate::ctrl::Rect::new(10, 60, 40, 10), visible: true, enabled: true, ..Ctrl::default() };
         label.set_attr("fillColour", "#204060".into());
@@ -2298,7 +2320,7 @@ mod tests {
 
     #[test]
     fn dragable_value_boxes_drag_their_value() {
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let mut vb = Ctrl { class: "CtrlValueBox".into(), name: "Num".into(), rect: crate::ctrl::Rect::new(10, 50, 30, 17), visible: true, enabled: true, ..Ctrl::default() };
         vb.set_attr("optSingleClickEdit", "false".into());
         let mut plain = vb.clone();
@@ -2321,7 +2343,7 @@ mod tests {
     }
 
     fn v2_app(children: Vec<Ctrl>) -> App {
-        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new() };
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
         let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 400, 400), visible: true, enabled: true, children, ..Ctrl::default() };
         let mut app = App::new(skin, root);
         app.v2_controls = true;

@@ -40,6 +40,61 @@ pub struct Renderer<'s> {
     /// The control whose children are being drawn is on (see
     /// `colParentOnFill`).
     parent_on: std::cell::Cell<bool>,
+    /// Pixels of controls' own drawing kept between frames.
+    pub cache: Option<&'s DrawCache>,
+}
+
+/// Controls' own drawing (children excluded) kept as pixels, by what it
+/// depends on (the control's [`Ctrl::draw_hash`], the scale, its parent
+/// being on): a frame composites a control that drew the same before
+/// instead of rasterising it again. A drawing is kept the second time it
+/// is seen, so controls that change every frame (meters) do not churn it.
+#[derive(Default)]
+pub struct DrawCache {
+    inner: std::cell::RefCell<CacheInner>,
+}
+
+#[derive(Default)]
+struct CacheInner {
+    seen: std::collections::HashSet<CacheKey>,
+    pixels: std::collections::HashMap<CacheKey, tiny_skia::Pixmap>,
+    bytes: usize,
+}
+
+type CacheKey = (u64, u32, bool);
+
+/// Bytes of pixels kept (cleared when exceeded) and drawings remembered as
+/// seen once.
+const CACHE_BYTES: usize = 64 << 20;
+const CACHE_SEEN: usize = 1 << 16;
+
+impl DrawCache {
+    pub fn clear(&self) {
+        *self.inner.borrow_mut() = CacheInner::default();
+    }
+
+    /// Pixmaps held (for tests and diagnostics).
+    pub fn len(&self) -> usize {
+        self.inner.borrow().pixels.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// A copy starts empty: the pixels belong to one renderer's frames.
+impl Clone for DrawCache {
+    fn clone(&self) -> DrawCache {
+        DrawCache::default()
+    }
+}
+
+impl std::fmt::Debug for DrawCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let i = self.inner.borrow();
+        write!(f, "DrawCache({} drawings, {} bytes)", i.pixels.len(), i.bytes)
+    }
 }
 
 /// Fingerprint the custom drawing of the control at `path` (from `root`)
@@ -170,7 +225,7 @@ enum Handle {
 
 impl<'s> Renderer<'s> {
     pub fn new(styles: &'s StyleSheet) -> Renderer<'s> {
-        Renderer { styles, custom: None, custom_drawn: None, custom_paths: None, path: Default::default(), in_layer: std::cell::Cell::new(0), parent_on: std::cell::Cell::new(false) }
+        Renderer { styles, custom: None, custom_drawn: None, custom_paths: None, path: Default::default(), in_layer: std::cell::Cell::new(0), parent_on: std::cell::Cell::new(false), cache: None }
     }
 
     pub fn style<'c>(&self, c: &'c Ctrl) -> &'c str {
@@ -236,6 +291,63 @@ impl<'s> Renderer<'s> {
         self.path.borrow_mut().pop();
     }
 
+    /// [`Renderer::draw_self`] through the [`DrawCache`]: at whole device
+    /// pixels and when not recording a fingerprint.
+    fn draw_self_cached(&self, p: &mut Painter, c: &Ctrl) {
+        let s = p.scale;
+        let (dx, dy) = (p.tx * s, p.ty * s);
+        let (lw, lh) = ((c.rect.w as f32 * s).ceil(), (c.rect.h as f32 * s).ceil());
+        // A margin around the control: tiny-skia rasterises strokes along
+        // a pixmap's own edge differently from inside a larger one.
+        const M: i32 = 2;
+        let m = (M as f32 * s) as i32;
+        let Some(cache) = self.cache.filter(|_| !p.is_recording() && self.in_layer.get() == 0 && dx.fract() == 0.0 && dy.fract() == 0.0 && lw >= 1.0 && lh >= 1.0) else {
+            return self.draw_self(p, c);
+        };
+        // Nothing of it in the area being drawn.
+        let (cx, cy, cw, ch) = p.clip;
+        let (ix, iy) = (p.tx as i32, p.ty as i32);
+        if ix >= cx + cw || iy >= cy + ch || ix + c.rect.w <= cx || iy + c.rect.h <= cy {
+            return;
+        }
+        let key = (c.draw_hash(), s.to_bits(), self.parent_on.get());
+        // Only the part inside the clip (whole device pixels at whole scales).
+        let blit = |p: &mut Painter, px: &tiny_skia::Pixmap| {
+            let (cx0, cy0) = ((cx as f32 * s).floor() as i32, (cy as f32 * s).floor() as i32);
+            let (cx1, cy1) = (((cx + cw) as f32 * s).ceil() as i32, ((cy + ch) as f32 * s).ceil() as i32);
+            let area = (cx0.max(dx as i32), cy0.max(dy as i32), cx1.min(dx as i32 + lw as i32), cy1.min(dy as i32 + lh as i32));
+            crate::paint::blend_over(p.pm, px, (dx as i32 - m, dy as i32 - m), area);
+        };
+        if let Some(px) = cache.inner.borrow().pixels.get(&key) {
+            return blit(p, px);
+        }
+        // Always through a layer, so a frame draws the same pixels whether
+        // the drawing was kept or not; kept the second time it is seen.
+        let Some(mut layer) = tiny_skia::Pixmap::new(lw as u32 + 2 * m as u32, lh as u32 + 2 * m as u32) else { return self.draw_self(p, c) };
+        {
+            let mut lp = Painter::new(&mut layer, p.fonts, s);
+            (lp.tx, lp.ty) = (M as f32, M as f32);
+            lp.clip = (M, M, c.rect.w, c.rect.h);
+            self.draw_self(&mut lp, c);
+        }
+        blit(p, &layer);
+        let mut inner = cache.inner.borrow_mut();
+        if !inner.seen.contains(&key) {
+            if inner.seen.len() >= CACHE_SEEN {
+                inner.seen.clear();
+            }
+            inner.seen.insert(key);
+            return;
+        }
+        let size = layer.data().len();
+        if inner.bytes + size > CACHE_BYTES {
+            inner.pixels.clear();
+            inner.bytes = 0;
+        }
+        inner.bytes += size;
+        inner.pixels.insert(key, layer);
+    }
+
     /// [re:527038]: draw `c` into a layer, composite it.
     fn draw_alpha(&self, p: &mut Painter, c: &Ctrl, alpha: f32) {
         if p.record(12, |k| {
@@ -295,7 +407,7 @@ impl<'s> Renderer<'s> {
                     }
                 }
             } else {
-                self.draw_self(p, c);
+                self.draw_self_cached(p, c);
             }
             if c.class == "CtrlSplitterPanel" {
                 self.splitter_bar(p, c);

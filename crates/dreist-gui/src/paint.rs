@@ -109,6 +109,36 @@ fn unit(seed: u32, a: u32, b: u32) -> f32 {
 /// Draw `src` with its top left at device pixel (`x`, `y`) of `pm`. A
 /// source starting left of or above the pixmap is cut there first: drawn
 /// across that edge, it would also cover the column (or row) after it.
+/// Composite premultiplied `src` (its corner at `at` in `dst`) over `dst`,
+/// source-over, within `area` (x0, y0, x1, y1 in `dst` pixels).
+pub fn blend_over(dst: &mut Pixmap, src: &Pixmap, at: (i32, i32), area: (i32, i32, i32, i32)) {
+    let (x0, y0) = (area.0.max(0).max(at.0), area.1.max(0).max(at.1));
+    let (x1, y1) = (area.2.min(dst.width() as i32).min(at.0 + src.width() as i32), area.3.min(dst.height() as i32).min(at.1 + src.height() as i32));
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (dw, sw) = (dst.width() as usize, src.width() as usize);
+    let s = src.data();
+    let d = dst.data_mut();
+    for y in y0..y1 {
+        let sy = (y - at.1) as usize;
+        let srow = &s[(sy * sw + (x0 - at.0) as usize) * 4..(sy * sw + (x1 - at.0) as usize) * 4];
+        let drow = &mut d[(y as usize * dw + x0 as usize) * 4..(y as usize * dw + x1 as usize) * 4];
+        for (dp, sp) in drow.as_chunks_mut::<4>().0.iter_mut().zip(srow.as_chunks::<4>().0) {
+            let sa = sp[3] as u32;
+            if sa == 255 {
+                dp.copy_from_slice(sp);
+            } else if sa != 0 {
+                let inv = 255 - sa;
+                for k in 0..4 {
+                    let v = dp[k] as u32 * inv + 128;
+                    dp[k] = (sp[k] as u32 + ((v + (v >> 8)) >> 8)).min(255) as u8;
+                }
+            }
+        }
+    }
+}
+
 pub fn blit(pm: &mut Pixmap, x: i32, y: i32, src: tiny_skia::PixmapRef, paint: &tiny_skia::PixmapPaint, mask: Option<&Mask>) {
     if x >= 0 && y >= 0 {
         pm.draw_pixmap(x, y, src, paint, Transform::identity(), mask);
