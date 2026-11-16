@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.3.0] - 2026-11-16
+
+### Features
+
+- Linux support for the window, host and path code (#9)
+- **gui:** CPU and memory readout (#44)
+- **engine:** Diagnostics core and debug run options (#48)
+- **host:** Hold the performance power profile while the standalone plays (#53)
+- **packaging:** Install scripts for every platform (#56)
+
+### Fixes
+
+- **testkit:** Engine render fingerprints are compared on macOS only (#21)
+- **stretch:** The same phase randomisation on every platform (#20)
+- **stretch:** Code scanning findings in the vendored stretch library (#27)
+- **gui:** Parented windows at the host's scale on Windows and Linux (#24)
+- **x11:** Draw the editor window's frames when they are presented (#23)
+- **nih-plug:** The main output's own port name (#22)
+- **nih-plug:** Vendored nih_log without the unmaintained atty (#43)
+- **linux:** Window, standalone audio and UI performance fixes (#35)
+- **nih-plug:** ALSA periods of the engine's block, two in the buffer (#51)
+
+### Performance
+
+- **engine:** Flush denormals to zero while the engine renders (#45)
+- **dsp:** Effects and tables set up before the audio thread needs them (#49)
+- **gui:** Keep controls' own drawing as pixels between frames (#46)
+
+### Documentation
+
+- Feature branches into dev by pull request, releases by pull request into main
+- Releasing is merging the release pull request
+- Platform minimums for macOS, Windows and Linux in the README (#14)
+- Check security alerts in the agent instructions (#29)
+- README and contributing guide as short bullet lists (#33)
+- Draft pull requests while work is in progress (#52)
+
+### Tests
+
+- **engine:** Lateness test without sleeping (#55)
+
+### Build and CI
+
+- Checks and CodeQL on pull requests into dev and main; Dependabot auto-merge
+- Release on merging the release pull request into main
+- Squash pull requests into dev, merge commits into main (#12)
+- Install Linux packages from the main Ubuntu archive (#31)
+
 ## [0.2.3] - 2026-11-11
 
 A shared host crate (`dreist-host`) owns the apps' audio, MIDI, dialog and serialisation
