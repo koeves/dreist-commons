@@ -1,11 +1,12 @@
 # Install the app next to this script (standalone app, VST3, CLAP) on
 # Windows, or remove it. packaging/install.sh does the same on Linux and macOS.
 #
-#   .\install.ps1                         install for this user
-#   .\install.ps1 --system                install for all users (administrator PowerShell)
-#   .\install.ps1 --uninstall             remove an install for this user
-#   .\install.ps1 --uninstall --system    remove a system-wide install
+#   .\install.ps1                         install for all users (administrator PowerShell)
+#   .\install.ps1 --user                  install for this user only
+#   .\install.ps1 --uninstall             remove a system-wide install
+#   .\install.ps1 --uninstall --user      remove an install for this user
 #   .\install.ps1 --app <Name> --uninstall    remove without the files at hand
+#   (--system, the default here, is accepted as on Linux and macOS)
 #
 # Next to this script, each part installed when present: <App>.vst3,
 # <App>-CLAP\ (<App>.clap + Resources\), <App>-App\ (<App>.exe + Resources\).
@@ -15,7 +16,7 @@
 $ErrorActionPreference = 'Stop'
 
 $here = $PSScriptRoot
-$scope = 'user'
+$scope = 'system'
 $action = 'install'
 $app = $null
 $argv = @($args)
@@ -32,6 +33,7 @@ for ($i = 0; $i -lt $argv.Count; $i++) {
     switch -Exact ($argv[$i]) {
         '--uninstall' { $action = 'uninstall' }
         '--system' { $scope = 'system' }
+        '--user' { $scope = 'user' }
         '--app' {
             if ($i + 1 -ge $argv.Count) { Show-Usage | Write-Host; exit 2 }
             $i++
@@ -62,7 +64,7 @@ if (-not $app) {
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($scope -eq 'system' -and -not $admin) {
-    [Console]::Error.WriteLine('--system needs an administrator PowerShell')
+    [Console]::Error.WriteLine('Installing for all users needs an administrator PowerShell; --user installs for this user only')
     exit 2
 }
 

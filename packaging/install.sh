@@ -7,6 +7,7 @@
 #   ./install.sh --uninstall             remove an install for this user
 #   sudo ./install.sh --uninstall --system   remove a system-wide install
 #   ./install.sh --app <Name> --uninstall    remove without the files at hand
+#   (--user, the default here, is accepted as on Windows)
 #
 # Next to this script, each part installed when present:
 #   Linux: <App>.vst3, <App>-CLAP/ (<App>.clap + Resources/),
@@ -33,6 +34,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --uninstall) action=uninstall ;;
         --system) scope=system ;;
+        --user) scope=user ;;
         --app)
             [ $# -gt 1 ] || { usage >&2; exit 2; }
             app=$2

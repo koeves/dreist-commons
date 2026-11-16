@@ -3,7 +3,8 @@
 Install scripts the apps ship in their release archives: `install.sh` (Linux, macOS) and `install.ps1` (Windows).
 
 - Each script installs the standalone app, VST3 and CLAP that sit next to it, and finds the app's name from them.
-- The same options everywhere: `--system` (all users), `--uninstall`, `--app <Name>` (uninstall without the files), `--help`.
+- The same options everywhere: `--user`, `--system` (all users), `--uninstall`, `--app <Name>` (uninstall without the files), `--help`.
+- Default: all users on Windows (administrator PowerShell), this user on Linux and macOS.
 - Every part is checked to be a complete build before anything installed is touched; a reinstall replaces the old version whole.
 - Settings and content stay on uninstall.
 - `DESTDIR=<dir>` (install.sh) stages the layout under `<dir>` for packages and tests.
@@ -14,7 +15,7 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 
 ### macOS
 
-| Part | This user | `--system` |
+| Part | This user (default) | `--system` |
 |---|---|---|
 | VST3 | `~/Library/Audio/Plug-Ins/VST3/<App>.vst3` | `/Library/Audio/Plug-Ins/VST3/<App>.vst3` |
 | CLAP | `~/Library/Audio/Plug-Ins/CLAP/<App>.clap` | `/Library/Audio/Plug-Ins/CLAP/<App>.clap` |
@@ -23,7 +24,7 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 
 ### Windows
 
-| Part | This user | `--system` |
+| Part | `--user` | All users (default) |
 |---|---|---|
 | VST3 | `%LOCALAPPDATA%\Programs\Common\VST3\<App>.vst3` | `%CommonProgramFiles%\VST3\<App>.vst3` |
 | CLAP | `%LOCALAPPDATA%\Programs\Common\CLAP\<App>\` | `%CommonProgramFiles%\CLAP\<App>\` |
@@ -33,7 +34,7 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 
 ### Linux
 
-| Part | This user | `--system` |
+| Part | This user (default) | `--system` |
 |---|---|---|
 | VST3 | `~/.vst3/<App>.vst3` | `/usr/local/lib/vst3/<App>.vst3` |
 | CLAP | `~/.clap/<App>/` | `/usr/lib/clap/<App>/` |

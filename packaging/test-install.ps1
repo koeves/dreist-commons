@@ -1,6 +1,6 @@
 # Check packaging/install.ps1 with a fake app ("Fake"): install, reinstall
-# over an older version, a refused incomplete build, --system (when run as
-# administrator) and uninstall. It installs for real, so it runs on CI runners.
+# over an older version, a refused incomplete build and uninstall, for this
+# user (--user) and for all users (the default; when run as administrator). It installs for real, so it runs on CI runners.
 #
 #   pwsh packaging/test-install.ps1
 $ErrorActionPreference = 'Stop'
@@ -37,7 +37,7 @@ try {
     $link = Join-Path ([Environment]::GetFolderPath('Programs')) "$app.lnk"
 
     '== install'
-    $r = Run $dist
+    $r = Run $dist @('--user')
     if ($r.Code -ne 0) { Bad "install exits 0: $($r.Out)" }
     Has 'VST3' $vst3
     Has 'CLAP' $clap
@@ -48,7 +48,7 @@ try {
     '== reinstall drops files of an older version'
     $stale = Join-Path $vst3 'Contents\old-file'
     New-Item -ItemType File -Path $stale | Out-Null
-    $r = Run $dist
+    $r = Run $dist @('--user')
     if ($r.Code -ne 0) { Bad 'reinstall exits 0' }
     Gone 'old file' $stale
     Gone 'no .new left' "$vst3.new"
@@ -59,7 +59,7 @@ try {
     [IO.File]::WriteAllBytes((Join-Path $broken "$app-App\$app.exe"), [byte[]]@())
     $marker = Join-Path $vst3 'marker'
     New-Item -ItemType File -Path $marker | Out-Null
-    $r = Run $broken
+    $r = Run $broken @('--user')
     if ($r.Code -ne 0) { Ok 'refuses an empty binary' } else { Bad 'refuses an empty binary' }
     if ($r.Out -match 'Not a complete build') { Ok 'says why' } else { Bad "error: $($r.Out)" }
     Has 'install untouched' $marker
@@ -71,7 +71,7 @@ try {
     if ($r.Out -match '--uninstall') { Ok 'help lists the options' } else { Bad 'help' }
 
     '== uninstall'
-    $r = Run $dist @('--uninstall')
+    $r = Run $dist @('--user', '--uninstall')
     if ($r.Code -ne 0) { Bad 'uninstall exits 0' }
     Gone 'VST3' $vst3
     Gone 'CLAP' $clap
@@ -80,30 +80,33 @@ try {
     if ($r.Out -match 'removed') { Ok 'message' } else { Bad "message: $($r.Out)" }
 
     '== uninstall by name, with nothing next to the script'
-    Run $dist | Out-Null
+    Run $dist @('--user') | Out-Null
     $bare = Join-Path $work 'bare'
     New-Item -ItemType Directory -Force -Path $bare | Out-Null
     Copy-Item $script (Join-Path $bare 'install.ps1')
-    $r = Run $bare @('--app', $app, '--uninstall')
+    $r = Run $bare @('--user', '--app', $app, '--uninstall')
     if ($r.Code -ne 0) { Bad '--app uninstall exits 0' }
     Gone 'VST3' $vst3
 
     $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
     if ($admin) {
-        '== system-wide'
-        $r = Run $dist @('--system')
-        if ($r.Code -ne 0) { Bad "--system exits 0: $($r.Out)" }
-        Has 'VST3' (Join-Path $env:CommonProgramFiles "VST3\$app.vst3")
-        Has 'CLAP' (Join-Path $env:CommonProgramFiles "CLAP\$app\$app.clap")
-        Has 'app' (Join-Path $env:ProgramFiles "$app\$app.exe")
-        Has 'Start menu entry' (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) "$app.lnk")
-        $r = Run $dist @('--system', '--uninstall')
-        if ($r.Code -ne 0) { Bad '--system --uninstall exits 0' }
+        '== all users (default, and --system)'
+        foreach ($opts in @(@(), @('--system'))) {
+            $r = Run $dist $opts
+            if ($r.Code -ne 0) { Bad "install $opts exits 0: $($r.Out)" }
+            Has 'VST3' (Join-Path $env:CommonProgramFiles "VST3\$app.vst3")
+            Has 'CLAP' (Join-Path $env:CommonProgramFiles "CLAP\$app\$app.clap")
+            Has 'app' (Join-Path $env:ProgramFiles "$app\$app.exe")
+            Has 'Start menu entry' (Join-Path ([Environment]::GetFolderPath('CommonPrograms')) "$app.lnk")
+        }
+        Gone 'nothing for this user' $vst3
+        $r = Run $dist @('--uninstall')
+        if ($r.Code -ne 0) { Bad 'uninstall exits 0' }
         Gone 'VST3' (Join-Path $env:CommonProgramFiles "VST3\$app.vst3")
         Gone 'app' (Join-Path $env:ProgramFiles $app)
     } else {
-        '== system-wide: skipped (not administrator)'
+        '== all users: skipped (not administrator)'
     }
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
