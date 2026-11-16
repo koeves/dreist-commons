@@ -1,28 +1,56 @@
 # Contributing
 
-Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/):
-`type(scope): summary`, with type one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`,
-`build`, `ci`, `chore`, `style` or `revert`, and `!` after the type for a breaking change. CI
-checks every new commit (`.github/workflows/commits.yml`); the changelog is generated from them.
+## Commits
 
-Releases: `git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md` ([git-cliff](https://git-cliff.org),
-config in `cliff.toml`), edit the new section by hand if needed, bump the version in `Cargo.toml`,
-commit as `chore(release): vX.Y.Z`, then tag `vX.Y.Z` and push the tag. The release workflow
-publishes the tag's `CHANGELOG.md` section as the release notes.
+- **Format**: [Conventional Commits](https://www.conventionalcommits.org/), `type(scope): summary`, with `!` after the type for a breaking change.
+- **Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
+- **Checked**: by the `conventional` check; the changelog and release notes are generated from the commits.
 
-Branches and CI: work goes to `dev`; at a release `dev` is merged into `main` with `--no-ff` and
-the merge is tagged. GitHub Actions run only on release tags (commit-subject check, CI, release)
-and by hand (`workflow_dispatch`), never on branch pushes, so run the checks locally before
-pushing: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (also
-with `--features dreist-gui/window`, and `-p dreist-host --all-features`) and `cargo test --workspace`
-(and `-p dreist-host --all-features`).
+## Branches and pull requests
 
-Apps: Dreist and Einst include this repository as a submodule at `commons`. A change reaches
-them when they bump the submodule (`build: dreist-commons ...`); behaviour that one app needs
-belongs behind a hook, with the defaults unchanged.
+- **Work**: on `feature/<name>`, one worktree per branch in `.claude/worktrees/<name>`.
+- **Into `dev`**: a pull request, squash-merged; its title is the Conventional Commit.
+- **Drafts**: longer work opens as a draft pull request, marked ready once its testing is done; short work goes from a local branch straight to a ready pull request.
+- **Issues**: for features, bug reports and work spanning several pull requests or repos; the pull request links it with `Closes #N`.
+- **No issue**: small fixes, docs, chores and dependency bumps go straight to a pull request with a conventional title.
+- **Board**: features and larger work for all three repos are tracked on [Dreist & Einst](https://github.com/users/koeves/projects/1).
+- **Rules**: `dev` and `main` take changes only through pull requests with green checks.
+- **Dependabot**: targets `dev`; patch, minor and Actions updates merge on their own when green.
 
-Dependencies: third-party versions live here only (`[workspace.dependencies]`, Dependabot's cargo
-updates run here). The apps take them through the commons crates: `dreist-host` owns the
-standalone's and editor's system-side crates (cpal, midir, rfd, serde / serde_json, libc,
-clap-sys) behind features and re-exports those the apps use directly. A bump reaches an app with
-the submodule bump and `cargo update -p <crate>` there.
+## Checks
+
+Run them before pushing:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --features dreist-gui/window -- -D warnings
+cargo clippy -p dreist-host --all-features --all-targets -- -D warnings
+cargo test --workspace
+cargo test -p dreist-gui --features window
+cargo test -p dreist-host --all-features
+```
+
+- **CI**: `macos` and `linux` (both required).
+- **CodeQL**: runs on every pull request into `dev` and `main`.
+
+## Releases
+
+- **Release**: a pull request from `dev` into `main`, merged with a merge commit.
+- **Automatic**: the merge computes the version from the commits, tags `vX.Y.Z` and publishes the GitHub release.
+- **Follow-up**: a changelog and version pull request into `dev` merges itself once green.
+- **Version**: fix → patch, feat → minor, breaking → major (minor while on 0.x); `Release-As: X.Y.Z` in the release pull request overrides it.
+- **Releasable**: feat, fix, perf, refactor, revert, breaking and dependency commits; without one nothing is released.
+- **Order**: release dreist-commons before the apps that need the change.
+
+## Apps
+
+- **Submodule**: Dreist and Einst include this repository at `commons`.
+- **Reaching an app**: a change arrives when the app bumps the submodule (`build: dreist-commons ...`).
+- **One app's behaviour**: belongs behind a hook, with the defaults unchanged.
+
+## Dependencies
+
+- **Versions**: all third-party versions live here (`[workspace.dependencies]`); Dependabot's cargo updates run here.
+- **System crates**: `dreist-host` owns cpal, midir, rfd, serde / serde_json, libc and clap-sys behind features, and re-exports what the apps use.
+- **Reaching an app**: with the submodule bump and `cargo update -p <crate>` there.

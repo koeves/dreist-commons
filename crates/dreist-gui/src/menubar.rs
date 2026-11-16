@@ -132,5 +132,7 @@ pub fn install(app_name: &str, app_items: &[Item], menus: &[(String, Vec<Item>)]
     }
 }
 
+/// Windows and Linux have no app-wide menu bar: the app's own menus in the
+/// window hold the same items.
 #[cfg(not(all(feature = "window", target_os = "macos")))]
 pub fn install(_app_name: &str, _app_items: &[Item], _menus: &[(String, Vec<Item>)]) {}

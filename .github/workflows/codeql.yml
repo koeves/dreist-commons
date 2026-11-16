@@ -1,10 +1,13 @@
 name: CodeQL
 
-# Code scanning, only on release tags and by hand (Actions run on releases,
-# never on branch pushes or pull requests).
+# Code scanning on pull requests into dev and main (the branch rules require its
+# result), on release tags and by hand (release-on-main.yml dispatches it on the
+# follow-up changelog pull request's branch); never on plain branch pushes.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +17,10 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
+    # Full analysis every time: the cached incremental (overlay) database re-reads changed source
+    # files but not changed headers, so header fixes in vendor/ were never seen.
+    env:
+      CODEQL_ACTION_OVERLAY_ANALYSIS: false
     permissions:
       actions: read
       contents: read

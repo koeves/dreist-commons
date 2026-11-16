@@ -93,6 +93,10 @@ pub fn begin(ns_view: *mut std::ffi::c_void, files: &[std::path::PathBuf]) -> bo
     }
 }
 
+/// Elsewhere the drag stays inside the window: Windows and X11 have no
+/// shared counterpart of the macOS dragging session here (an OLE drag
+/// source or the XDND protocol would each need their own source), so the
+/// internal drag carries on and drops nothing outside.
 #[cfg(not(all(feature = "window", target_os = "macos")))]
 pub fn begin(_ns_view: *mut std::ffi::c_void, _files: &[std::path::PathBuf]) -> bool {
     false

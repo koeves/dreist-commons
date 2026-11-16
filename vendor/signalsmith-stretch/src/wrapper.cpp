@@ -39,8 +39,12 @@ public:
 
 struct signalsmith_stretch {
     // Dreist: a fixed seed instead of std::random_device, so renders are
-    // reproducible (phases are randomised above 2x stretch).
-    signalsmith::stretch::SignalsmithStretch<float> instance{0x5eed};
+    // reproducible (phases are randomised above 2x stretch), and a named
+    // engine instead of std::default_random_engine, which each standard
+    // library defines differently (libc++: minstd_rand, libstdc++:
+    // minstd_rand0, MSVC: mt19937): the same sequence on every platform,
+    // libc++'s, which the macOS renders were made with.
+    signalsmith::stretch::SignalsmithStretch<float, std::minstd_rand> instance{0x5eed};
     int channel_count;
 };
 

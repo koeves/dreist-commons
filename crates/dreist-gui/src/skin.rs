@@ -28,6 +28,8 @@ pub struct Skin {
     pub ours: PathBuf,
     pub theme: String,
     pub styles: StyleSheet,
+    /// Controls' drawing kept between frames (see [`crate::render::DrawCache`]).
+    pub cache: crate::render::DrawCache,
 }
 
 #[derive(Debug)]
@@ -84,7 +86,7 @@ impl Skin {
     pub fn load(dir: &Path, theme: &str) -> Result<Skin, SkinError> {
         let ours = Self::ours_dir();
         let theme = if Self::themes().iter().any(|t| t == theme) { theme } else { default_theme() };
-        let mut skin = Skin { dir: dir.to_path_buf(), ours, theme: theme.to_string(), styles: StyleSheet::new() };
+        let mut skin = Skin { dir: dir.to_path_buf(), ours, theme: theme.to_string(), styles: StyleSheet::new(), cache: Default::default() };
         let info = read_node(&skin.resolve("project.gltinfo"))?;
         let defaults: Vec<String> =
             info.children.iter().filter(|n| n.name.as_deref() == Some("defaultStyles")).flat_map(|v| v.children.iter().filter_map(|s| s.attr("string").map(str::to_string))).collect();

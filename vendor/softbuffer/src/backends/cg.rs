@@ -204,6 +204,11 @@ pub struct CGImpl<D, W> {
     width: usize,
     /// The height of the underlying buffer.
     height: usize,
+    /// The pixels, kept between frames so a caller can redraw only what
+    /// changed (`age` 1) instead of filling a new buffer every frame.
+    pixels: util::PixelBuffer,
+    /// `pixels` holds the last presented frame.
+    presented: bool,
     window_handle: W,
     _display: PhantomData<D>,
 }
@@ -338,6 +343,8 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> SurfaceInterface<D, W> for CGImpl<
             color_space,
             width,
             height,
+            pixels: util::PixelBuffer(Vec::new()),
+            presented: false,
             _display: PhantomData,
             window_handle: window_src,
         })
@@ -349,23 +356,28 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> SurfaceInterface<D, W> for CGImpl<
     }
 
     fn resize(&mut self, width: NonZeroU32, height: NonZeroU32) -> Result<(), SoftBufferError> {
-        self.width = width.get() as usize;
-        self.height = height.get() as usize;
+        let (w, h) = (width.get() as usize, height.get() as usize);
+        if (w, h) != (self.width, self.height) {
+            self.presented = false;
+        }
+        self.width = w;
+        self.height = h;
         Ok(())
     }
 
     fn buffer_mut(&mut self) -> Result<BufferImpl<'_, D, W>, SoftBufferError> {
-        Ok(BufferImpl {
-            buffer: util::PixelBuffer(vec![0; self.width * self.height]),
-            imp: self,
-        })
+        let len = self.width * self.height;
+        if self.pixels.len() != len {
+            self.pixels.0 = vec![0; len];
+            self.presented = false;
+        }
+        Ok(BufferImpl { imp: self })
     }
 }
 
 #[derive(Debug)]
 pub struct BufferImpl<'a, D, W> {
     imp: &'a mut CGImpl<D, W>,
-    buffer: util::PixelBuffer,
 }
 
 impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_, D, W> {
@@ -379,16 +391,16 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_,
 
     #[inline]
     fn pixels(&self) -> &[u32] {
-        &self.buffer
+        &self.imp.pixels
     }
 
     #[inline]
     fn pixels_mut(&mut self) -> &mut [u32] {
-        &mut self.buffer
+        &mut self.imp.pixels
     }
 
     fn age(&self) -> u8 {
-        0
+        u8::from(self.imp.presented)
     }
 
     fn present(self) -> Result<(), SoftBufferError> {
@@ -403,9 +415,11 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_,
             drop(unsafe { Box::from_raw(slice) })
         }
 
+        // The layer keeps the image's pixels: it gets a copy, and the kept
+        // buffer stays for the next frame.
         let data_provider = {
-            let len = self.buffer.len() * size_of::<u32>();
-            let buffer: *mut [u32] = Box::into_raw(self.buffer.0.into_boxed_slice());
+            let len = self.imp.pixels.len() * size_of::<u32>();
+            let buffer: *mut [u32] = Box::into_raw(Box::<[u32]>::from(&self.imp.pixels.0[..]));
             // Convert slice pointer to thin pointer.
             let data_ptr = buffer.cast::<c_void>();
 
@@ -454,6 +468,7 @@ impl<D: HasDisplayHandle, W: HasWindowHandle> BufferInterface for BufferImpl<'_,
         unsafe { self.imp.layer.setContents(Some(image.as_ref())) };
 
         CATransaction::commit();
+        self.imp.presented = true;
         Ok(())
     }
 

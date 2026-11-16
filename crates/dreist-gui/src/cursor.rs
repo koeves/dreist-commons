@@ -172,6 +172,39 @@ pub fn apply(c: &Cursor, cursors_dir: &Path) {
     }
 }
 
+/// The X11 cursor standing for `c` (the cursor theme's; the drawn image
+/// cursors map to the nearest theme cursor).
+#[cfg(all(feature = "window", target_os = "linux"))]
+pub fn x11(c: &Cursor) -> baseview::MouseCursor {
+    use baseview::MouseCursor as M;
+    match c {
+        Cursor::Arrow => M::Default,
+        Cursor::Busy => M::Working,
+        Cursor::Hand => M::Hand,
+        Cursor::UpDown => M::NsResize,
+        Cursor::LeftRight => M::EwResize,
+        Cursor::IBeam => M::Text,
+        Cursor::Resize | Cursor::CrossHairs => M::Crosshair,
+        Cursor::Plus => M::Cell,
+        Cursor::NotAllowed => M::NotAllowed,
+        Cursor::ResizeNwse => M::NwseResize,
+        Cursor::Image(name) => match name.as_str() {
+            "ResizeLeft" | "ResizeRight" | "ResizeRightThin" | "ResizeBiDir" | "DragEnvelopePointLR" => M::EwResize,
+            "DragEnvelopePointUD" | "TransmodPrimary" | "TransmodSecondary" | "TransmodBoth" => M::NsResize,
+            "DragEnvelopePointMulti" | "Multi" => M::Move,
+            "NotAllowed" => M::NotAllowed,
+            "Pen" | "Selection" => M::Crosshair,
+            "Zoom" => M::ZoomIn,
+            "Preview" => M::Hand,
+            n if n.ends_with("Copy") => M::Copy,
+            n if n.starts_with("Drag") => M::HandGrabbing,
+            _ => M::Default,
+        },
+    }
+}
+
+/// Elsewhere the window sets the cursor itself (Linux: [`x11`] through the
+/// window; Windows keeps the system arrow).
 #[cfg(not(all(feature = "window", target_os = "macos")))]
 pub fn apply(_c: &Cursor, _cursors_dir: &Path) {}
 

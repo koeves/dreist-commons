@@ -56,12 +56,20 @@ impl Node for Maul {
         &mut self.ports
     }
 
-    fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
-        if self.sr != ctx.sample_rate {
-            self.sr = ctx.sample_rate;
+    /// Stream setup ahead of the audio thread (the effect is created with
+    /// the rate; the first block would otherwise do it).
+    fn prepare_rate(&mut self, sr: f32) {
+        if self.sr != sr {
+            self.sr = sr;
             for (b, m) in self.bands.iter_mut().zip([0, 1]) {
                 b.prepare(self.sr, m);
             }
+        }
+    }
+
+    fn process(&mut self, ctx: &Ctx, inp: [&[f32]; 2], out: [&mut [f32]; 2]) {
+        if self.sr != ctx.sample_rate {
+            self.prepare_rate(ctx.sample_rate);
         }
         let p = |i: usize| self.ports[i].value;
         let t = p(0) / 32.0;

@@ -3,7 +3,7 @@ name = "dreist-host"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-description = "The apps' side of the system: audio devices, MIDI ports, file dialogs, session relaunch, local time; owns those third-party dependencies"
+description = "The apps' side of the system: audio devices, MIDI ports, file dialogs, session relaunch, local time, file manager and clipboard; owns those third-party dependencies"
 
 [dependencies]
 libc.workspace = true

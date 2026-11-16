@@ -1,5 +1,5 @@
-# git-cliff: CHANGELOG.md and release notes from Conventional Commits.
-#   git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md
+# git-cliff: the next version, CHANGELOG.md and the release notes from
+# Conventional Commits (.github/release/, run by release-on-main.yml).
 
 [changelog]
 header = "# Changelog\n"
@@ -27,9 +27,16 @@ commit_parsers = [
   { message = "^test", group = "<!-- 5 -->Tests" },
   { message = "^(build|ci)", group = "<!-- 6 -->Build and CI" },
   { message = "^chore\\(release\\)", skip = true },
+  { message = "^docs\\(release\\)", skip = true },
   { message = "^docs: coordination log", skip = true },
   { message = "^(chore|style|revert)", group = "<!-- 7 -->Other" },
 ]
 filter_commits = false
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
+
+# The next version (`git cliff --bumped-version`): fix and the rest -> patch,
+# feat -> minor, breaking -> major; while on 0.x, breaking -> minor.
+[bump]
+features_always_bump_minor = true
+breaking_always_bump_major = false

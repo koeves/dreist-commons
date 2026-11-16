@@ -157,7 +157,10 @@ impl AudioIOLayout {
 
     /// The name for the main output port. Either generated or taken from the `names` field.
     pub fn main_output_name(&self) -> String {
-        self.names.main_input.unwrap_or("Output").to_owned()
+        // Dreist: the output's own name (upstream returned the input's,
+        // which named the VST3 output bus after the input and made the
+        // JACK backend register the input's port names twice).
+        self.names.main_output.unwrap_or("Output").to_owned()
     }
 
     /// The name for the auxiliary input port with the given index. Either generated or taken from

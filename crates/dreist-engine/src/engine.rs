@@ -804,6 +804,11 @@ impl Dreist {
     }
 
     /// Song position in quarter notes (internal loop applied).
+    /// Voices sounding (not idle), and how many of them timestretch.
+    pub fn voice_counts(&self) -> (usize, usize) {
+        self.voices.iter().filter(|v| v.state != VoiceState::Idle).fold((0, 0), |(n, s), v| (n + 1, s + usize::from(v.voice.stretching())))
+    }
+
     pub fn song_position(&self) -> f64 {
         self.song.effective_ppq(self.ppq)
     }
@@ -880,6 +885,8 @@ impl Dreist {
 
     /// [[re:9f37ad]] reusing already decoded samples.
     pub fn from_project_cached(project: &Project, samples: &Path, sr: f32, options: RenderOptions, cache: &mut SampleCache) -> Dreist {
+        // Lookup tables before the audio thread needs them.
+        dreist_dsp::warm_tables();
         dreist_dsp::fx::nodes::reset_shared_rng();
         // Shared lookup tables: built here, not on the audio thread.
         dreist_dsp::analog::warm();
@@ -1452,6 +1459,8 @@ impl Dreist {
     /// As `process_multi`, with the host's audio input for the sampler
     /// ([re:37bdbe]; its thru signal goes to the main output).
     pub fn process_with_input(&mut self, left: &mut [f32], right: &mut [f32], subs: &mut [[&mut [f32]; 2]], input: Option<[&[f32]; 2]>) {
+        // Tails decaying into denormals cost many times more on x86.
+        let _flush = dreist_dsp::denormal::FlushDenormals::new();
         let n = left.len();
         left.fill(0.0);
         right.fill(0.0);

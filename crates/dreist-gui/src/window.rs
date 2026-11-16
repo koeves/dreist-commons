@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use baseview::{Event, EventStatus, MouseEvent, Size, Window, WindowEvent, WindowHandler, WindowOpenOptions, WindowScalePolicy};
 use raw_window_handle as rwh;
 use raw_window_handle_05 as rwh05;
-use rwh05::HasRawWindowHandle;
+use rwh05::{HasRawDisplayHandle, HasRawWindowHandle};
 
 use crate::app::{App, MouseButton, UiEvent};
 
@@ -79,8 +79,12 @@ fn handles(window: &Window) -> Option<Handles> {
             Some(Handles { window: rwh::RawWindowHandle::Win32(rwh::Win32WindowHandle::new(hwnd)), display: rwh::RawDisplayHandle::Windows(rwh::WindowsDisplayHandle::new()) })
         }
         rwh05::RawWindowHandle::Xlib(h) => {
-            let mut d = rwh::XlibDisplayHandle::new(None, 0);
-            d.display = None;
+            // The window's own X connection (softbuffer opens one of its
+            // own without it).
+            let d = match window.raw_display_handle() {
+                rwh05::RawDisplayHandle::Xlib(d) => rwh::XlibDisplayHandle::new(NonNull::new(d.display), d.screen),
+                _ => rwh::XlibDisplayHandle::new(None, 0),
+            };
             Some(Handles { window: rwh::RawWindowHandle::Xlib(rwh::XlibWindowHandle::new(h.window)), display: rwh::RawDisplayHandle::Xlib(d) })
         }
         _ => None,
@@ -94,9 +98,131 @@ struct Handler<T: WindowApp> {
     physical: (u32, u32),
     /// The cursor last applied.
     cursor: crate::cursor::Cursor,
+    /// Frame counts and render time over each second: [`App::ui_load`],
+    /// printed with `DREIST_GUI_STATS=1`.
+    stats: FrameStats,
+}
+
+/// What the window's frames did over the last second (a diagnostic).
+struct FrameStats {
+    since: std::time::Instant,
+    frames: u32,
+    idle: u32,
+    full: u32,
+    partial: u32,
+    resizes: u32,
+    busy: std::time::Duration,
+    print: bool,
+}
+
+impl FrameStats {
+    fn new(print: bool) -> FrameStats {
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
+    }
+
+    /// Each second: the share of a core the frames took (and the counts
+    /// printed when asked for).
+    fn report(&mut self) -> Option<f32> {
+        let t = self.since.elapsed();
+        if t.as_secs_f64() < 1.0 {
+            return None;
+        }
+        let share = (self.busy.as_secs_f64() / t.as_secs_f64()) as f32;
+        if self.print {
+            eprintln!("gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core", self.frames, self.idle, self.full, self.partial, self.resizes, share * 100.0);
+        }
+        *self = FrameStats::new(self.print);
+        Some(share)
+    }
 }
 
 impl<T: WindowApp> Handler<T> {
+    fn frame(&mut self, window: &mut Window) {
+        self.app.frame();
+        // Live UI scale changes ([re:2fbdeb] + host resize).
+        if std::mem::take(&mut self.app.app().resize_request) {
+            let (w, h) = self.app.app().size();
+            let ui = self.app.app().ui_scale.max(0.25) as f64;
+            window.resize(Size::new(w as f64 * ui, h as f64 * ui));
+            self.app.app().dirty = true;
+            self.stats.resizes += 1;
+        }
+        if !self.app.app().needs_redraw() {
+            self.stats.idle += 1;
+            return;
+        }
+        let scale = self.scale as f32;
+        if self.surface.is_none() {
+            return;
+        }
+        let ui = self.app.app().ui_scale.max(0.25);
+        self.app.render(scale * ui);
+        // The device pixels the frame changed, when not all of them. A
+        // rectangle off the device pixel grid (a fractional scale) makes
+        // the whole frame go out instead; empty ones are left out.
+        let damage: Option<Vec<(u32, u32, u32, u32)>> = {
+            let app = self.app.app();
+            let root = app.root.rect;
+            app.frame_damage
+                .as_ref()
+                .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+        };
+        match damage {
+            Some(_) => self.stats.partial += 1,
+            None => self.stats.full += 1,
+        }
+        let Some(pm) = self.app.app().last_frame() else { return };
+        let Some(surface) = self.surface.as_mut() else { return };
+        // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
+        if let Ok(p) = std::env::var("DREIST_GUI_DUMP") {
+            let _ = pm.save_png(p);
+        }
+        let (w, h) = (pm.width(), pm.height());
+        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
+        if surface.resize(nw, nh).is_err() {
+            return;
+        }
+        let Ok(mut buf) = surface.buffer_mut() else { return };
+        // Opaque backdrop, so premultiplied == straight: RGBA bytes to ARGB
+        // with alpha 0xff (a form the compiler vectorizes). The alpha byte
+        // matters on X11, where the window has a 32-bit visual and a
+        // compositor would show alpha 0 as transparent.
+        let convert = |d: &mut [u32], s: &[u8]| {
+            for (d, s) in d.iter_mut().zip(s.as_chunks::<4>().0) {
+                let v = u32::from_le_bytes(*s);
+                *d = 0xff00_0000 | (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
+            }
+        };
+        // A buffer that still holds the last frame only needs the changed
+        // pixels converted and sent (a moving playhead, a meter), not the
+        // whole window every frame.
+        let partial = damage.filter(|_| buf.age() == 1 && self.physical == (w, h));
+        match partial {
+            Some(rects) => {
+                let stride = w as usize;
+                let mut sent = Vec::with_capacity(rects.len());
+                for &(x, y, rw, rh) in &rects {
+                    let (x, rw) = (x as usize, rw as usize);
+                    for row in y as usize..(y + rh) as usize {
+                        let o = row * stride + x;
+                        convert(&mut buf[o..o + rw], &pm.data()[o * 4..(o + rw) * 4]);
+                    }
+                    if let (Some(rw), Some(rh)) = (NonZeroU32::new(rw as u32), NonZeroU32::new(rh)) {
+                        sent.push(softbuffer::Rect { x: x as u32, y, width: rw, height: rh });
+                    }
+                }
+                if !sent.is_empty() {
+                    let _ = buf.present_with_damage(&sent);
+                }
+            }
+            None => {
+                convert(&mut buf, pm.data());
+                let _ = buf.present();
+            }
+        }
+        self.physical = (w, h);
+    }
+
     fn dispatch(&mut self, events: Vec<UiEvent>) {
         for e in &events {
             self.app.event(e);
@@ -112,45 +238,16 @@ impl<T: WindowApp> Handler<T> {
 
 impl<T: WindowApp> WindowHandler for Handler<T> {
     fn on_frame(&mut self, window: &mut Window) {
-        self.app.frame();
-        // Live UI scale changes ([re:2fbdeb] + host resize).
-        if std::mem::take(&mut self.app.app().resize_request) {
-            let (w, h) = self.app.app().size();
-            let ui = self.app.app().ui_scale.max(0.25) as f64;
-            window.resize(Size::new(w as f64 * ui, h as f64 * ui));
-            self.app.app().dirty = true;
+        let started = std::time::Instant::now();
+        self.frame(window);
+        self.stats.frames += 1;
+        self.stats.busy += started.elapsed();
+        if let Some(share) = self.stats.report() {
+            self.app.app().ui_load = Some(share);
         }
-        if !self.app.app().needs_redraw() {
-            return;
-        }
-        let scale = self.scale as f32;
-        if self.surface.is_none() {
-            return;
-        }
-        let ui = self.app.app().ui_scale.max(0.25);
-        let pm = self.app.render(scale * ui);
-        let Some(surface) = self.surface.as_mut() else { return };
-        // Debug aid: DREIST_GUI_DUMP=path.png saves each presented frame.
-        if let Ok(p) = std::env::var("DREIST_GUI_DUMP") {
-            let _ = pm.save_png(p);
-        }
-        let (w, h) = (pm.width(), pm.height());
-        let (Some(nw), Some(nh)) = (NonZeroU32::new(w), NonZeroU32::new(h)) else { return };
-        if surface.resize(nw, nh).is_err() {
-            return;
-        }
-        let Ok(mut buf) = surface.buffer_mut() else { return };
-        for (d, s) in buf.iter_mut().zip(pm.data().as_chunks::<4>().0) {
-            // Opaque backdrop, so premultiplied == straight: RGBA bytes to
-            // 0RGB (a form the compiler vectorizes).
-            let v = u32::from_le_bytes(*s);
-            *d = (v & 0xff) << 16 | (v & 0xff00) | ((v >> 16) & 0xff);
-        }
-        let _ = buf.present();
-        self.physical = (w, h);
     }
 
-    fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
+    fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
         let set_mods = |app: &mut App, m: keyboard_types::Modifiers| {
             app.mods = crate::app::Mods {
                 shift: m.contains(keyboard_types::Modifiers::SHIFT),
@@ -174,7 +271,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 self.tooltip();
                 // A drag left the window with files to give: the OS drag.
                 if let Some(files) = self.app.app().drag_out.take() {
-                    let view = match _window.raw_window_handle() {
+                    let view = match window.raw_window_handle() {
                         rwh05::RawWindowHandle::AppKit(h) => h.ns_view,
                         _ => std::ptr::null_mut(),
                     };
@@ -264,7 +361,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 let ui = self.app.app().ui_scale.max(0.25);
                 let ev = self.app.app().files(position.x as f32 / ui, position.y as f32 / ui, files, false);
                 self.dispatch(ev);
-                self.apply_cursor();
+                self.apply_cursor(window);
                 return EventStatus::AcceptDrop(baseview::DropEffect::Copy);
             }
             Event::Mouse(MouseEvent::DragDropped { position, data, .. }) => {
@@ -273,7 +370,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 let ev = self.app.app().files(position.x as f32 / ui, position.y as f32 / ui, files, true);
                 self.dispatch(ev);
                 self.app.app().cursor = crate::cursor::Cursor::Arrow;
-                self.apply_cursor();
+                self.apply_cursor(window);
                 return EventStatus::AcceptDrop(baseview::DropEffect::Copy);
             }
             Event::Window(WindowEvent::Resized(info)) => {
@@ -286,25 +383,29 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
             }
             _ => return EventStatus::Ignored,
         }
-        self.apply_cursor();
+        self.apply_cursor(window);
         EventStatus::Captured
     }
 }
 
 impl<T: WindowApp> Handler<T> {
-    fn apply_cursor(&mut self) {
+    fn apply_cursor(&mut self, window: &mut Window) {
         let want = self.app.app().cursor.clone();
         if want != self.cursor {
             crate::cursor::apply(&want, &dreist_formats::paths::ui_dir().join("Cursors"));
+            #[cfg(target_os = "linux")]
+            window.set_mouse_cursor(crate::cursor::x11(&want));
+            #[cfg(not(target_os = "linux"))]
+            let _ = window;
             self.cursor = want;
         }
     }
 }
 
-fn options<T: WindowApp>(app: &mut T, title: &str) -> WindowOpenOptions {
+fn options<T: WindowApp>(app: &mut T, title: &str, scale: WindowScalePolicy) -> WindowOpenOptions {
     let (w, h) = app.app().size();
     let ui = app.app().ui_scale.max(0.25) as f64;
-    WindowOpenOptions { title: title.into(), size: Size::new(w as f64 * ui, h as f64 * ui), scale: WindowScalePolicy::SystemScaleFactor, gl_config: None }
+    WindowOpenOptions { title: title.into(), size: Size::new(w as f64 * ui, h as f64 * ui), scale, gl_config: None }
 }
 
 fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send + 'static {
@@ -321,18 +422,31 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow }
+        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()) }
     }
 }
 
-/// Open the editor inside a host-provided parent view.
-pub fn open_parented<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut app: T) -> baseview::WindowHandle {
-    let opts = options(&mut app, dreist_formats::profile::get().product);
+/// Open the editor inside a host-provided parent view, at the host's scale
+/// factor 1 (see [`open_parented_scaled`]).
+pub fn open_parented<P: HasRawWindowHandle, T: WindowApp>(parent: &P, app: T) -> baseview::WindowHandle {
+    open_parented_scaled(parent, app, 1.0)
+}
+
+/// Open the editor inside a host-provided parent view. `scale` is the
+/// host's scale factor (nih-plug's `Editor::set_scale_factor`; 1 when the
+/// host gave none). On Windows and Linux the host sizes the parent view
+/// from the editor's size times that factor, so the window takes the same
+/// factor rather than the system's: at another system scale (an X11
+/// desktop at 192 dpi, say) the editor would otherwise be drawn larger or
+/// smaller than the view that holds it. macOS scales by itself.
+pub fn open_parented_scaled<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut app: T, scale: f64) -> baseview::WindowHandle {
+    let policy = if cfg!(target_os = "macos") { WindowScalePolicy::SystemScaleFactor } else { WindowScalePolicy::ScaleFactor(scale.max(0.25)) };
+    let opts = options(&mut app, dreist_formats::profile::get().product, policy);
     Window::open_parented(parent, opts, build(app))
 }
 
 /// Open a top-level window and run until it is closed.
 pub fn open_blocking<T: WindowApp>(mut app: T, title: &str) {
-    let opts = options(&mut app, title);
+    let opts = options(&mut app, title, WindowScalePolicy::SystemScaleFactor);
     Window::open_blocking(opts, build(app));
 }

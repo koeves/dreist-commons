@@ -129,7 +129,7 @@ pub struct Anchored {
 /// access forgets the cached [`Attrs::hash`].
 #[derive(Clone, Debug, Default)]
 pub struct Attrs {
-    map: HashMap<String, String>,
+    map: FxMap<String, String>,
     hash: std::cell::Cell<Option<u64>>,
 }
 
@@ -151,7 +151,7 @@ impl Attrs {
 }
 
 impl std::ops::Deref for Attrs {
-    type Target = HashMap<String, String>;
+    type Target = FxMap<String, String>;
     fn deref(&self) -> &Self::Target {
         &self.map
     }
@@ -172,7 +172,11 @@ impl FromIterator<(String, String)> for Attrs {
 
 /// A cheap word-at-a-time hasher (FxHash mixing) for [`Ctrl::draw_hash`]:
 /// short fields, run over the whole tree on every sync.
-pub(crate) struct FxHasher(u64);
+pub struct FxHasher(u64);
+
+/// A map hashed with [`FxHasher`]: skin and style names, looked up many
+/// times per frame (no untrusted keys).
+pub type FxMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<FxHasher>>;
 
 impl Default for FxHasher {
     fn default() -> FxHasher {

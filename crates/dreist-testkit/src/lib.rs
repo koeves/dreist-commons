@@ -3,6 +3,8 @@
 //! - [`Golden`]: named fingerprints of rendered audio stored under the
 //!   calling crate's `tests/golden/<set>.txt`; a mismatch fails with the
 //!   first differing sample. `UPDATE_GOLDEN=1` rewrites the file.
+//!   [`Golden::open_macos`] sets hold renders whose bits depend on the
+//!   platform's maths library: they fail on macOS only.
 //! - [`fnv`]: a 64-bit FNV-1a hash over the exact `f32` bits.
 //! - [`Stats`]: finiteness, peak, RMS and subnormal counts of a signal.
 //! - [`CountingAlloc`]: a global allocator that counts allocations made
@@ -66,6 +68,7 @@ pub struct Golden {
     seen: BTreeMap<String, u64>,
     update: bool,
     failures: Vec<String>,
+    macos_only: bool,
 }
 
 impl Golden {
@@ -81,7 +84,16 @@ impl Golden {
                 Some((k.to_string(), u64::from_str_radix(v.trim(), 16).ok()?))
             })
             .collect();
-        Golden { path, stored, seen: BTreeMap::new(), update: std::env::var_os("UPDATE_GOLDEN").is_some(), failures: Vec::new() }
+        Golden { path, stored, seen: BTreeMap::new(), update: std::env::var_os("UPDATE_GOLDEN").is_some(), failures: Vec::new(), macos_only: false }
+    }
+
+    /// The set `name` of renders recorded on macOS whose bits depend on the
+    /// platform's maths library (`sin`, `exp`, `pow` ... round differently
+    /// in glibc and the MSVC runtime): mismatches fail on macOS only and are
+    /// printed elsewhere, where the renders still run (and their sanity
+    /// checks still fail).
+    pub fn open_macos(name: &str) -> Golden {
+        Golden { macos_only: true, ..Golden::open(name) }
     }
 
     /// Record `key`'s fingerprint; `preview` (a channel) is reported on a
@@ -107,6 +119,12 @@ impl Golden {
             let _ = std::fs::create_dir_all(self.path.parent().unwrap());
             let text: String = self.seen.iter().map(|(k, v)| format!("{k} {v:016x}\n")).collect();
             std::fs::write(&self.path, text).expect("write golden file");
+            return;
+        }
+        if self.macos_only && !cfg!(target_os = "macos") {
+            if !self.failures.is_empty() {
+                eprintln!("{} fingerprint mismatches in {} (compared on macOS only):\n{}", self.failures.len(), self.path.display(), self.failures.join("\n"));
+            }
             return;
         }
         assert!(self.failures.is_empty(), "{} fingerprint mismatches in {}:\n{}", self.failures.len(), self.path.display(), self.failures.join("\n"));

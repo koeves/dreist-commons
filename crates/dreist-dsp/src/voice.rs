@@ -357,6 +357,11 @@ pub struct Voice {
 }
 
 impl Voice {
+    /// The current note plays through a timestretcher.
+    pub fn stretching(&self) -> bool {
+        self.stretch.is_some()
+    }
+
     pub fn new(sample_rate: f32) -> Voice {
         Voice {
             sr: sample_rate,

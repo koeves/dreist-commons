@@ -1,12 +1,21 @@
 name: CI
 
-# Runs only as part of the tag-triggered release (release.yml) and by hand.
+# Runs on pull requests into dev and main, inside the release (release.yml)
+# and by hand (release-on-main.yml dispatches it on the follow-up changelog
+# pull request's branch); never on plain branch pushes.
 on:
+  pull_request:
+    branches: [dev, main]
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
+
+# A newer push to the same pull request cancels the older run.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,7 +26,9 @@ env:
 # CI runs this suite against its assets.
 jobs:
   linux:
-    # Engine, DSP, editor and GUI tests run headless on Linux.
+    # Engine, DSP, editor and GUI tests run headless on Linux; the X11
+    # window code and the host crate (ALSA audio and MIDI, portal file
+    # dialogs) build and lint here too.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -25,10 +36,26 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: System packages
+        run: |
+          # The runners' default Azure mirror sometimes stops resolving; use the main archive.
+          sudo sed -i -e 's|mirror+file:/etc/apt/apt-mirrors.txt|http://archive.ubuntu.com/ubuntu/|g' \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          grep -h '^URIs' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Clippy (window)
+        run: cargo clippy --locked --workspace --all-targets --features dreist-gui/window -- -D warnings
+      - name: Clippy (host)
+        run: cargo clippy --locked -p dreist-host --all-targets --all-features -- -D warnings
+      - name: Test (window)
+        run: cargo test --locked -p dreist-gui --features window
+      - name: Test (host)
+        run: cargo test --locked -p dreist-host --all-features
       - name: Test
         # The effect fingerprints hash float output, which differs between
         # platforms: they are checked on macOS below, here non-fatal.
@@ -51,7 +78,6 @@ jobs:
       - name: Clippy (window)
         run: cargo clippy --locked --workspace --all-targets --features dreist-gui/window -- -D warnings
       - name: Clippy (host)
-        # cpal and rfd need the ALSA and GTK headers on Linux: macOS only.
         run: cargo clippy --locked -p dreist-host --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace
@@ -59,3 +85,25 @@ jobs:
         run: cargo test --locked -p dreist-gui --features window
       - name: Test (host)
         run: cargo test --locked -p dreist-host --all-features
+
+  packaging:
+    # The apps' install scripts (packaging/), with a fake app on every system.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shellcheck
+        if: runner.os != 'Windows'
+        run: |
+          command -v shellcheck >/dev/null || brew install shellcheck
+          shellcheck packaging/install.sh packaging/test-install.sh
+      - name: Test (install.sh)
+        if: runner.os != 'Windows'
+        run: sh packaging/test-install.sh
+      - name: Test (install.ps1)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/test-install.ps1

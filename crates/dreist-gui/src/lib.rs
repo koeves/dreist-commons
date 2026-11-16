@@ -14,6 +14,7 @@ pub mod meter;
 #[cfg(all(feature = "window", target_os = "macos"))]
 mod objc_class;
 pub mod paint;
+pub mod perf;
 pub mod render;
 pub mod scroll;
 pub mod skin;
@@ -89,6 +90,7 @@ pub fn render_region(
             p.clip = (0, 0, px1 - px0, py1 - py0);
             let mut rd = render::Renderer::new(&skin.styles);
             rd.custom = custom;
+            rd.cache = Some(&skin.cache);
             rd.draw(&mut p, root);
             // The open menu on top, in the same shifted space.
             p.tx = -px0 as f32;
@@ -122,6 +124,7 @@ pub fn render_region(
     p.clip = (x0, y0, x1 - x0, y1 - y0);
     let mut rd = render::Renderer::new(&skin.styles);
     rd.custom = custom;
+    rd.cache = Some(&skin.cache);
     rd.draw(&mut p, root);
     p.tx = 0.0;
     p.ty = 0.0;
@@ -192,6 +195,7 @@ pub fn render_full_into(
     p.ty = -root.rect.y as f32;
     let mut r = render::Renderer::new(&skin.styles);
     r.custom = custom;
+    r.cache = Some(&skin.cache);
     r.custom_drawn = custom_drawn;
     r.custom_paths = custom_paths;
     r.draw(&mut p, root);

@@ -72,7 +72,7 @@ fn main() {
             let win: *mut Object = msg_send![win, initWithContentRect: frame styleMask: 1usize backing: 2usize defer: false];
             // Off screen and never shown, so never key.
             let view: *mut Object = msg_send![win, contentView];
-            let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: StyleSheet::new() };
+            let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: StyleSheet::new(), cache: Default::default() };
             let root = Ctrl { class: "root".into(), rect: Rect::new(0, 0, 200, 100), visible: true, enabled: true, ..Ctrl::default() };
             let mut handle = open_parented(&Parent(view), Hooked(App::new(skin, root), Box::new(|_, _| {})));
             let subviews: *mut Object = msg_send![view, subviews];

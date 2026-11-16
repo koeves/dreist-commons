@@ -27,12 +27,36 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from).unwrap_or_default()
 }
 
+/// The folder that holds the apps' settings folders: `~/Library/Application
+/// Support` on macOS, `%APPDATA%` on Windows and the XDG config folder
+/// elsewhere (`$XDG_CONFIG_HOME`, else `~/.config`).
+pub fn settings_base() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support"))
+    } else if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        xdg_dir("XDG_CONFIG_HOME", ".config")
+    }
+}
+
+/// An XDG base folder: `var` when it holds an absolute path (the
+/// specification ignores relative ones), else `fallback` in the home folder.
+pub fn xdg_dir(var: &str, fallback: &str) -> Option<PathBuf> {
+    match std::env::var_os(var).map(PathBuf::from) {
+        Some(p) if p.is_absolute() => Some(p),
+        _ => std::env::var_os("HOME").map(|h| PathBuf::from(h).join(fallback)),
+    }
+}
+
 /// `<bundle>/Contents/Resources/<name>` of the bundle holding this image.
 pub fn bundled_dir(name: &str) -> Option<PathBuf> {
     let image = own_image()?;
     // <bundle>/Contents/MacOS/<binary>
     let bundle = image.parent()?.parent().map(|c| c.join("Resources").join(name));
-    // Windows `.exe` and `.clap` are bare files: `Resources/` sits next to them.
+    // Windows and Linux `.exe` / app binaries and `.clap` files are bare
+    // files: `Resources/` sits next to them. (A Linux VST3 is
+    // `<bundle>/Contents/x86_64-linux/<name>.so`, which the first form finds.)
     let beside = image.parent().map(|d| d.join("Resources").join(name));
     bundle.into_iter().chain(beside).find(|p| p.is_dir())
 }
@@ -58,7 +82,13 @@ fn own_image() -> Option<PathBuf> {
     }
     // SAFETY: dli_fname is a NUL-terminated path owned by the loader.
     let s = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) };
-    Some(PathBuf::from(s.to_string_lossy().into_owned()))
+    let p = PathBuf::from(s.to_string_lossy().into_owned());
+    // glibc names the main program as it was started (argv[0]: relative,
+    // bare, or a symlink such as `~/.local/bin/<app>`): the executable's
+    // real path then, so `Resources/` beside it is found.
+    #[cfg(not(target_os = "macos"))]
+    let p = if p.is_absolute() { std::fs::canonicalize(&p).unwrap_or(p) } else { std::env::current_exe().ok().map(|e| std::fs::canonicalize(&e).unwrap_or(e))? };
+    Some(p)
 }
 
 #[cfg(windows)]
@@ -92,6 +122,21 @@ fn own_image() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    /// XDG folders: absolute values only, else the home fallback.
+    #[test]
+    fn xdg_dirs_take_absolute_values_only() {
+        // A variable no other test reads.
+        let var = "DREIST_TEST_XDG_DIR";
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        // SAFETY: only this test touches the variable.
+        unsafe { std::env::set_var(var, "/tmp/xdg") };
+        assert_eq!(super::xdg_dir(var, ".config"), Some(std::path::PathBuf::from("/tmp/xdg")));
+        unsafe { std::env::set_var(var, "relative") };
+        assert_eq!(super::xdg_dir(var, ".config"), home.as_ref().map(|h| h.join(".config")));
+        unsafe { std::env::remove_var(var) };
+        assert_eq!(super::xdg_dir(var, ".config"), home.map(|h| h.join(".config")));
+    }
+
     /// The reference profile finds a Dreist checkout's UI (skipped without one).
     #[test]
     fn ui_dir_holds_the_skins_icons_and_cursors() {
