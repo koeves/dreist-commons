@@ -74,7 +74,9 @@ git show --stat --format='%an <%ae>%n%s' HEAD
 
 if [ "$dry" = 1 ]; then
   git --no-pager diff HEAD~1 -- CHANGELOG.md | head -n 60
-  echo "(dry run: nothing pushed)"
+  git switch -q --detach
+  git -C "$root" branch -q -D "$branch"
+  echo "(dry run: nothing pushed, no branch kept)"
   exit 0
 fi
 git push -q -u origin "$branch"
