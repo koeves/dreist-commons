@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CHANGELOG.md with tag $1's section (git-cliff, cliff.toml) above the
-# previous ones.
+# previous ones; an existing section for the same version is replaced.
 set -euo pipefail
 tag=$1
 dir=$(dirname "$0")
@@ -10,6 +10,11 @@ section=$(mktemp)
   "$dir/notes.sh" "$tag"
   printf '\n'
 } > "$section"
-awk -v section="$section" '!done && /^## / { while ((getline l < section) > 0) print l; done = 1 } { print }' CHANGELOG.md > CHANGELOG.md.new
+awk -v section="$section" -v head="## [${tag#v}]" '
+  index($0, head) == 1 { skip = 1; next }
+  skip && /^## / { skip = 0 }
+  skip { next }
+  !done && /^## / { while ((getline l < section) > 0) print l; done = 1 }
+  { print }' CHANGELOG.md > CHANGELOG.md.new
 mv CHANGELOG.md.new CHANGELOG.md
 rm -f "$section"

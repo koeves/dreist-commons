@@ -1,0 +1,38 @@
+name: Release pull requests
+
+# After every push to dev: keeps the release pull request into dev
+# ("chore(release): vX.Y.Z", the version and its changelog) up to date while
+# releasable commits wait, and opens the release pull request into main once
+# that is merged (.github/release/release-pr.sh). Also by hand.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: true
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # release/next
+      pull-requests: write
+      actions: write # dispatch the checks
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - name: Release pull requests
+        run: .github/release/release-pr.sh

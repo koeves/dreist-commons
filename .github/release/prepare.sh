@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Prepare a release: cut release/vX.Y.Z from origin/dev, write the version
-# (stamp-version.sh) and its CHANGELOG.md section (changelog.sh) in one
-# commit by you, push it and open its pull request into dev. Once that is
-# merged, `--open` opens the release pull request (dev -> main); merging that
+# Prepare a release by hand (release-pr.yml does it on every push to dev):
+# cut release/vX.Y.Z from origin/dev, write the version (stamp-version.sh)
+# and its CHANGELOG.md section (changelog.sh) in one commit by you, push it
+# and open its pull request into dev. Once that is merged, release-pr.yml
+# (or `--open`) opens the release pull request (dev -> main); merging that
 # releases (release-on-main.yml).
 #
 #   .github/release/prepare.sh                 the version from the commits since the last tag
@@ -67,7 +68,7 @@ branch=release/$tag
 git switch -q -c "$branch"
 .github/release/changelog.sh "$tag"
 .github/release/stamp-version.sh "$version"
-title="docs(release): changelog and version for $tag"
+title="chore(release): $tag"
 git commit -q -am "$title"
 echo "== $title"
 git show --stat --format='%an <%ae>%n%s' HEAD

@@ -34,22 +34,22 @@ if git rev-parse -q --verify "refs/tags/v$version" > /dev/null; then
     say "Nothing released: v$version is tagged already and no release was prepared for the releasable commits since ${prev:-the first commit}."
     exit 0
   fi
-  say "No release prepared: Cargo.toml has $version, released as v$version, but releasable commits came since. Run .github/release/prepare.sh and merge its pull request into dev first:"
+  say "No release prepared: Cargo.toml has $version, released as v$version, but releasable commits came since. Merge the release pull request into dev (release/next, or prepare.sh) first:"
   printf '%s\n' "$pending" | sed 's/^/- /' | tee -a "$summary" >&2
   exit 1
 fi
 if ! grep -q "^## \[$version\]" CHANGELOG.md; then
-  say "CHANGELOG.md has no section for $version: run .github/release/prepare.sh."
+  say "CHANGELOG.md has no section for $version: merge the release pull request into dev (release/next, or prepare.sh) first."
   exit 1
 fi
-prepared=$(git log -1 --format=%H --grep="^docs(release): changelog and version for v$version" HEAD || true)
+prepared=$(git log -1 --no-merges -E --format=%H --grep="^(docs\(release\): changelog and version for|chore\(release\):) v$version( |$)" HEAD || true)
 if [ -z "$prepared" ]; then
-  say "No commit \"docs(release): changelog and version for v$version\" on this branch: run .github/release/prepare.sh."
+  say "No release commit for v$version on this branch (\"chore(release): v$version\" from release-pr.yml, or prepare.sh)."
   exit 1
 fi
 late=$(git log --no-merges --format=%s "$prepared..HEAD" | grep -E "$RELEASABLE" || true)
 if [ -n "$late" ]; then
-  say "Releasable commits came after the release was prepared; run .github/release/prepare.sh again:"
+  say "Releasable commits came after the release was prepared: merge the updated release pull request into dev (release/next) first:"
   printf '%s\n' "$late" | sed 's/^/- /' | tee -a "$summary" >&2
   exit 1
 fi
