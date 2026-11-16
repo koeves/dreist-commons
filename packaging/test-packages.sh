@@ -4,6 +4,7 @@
 # layout and fields, the signed index, pool pruning, and apt reading the repo.
 #
 #   packaging/test-packages.sh
+# shellcheck disable=SC2016,SC2034 # check evaluates its quoted test later
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -39,7 +40,7 @@ dpkg-deb --extract "$deb" "$work/x"
 check "launcher runs /opt/Fake/Fake" 'grep -q "^Exec=/opt/Fake/Fake$" "$work/x/usr/share/applications/fake.desktop"'
 
 echo "== apt repository"
-export GNUPGHOME=$work/gnupg
+export GNUPGHOME="$work/gnupg"
 mkdir -m 700 "$GNUPGHOME"
 gpg --batch --quiet --passphrase '' --quick-generate-key "packaging test" ed25519 sign 1d
 APT_KEY_ID=$(gpg --batch --list-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')

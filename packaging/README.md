@@ -54,7 +54,15 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 | Windows | `<App>.vst3`, `<App>-CLAP\` (`<App>.clap`, `Resources\`), `<App>-App\` (`<App>.exe`, `Resources\`) |
 | Linux | `<App>.vst3`, `<App>-CLAP/` (`<App>.clap`, `Resources/`), `<App>-App/` (`<App>`, `Resources/`, `<app>.desktop`, `icons/`) |
 
+## Packages
+
+- **Homebrew** (macOS): `cask.sh` writes the cask for the macOS archive; the apps' release workflow pushes it to `koeves/homebrew-tap`.
+- **apt** (Debian, Ubuntu): `deb.sh` builds a `.deb` from the Linux archive (`--system` layout under `/usr`, the app in `/opt/<App>`); `apt-publish.sh` adds it to the signed repository tree in `koeves/apt`.
+- **Release secrets** (each app repository): `HOMEBREW_TAP_TOKEN` and `APT_REPO_TOKEN`, fine-grained tokens with contents write access to `koeves/homebrew-tap` and `koeves/apt`, and `APT_GPG_PRIVATE_KEY`, the armored signing key.
+- **Without a secret** the release skips that step.
+
 ## Tests
 
     sh packaging/test-install.sh        # Linux, macOS: fake app in a scratch home and DESTDIR
     pwsh packaging/test-install.ps1     # Windows: installs a fake app for real (CI runners)
+    sh packaging/test-packages.sh       # Debian / Ubuntu: .deb and signed apt repository, fake app
