@@ -17,8 +17,10 @@ set -euo pipefail
 out=${GITHUB_OUTPUT:-/dev/stdout}
 summary=${GITHUB_STEP_SUMMARY:-/dev/stderr}
 say() { printf '%s\n' "$*" >&2; printf '%s\n\n' "$*" >> "$summary"; }
+# shellcheck source=.github/release/releasable.sh
+. "$(dirname "$0")/releasable.sh"
 
-prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)
+prev=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
 range=${prev:+$prev..}HEAD
 
 release_as() { tr -d '\r' | sed -n -E 's/^[[:space:]]*Release-As:[[:space:]]*v?([0-9]+\.[0-9]+\.[0-9]+)[[:space:]]*$/\1/Ip'; }
@@ -37,8 +39,7 @@ if [ -n "$override" ]; then
   version=$override
   say "Release-As: $version (since ${prev:-the first commit})."
 else
-  releasable='^(feat|fix|perf|refactor|revert)(\([^)]*\))?!?: |^[a-z]+(\([^)]*\))?!: |^(build|chore)\(deps\): |^build(\([^)]*\))?: dreist-commons '
-  hits=$(git log --no-merges --format=%s "$range" | grep -E "$releasable" || true)
+  hits=$(git log --no-merges --format=%s "$range" | grep -E "$RELEASABLE" || true)
   breaking=$(git log --no-merges --format=%B "$range" | grep -E '^BREAKING[ -]CHANGE: ' || true)
   if [ -z "$hits" ] && [ -z "$breaking" ]; then
     say "Nothing to release: no feat, fix, perf, refactor, revert, breaking or dependency commit since ${prev:-the first commit} (add \`Release-As: X.Y.Z\` to release anyway)."
