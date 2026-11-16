@@ -8,6 +8,7 @@ Install scripts the apps ship in their release archives: `install.sh` (Linux, ma
 - Every part is checked to be a complete build before anything installed is touched; a reinstall replaces the old version whole.
 - Settings and content stay on uninstall.
 - `DESTDIR=<dir>` (install.sh) stages the layout under `<dir>` for packages and tests.
+- `PREFIX=/usr` (install.sh, Linux `--system`) puts the VST3, command, launcher and icons under `/usr` for packages.
 
 ## Locations
 
