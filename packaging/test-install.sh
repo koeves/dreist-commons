@@ -85,7 +85,7 @@ echo "== an incomplete build changes nothing"
 cp -R "$dist" "$work/broken"
 if [ "$os" = Linux ]; then : >"$work/broken/$app-App/$app"; else : >"$work/broken/$app.app/Contents/MacOS/$app"; fi
 touch "$vst3/marker"
-if HOME=$H DESTDIR=$R sh "$work/broken/install.sh" >/dev/null 2>"$work/err"; then bad "refuses an empty binary"; else ok "refuses an empty binary"; fi
+if HOME=$H XDG_DATA_HOME='' XDG_CONFIG_HOME='' DESTDIR=$R sh "$work/broken/install.sh" >/dev/null 2>"$work/err"; then bad "refuses an empty binary"; else ok "refuses an empty binary"; fi
 grep -q "Not a complete build" "$work/err" && ok "says why" || bad "error: $(cat "$work/err")"
 has "install untouched" "$vst3/marker"
 
@@ -106,7 +106,7 @@ echo "== uninstall by name, with nothing next to the script"
 run >/dev/null 2>&1
 mkdir -p "$work/bare"
 cp "$script" "$work/bare/install.sh"
-HOME=$H DESTDIR=$R sh "$work/bare/install.sh" --app "$app" --uninstall >/dev/null 2>&1 || bad "--app uninstall exits 0"
+HOME=$H XDG_DATA_HOME='' XDG_CONFIG_HOME='' DESTDIR=$R sh "$work/bare/install.sh" --app "$app" --uninstall >/dev/null 2>&1 || bad "--app uninstall exits 0"
 gone "VST3" "$vst3"
 
 echo "== system-wide staging"
