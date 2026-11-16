@@ -10,6 +10,7 @@ dreist-testkit = { path = "../dreist-testkit" }
 dreist-formats = { path = "../dreist-formats" }
 dreist-dsp = { path = "../dreist-dsp" }
 symphonia = { version = "0.5.5", default-features = false, features = ["wav", "aiff", "pcm"] }
+libc.workspace = true
 
 
 [lints]

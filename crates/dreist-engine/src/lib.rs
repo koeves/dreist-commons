@@ -4,6 +4,7 @@
 
 pub mod audio;
 pub mod binding;
+pub mod diag;
 pub mod engine;
 pub mod export;
 pub mod fx;

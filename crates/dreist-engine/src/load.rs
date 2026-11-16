@@ -12,10 +12,11 @@ use std::time::Instant;
 pub struct LoadReading {
     /// Processing time over audio time, for the second.
     pub average: f32,
-    /// The slowest block's time over its own duration.
+    /// The slowest block's time over the stream's period (the longest
+    /// block).
     pub peak: f32,
     /// Blocks that started later than 1.5 periods (plus 2 ms) after the
-    /// previous one, since the start.
+    /// previous one, since the start (not in the first second).
     pub late: u32,
 }
 
@@ -33,6 +34,13 @@ pub struct DspLoad {
     audio: AtomicU64,
     worst: AtomicU32,
     late: AtomicU32,
+    /// The stream's period (ns): the longest block seen. Audio servers
+    /// slip in short callbacks between full ones, so lateness and a block's
+    /// share are judged against this, not each block's own length.
+    period: AtomicU64,
+    /// Audio time processed so far (ns): the first second's callback gaps
+    /// (the stream starting) are not late blocks.
+    total: AtomicU64,
     /// The last finished second (millionths), and how many seconds finished.
     average_out: AtomicU32,
     peak_out: AtomicU32,
@@ -55,6 +63,8 @@ impl DspLoad {
             audio: AtomicU64::new(0),
             worst: AtomicU32::new(0),
             late: AtomicU32::new(0),
+            total: AtomicU64::new(0),
+            period: AtomicU64::new(0),
             average_out: AtomicU32::new(0),
             peak_out: AtomicU32::new(0),
             seconds: AtomicU32::new(0),
@@ -72,18 +82,22 @@ impl DspLoad {
         self.start.store(now, Relaxed);
     }
 
-    /// The audio thread, as the block of `samples` at `rate` ends.
-    pub fn end(&self, samples: usize, rate: f32) {
+    /// The audio thread, as the block of `samples` at `rate` ends; true
+    /// when the block started late.
+    pub fn end(&self, samples: usize, rate: f32) -> bool {
         let (start, prev) = (self.start.load(Relaxed), self.prev_start.load(Relaxed));
         if start == 0 || samples == 0 || rate <= 0.0 {
-            return;
+            return false;
         }
         let busy = self.now().saturating_sub(start);
         let audio = (samples as f64 * 1e9 / rate as f64) as u64;
-        if prev != 0 && start - prev > audio * 3 / 2 + 2_000_000 {
+        let warm = self.total.fetch_add(audio, Relaxed) >= 1_000_000_000;
+        let period = self.period.fetch_max(audio, Relaxed).max(audio);
+        let late = warm && prev != 0 && start - prev > period * 3 / 2 + 2_000_000;
+        if late {
             self.late.fetch_add(1, Relaxed);
         }
-        let share = (busy as f64 / audio.max(1) as f64 * 1e6).min(u32::MAX as f64) as u32;
+        let share = (busy as f64 / period.max(1) as f64 * 1e6).min(u32::MAX as f64) as u32;
         self.worst.fetch_max(share, Relaxed);
         let b = self.busy.fetch_add(busy, Relaxed) + busy;
         let a = self.audio.fetch_add(audio, Relaxed) + audio;
@@ -94,6 +108,7 @@ impl DspLoad {
             self.audio.store(0, Relaxed);
             self.seconds.fetch_add(1, Relaxed);
         }
+        late
     }
 
     /// [`DspLoad::begin`] now and [`DspLoad::end`] when the guard drops (a
@@ -101,6 +116,11 @@ impl DspLoad {
     pub fn scope(&self, samples: usize, rate: f32) -> LoadScope<'_> {
         self.begin();
         LoadScope { load: self, samples, rate }
+    }
+
+    /// The stream's period so far (the longest block, ns).
+    pub fn period_ns(&self) -> u64 {
+        self.period.load(Relaxed)
     }
 
     /// The last finished second; `None` before the first.
@@ -126,7 +146,7 @@ pub struct LoadScope<'a> {
 
 impl Drop for LoadScope<'_> {
     fn drop(&mut self) {
-        self.load.end(self.samples, self.rate);
+        let _ = self.load.end(self.samples, self.rate);
     }
 }
 
@@ -236,12 +256,42 @@ mod tests {
     #[test]
     fn a_late_block_counts() {
         let l = DspLoad::new();
+        // Past the first second of audio (the stream starting).
+        l.total.store(1_000_000_000, Relaxed);
         l.begin();
         l.end(64, 48000.0);
         std::thread::sleep(std::time::Duration::from_millis(10));
         l.begin();
         l.end(64, 48000.0);
         assert_eq!(l.late.load(Relaxed), 1);
+    }
+
+    #[test]
+    fn short_callbacks_between_full_ones_are_not_late() {
+        let l = DspLoad::new();
+        l.total.store(1_000_000_000, Relaxed);
+        // A full period (21 ms), a 5-frame callback, the next full block
+        // 10 ms later: not late (judged against the 5 frames it would be),
+        // and the short one's share is of the period.
+        l.begin();
+        l.end(1024, 48000.0);
+        l.begin();
+        assert!(!l.end(5, 48000.0));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        l.begin();
+        assert!(!l.end(1024, 48000.0));
+        assert!(l.worst.load(Relaxed) < 500_000, "{}", l.worst.load(Relaxed));
+    }
+
+    /// The stream's period (ns), for judging a block's share.
+    #[test]
+    fn the_period_is_the_longest_block() {
+        let l = DspLoad::new();
+        l.begin();
+        l.end(1024, 48000.0);
+        l.begin();
+        l.end(5, 48000.0);
+        assert_eq!(l.period_ns(), (1024.0 * 1e9 / 48000.0) as u64);
     }
 
     #[test]
