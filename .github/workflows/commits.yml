@@ -2,9 +2,10 @@ name: Commits
 
 # Commit subjects follow Conventional Commits (see CONTRIBUTING.md): the
 # pull request title on pull requests into dev (squash merges make it the commit),
-# the commits since the last release tag everywhere else; # version, changelog and release notes are generated from them. Runs on pull
-# requests, inside the release (release.yml) and by hand (release-on-main.yml
-# dispatches it on the follow-up changelog pull request's branch).
+# the commits since the last release tag everywhere else; version, changelog
+# and release notes are generated from them. A release pull request (into
+# main) must carry a prepared release (release-version). Runs on pull
+# requests, inside the release (release.yml) and by hand.
 on:
   pull_request:
     branches: [dev, main]
@@ -56,3 +57,17 @@ jobs:
             fi
           done < <(git log --no-merges --format='%h %s' "$range")
           exit $bad
+
+  release-version:
+    # A release pull request (into main) carries a prepared release: the
+    # version in Cargo.toml is untagged, CHANGELOG.md has its section and no
+    # releasable commit came after it (.github/release/release-version.sh).
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: The release is prepared
+        run: .github/release/release-version.sh

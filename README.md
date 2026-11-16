@@ -3,8 +3,8 @@
 # dreist-commons
 
 [![Release](https://img.shields.io/github/v/release/koeves/dreist-commons)](https://github.com/koeves/dreist-commons/releases/latest)
-[![CI](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml/badge.svg)](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml/badge.svg)](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml)
+[![CI](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/koeves/dreist-commons/actions/workflows/ci.yml?query=branch%3Adev)
+[![CodeQL](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/koeves/dreist-commons/actions/workflows/codeql.yml?query=branch%3Amain)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](#platforms)
 
