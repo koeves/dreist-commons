@@ -9,6 +9,8 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/packages-test.XXXXXX")
+# The throwaway keyring from the start, so the cleanup never reaches the user's own gpg.
+export GNUPGHOME="$work/gnupg"
 trap 'gpgconf --kill all 2>/dev/null || true; rm -rf "$work"' EXIT
 app=Fake
 fails=0
@@ -40,10 +42,9 @@ dpkg-deb --extract "$deb" "$work/x"
 check "launcher runs /opt/Fake/Fake" 'grep -q "^Exec=/opt/Fake/Fake$" "$work/x/usr/share/applications/fake.desktop"'
 
 echo "== apt repository"
-export GNUPGHOME="$work/gnupg"
 mkdir -m 700 "$GNUPGHOME"
-gpg --batch --quiet --passphrase '' --quick-generate-key "packaging test" ed25519 sign 1d
-APT_KEY_ID=$(gpg --batch --list-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
+gpg --batch --quiet --passphrase '' --quick-generate-key "packaging test" ed25519 sign 1d 2>/dev/null
+APT_KEY_ID=$(gpg --batch --list-keys --with-colons 2>/dev/null | awk -F: '/^fpr/ { print $10; exit }')
 export APT_KEY_ID
 repo=$work/repo
 mkdir "$repo"

@@ -40,7 +40,7 @@ apt-ftparchive \
     -o APT::FTPArchive::Release::Architectures=amd64 \
     -o APT::FTPArchive::Release::Components=main \
     release dists/stable >dists/stable/Release
-gpg --batch --yes --local-user "$APT_KEY_ID" --armor --detach-sign --output dists/stable/Release.gpg dists/stable/Release
-gpg --batch --yes --local-user "$APT_KEY_ID" --clearsign --output dists/stable/InRelease dists/stable/Release
+gpg --batch --quiet --yes --local-user "$APT_KEY_ID" --armor --detach-sign --output dists/stable/Release.gpg dists/stable/Release
+gpg --batch --quiet --yes --local-user "$APT_KEY_ID" --clearsign --output dists/stable/InRelease dists/stable/Release
 gpg --batch --armor --export "$APT_KEY_ID" >key.asc
 touch .nojekyll
