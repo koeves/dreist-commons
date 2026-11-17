@@ -65,9 +65,10 @@ jobs:
       contents: write
 
   dev:
-    # dev follows main: a fast-forward with the DEV_SYNC_KEY deploy key (the
-    # dev ruleset's bypass), or a sync pull request when dev has moved on.
-    # Skipped while the secret is not set.
+    # dev follows main with the DEV_SYNC_KEY deploy key (the dev ruleset's
+    # bypass): a fast-forward, or main merged into dev when dev has moved on;
+    # a sync pull request only when that merge conflicts. Skipped while the
+    # secret is not set.
     needs: [version, release]
     if: always() && needs.version.result == 'success' && needs.release.result != 'failure' && needs.release.result != 'cancelled'
     runs-on: ubuntu-24.04
