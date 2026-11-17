@@ -1,10 +1,12 @@
 name: Release on main
 
-# Merging the release pull request (dev -> main) releases the version that
-# .github/release/prepare.sh wrote into Cargo.toml and CHANGELOG.md on dev
-# (.github/release/release-version.sh checks them): the merge commit is
-# tagged `vX.Y.Z` and release.yml publishes it. Nothing is released when no
-# release was prepared.
+# Merging the release pull request (dev -> main) releases: the version comes
+# from the commits since the last tag (.github/release/next-version.sh; a
+# `Release-As: X.Y.Z` line in the pull request's body or a commit message
+# overrides it), the merge commit is tagged `vX.Y.Z` and release.yml
+# publishes it with the changelog section as its notes. Nothing is released
+# when no commit since the tag is releasable. Afterwards dev is
+# fast-forwarded to main (.github/release/sync-dev.sh).
 on:
   push:
     branches: [main]
@@ -21,6 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write # the tag
+      pull-requests: read
     outputs:
       tag: ${{ steps.next.outputs.tag }}
       version: ${{ steps.next.outputs.version }}
@@ -28,9 +31,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Version
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - name: The merged pull request's body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].body // ""' > "$RUNNER_TEMP/pr-body.txt"
+      - name: Next version
         id: next
-        run: .github/release/release-version.sh --release
+        env:
+          PR_BODY_FILE: ${{ runner.temp }}/pr-body.txt
+        run: .github/release/next-version.sh
       - name: Tag the merge commit
         if: steps.next.outputs.tag != ''
         env:
@@ -52,3 +64,31 @@ jobs:
     permissions:
       contents: write
 
+  dev:
+    # dev follows main: a fast-forward with the DEV_SYNC_KEY deploy key (the
+    # dev ruleset's bypass), or a sync pull request when dev has moved on.
+    # Skipped while the secret is not set.
+    needs: [version, release]
+    if: always() && needs.version.result == 'success' && needs.release.result != 'failure' && needs.release.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # the sync branch
+      pull-requests: write
+      actions: write # dispatch the checks
+    env:
+      DEV_SYNC_KEY: ${{ secrets.DEV_SYNC_KEY }}
+    steps:
+      - name: No deploy key
+        if: env.DEV_SYNC_KEY == ''
+        run: echo "::notice::DEV_SYNC_KEY is not set, so dev was not fast-forwarded to main."
+      - uses: actions/checkout@v7
+        if: env.DEV_SYNC_KEY != ''
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEV_SYNC_KEY }}
+          persist-credentials: true
+      - name: Fast-forward dev
+        if: env.DEV_SYNC_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/release/sync-dev.sh

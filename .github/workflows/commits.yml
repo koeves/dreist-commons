@@ -3,8 +3,8 @@ name: Commits
 # Commit subjects follow Conventional Commits (see CONTRIBUTING.md): the
 # pull request title on pull requests into dev (squash merges make it the commit),
 # the commits since the last release tag everywhere else; version, changelog
-# and release notes are generated from them. A release pull request (into
-# main) must carry a prepared release (release-version). Runs on pull
+# and release notes are generated from them; the release pull request (into
+# main) shows the version it releases (release-version). Runs on pull
 # requests, inside the release (release.yml) and by hand.
 on:
   pull_request:
@@ -59,9 +59,10 @@ jobs:
           exit $bad
 
   release-version:
-    # A release pull request (into main) carries a prepared release: the
-    # version in Cargo.toml is untagged, CHANGELOG.md has its section and no
-    # releasable commit came after it (.github/release/release-version.sh).
+    # On the release pull request (into main): the version its merge releases
+    # (.github/release/next-version.sh; `Release-As: X.Y.Z` in the body or a
+    # commit overrides it), in the job summary. Fails only when that version
+    # is not usable (already tagged, not X.Y.Z).
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
     runs-on: ubuntu-24.04
     steps:
@@ -69,5 +70,12 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: The release is prepared
-        run: .github/release/release-version.sh
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - name: The version this release pull request releases
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$BODY" > "$RUNNER_TEMP/pr-body.txt"
+          PR_BODY_FILE="$RUNNER_TEMP/pr-body.txt" GITHUB_OUTPUT=/dev/null .github/release/next-version.sh
