@@ -63,6 +63,7 @@ jobs:
       upload: true
     permissions:
       contents: write
+      pull-requests: write # release.yml -> commits.yml (release-version)
 
   dev:
     # dev follows main with the DEV_SYNC_KEY deploy key (the dev ruleset's
