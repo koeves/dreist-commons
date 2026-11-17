@@ -4,7 +4,7 @@
 
 - **Format**: [Conventional Commits](https://www.conventionalcommits.org/), `type(scope): summary`, with `!` after the type for a breaking change.
 - **Types**: `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `style`, `revert`.
-- **Checked**: by the `conventional` check; the changelog and release notes are generated from the commits.
+- **Checked**: by the `conventional` check; versions and release notes are generated from the commits.
 
 ## Branches and pull requests
 
@@ -37,11 +37,13 @@ cargo test -p dreist-host --all-features
 
 ## Releases
 
-- **Prepare**: `.github/release/prepare.sh` cuts `release/vX.Y.Z` from `dev` with the version and its CHANGELOG section in one commit and opens its pull request into `dev`; `--dry-run` tries it locally.
-- **Version**: from the commits since the last tag: fix → patch, feat → minor, breaking → major (minor while on 0.x); `--as X.Y.Z` or a `Release-As: X.Y.Z` line in a commit sets it.
+- **Release**: when `dev` is ready, a pull request from `dev` into `main`, merged with a merge commit; its `release-version` check shows the version it releases.
+- **Version**: from the commits since the last tag: fix → patch, feat → minor, breaking → major (minor while on 0.x); `Release-As: X.Y.Z` in the release pull request or a commit sets it.
 - **Releasable**: feat, fix, perf, refactor, revert, breaking and dependency commits; `ci`, `docs`, `test`, `style` and other commits alone release nothing.
-- **Release**: `prepare.sh --open` opens the pull request from `dev` into `main`, merged with a merge commit; its `release-version` check needs the prepared version and changelog and no releasable commit after them.
-- **Automatic**: the merge tags `vX.Y.Z` and publishes the GitHub release; the changelog and version are already in `dev`.
+- **Automatic**: the merge tags `vX.Y.Z` and publishes the GitHub release, with the changes since the last tag as its notes.
+- **Changes**: on the [Releases](https://github.com/koeves/dreist-commons/releases) page; there is no changelog file.
+- **`dev` follows `main`**: after the merge, `dev` is fast-forwarded to `main` (the `DEV_SYNC_KEY` deploy key), or a sync pull request opens when `dev` has moved on.
+- **Versions in the repository**: `Cargo.toml` keeps `0.0.0`; the release is the tag.
 - **Order**: release dreist-commons before the apps that need the change.
 
 ## Apps
