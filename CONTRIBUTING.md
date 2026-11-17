@@ -37,12 +37,12 @@ cargo test -p dreist-host --all-features
 
 ## Releases
 
-- **Release**: when `dev` is ready, a pull request from `dev` into `main`, merged with a merge commit; its `release-version` check shows the version it releases.
+- **Release**: when `dev` is ready, a pull request from `dev` into `main`, merged with a merge commit; its `release-version` check shows the version it releases and sets the title to `chore(release): vX.Y.Z` (or `chore: sync dev into main (no release)`).
 - **Version**: from the commits since the last tag: fix → patch, feat → minor, breaking → major (minor while on 0.x); `Release-As: X.Y.Z` in the release pull request or a commit sets it.
 - **Releasable**: feat, fix, perf, refactor, revert, breaking and dependency commits; `ci`, `docs`, `test`, `style` and other commits alone release nothing.
 - **Automatic**: the merge tags `vX.Y.Z` and publishes the GitHub release, with the changes since the last tag as its notes.
 - **Changes**: on the [Releases](https://github.com/koeves/dreist-commons/releases) page; there is no changelog file.
-- **`dev` follows `main`**: after the merge, `dev` is fast-forwarded to `main` (the `DEV_SYNC_KEY` deploy key), or a sync pull request opens when `dev` has moved on.
+- **`dev` follows `main`**: after the merge, `dev` is fast-forwarded to `main` (the `DEV_SYNC_KEY` deploy key), or `main` is merged into `dev` when `dev` has moved on; a sync pull request opens only when that merge conflicts.
 - **Versions in the repository**: `Cargo.toml` keeps `0.0.0`; the release is the tag.
 - **Order**: release dreist-commons before the apps that need the change.
 
