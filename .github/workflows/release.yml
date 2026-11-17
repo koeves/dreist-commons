@@ -38,6 +38,11 @@ env:
 jobs:
   commits:
     uses: ./.github/workflows/commits.yml
+    # commits.yml's release-version job sets pull request titles (skipped
+    # here, but a called workflow's permissions are checked at startup).
+    permissions:
+      contents: read
+      pull-requests: write
 
   ci:
     uses: ./.github/workflows/ci.yml
