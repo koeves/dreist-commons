@@ -232,6 +232,22 @@ mod tests {
     }
 
     #[test]
+    fn a_session_exports_its_log_without_the_users_paths() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        super::super::start("Diagtest", "1.2.3", vec![("note".into(), Value::from(format!("{home}/private/song.geist")))]);
+        super::super::audio(vec![("format".into(), "CLAP".into()), ("host".into(), "Some Host".into()), ("rate".into(), 48_000.0f32.into()), ("max_block".into(), 512u32.into())]);
+        let p = export(&[("Content".into(), format!("{home}/Music/Samples"))], &[]).unwrap();
+        let s = std::fs::read_to_string(&p).unwrap();
+        if let Some(d) = log_dir("Diagtest") {
+            let _ = std::fs::remove_dir_all(d);
+        }
+        assert!(s.starts_with("# Diagtest diagnostics\nformat=1\n") && s.contains("\nversion=1.2.3\n"), "{s}");
+        assert!(s.contains("\n# audio\nformat=CLAP\nhost=\"Some Host\"\n") || s.contains("\n# audio\nformat=CLAP\nhost=Some Host\n"), "{s}");
+        assert!(s.contains("\n# run\nseconds=") && s.contains("\nContent=<path>\n") && s.contains(" start os="), "{s}");
+        assert!(home.len() < 2 || !s.contains(&home), "{s}");
+    }
+
+    #[test]
     fn the_report_has_its_sections() {
         let s = report(&[("Folder".into(), "/nowhere/else".into()), ("Buffer".into(), "512".into())], &[]);
         assert!(s.starts_with("# ") && s.contains("\n# system\nos=") && s.contains("\n# settings\nFolder=<path>\nBuffer=512\n"), "{s}");
