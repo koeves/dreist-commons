@@ -1,20 +1,30 @@
-//! Diagnostics: what the audio thread and the editor report while a
-//! standalone app runs, written as timestamped lines (text or JSON) to a
-//! rotating log in the platform's log folder and, when asked, to stderr.
+//! Diagnostics: what the audio thread and the editor report while an app
+//! runs (standalone, VST3 or CLAP), written as timestamped text lines to a
+//! rotating log in the platform's log folder and, in a debug run, to stderr
+//! (text or JSON).
 //!
-//! - [`Monitor`]: one per process, enabled by the app ([`enable`]); the
-//!   audio thread times its blocks and reports the song position with
-//!   atomics only, and late blocks (a dropout before them) queue as events.
+//! - [`Monitor`]: one per process ([`enable`]); the audio thread of one
+//!   plugin instance ([`monitor_for`]) times its blocks and reports the
+//!   song position with atomics only, and late blocks (a dropout before
+//!   them) queue as events.
 //! - [`Log`]: the log file and stderr, one line per [`Event`].
-//! - [`Recorder`]: a thread that writes the start-up information, the
-//!   stats of every second and the late-block events, and the summary at
-//!   the end.
+//! - [`Recorder`]: writes the start-up information, the stats (every
+//!   second while playing or late, else every minute) and the late-block
+//!   events, keeps the recent ones for [`export`], and the summary at the
+//!   end.
+//! - [`start`]: the app's session log (one per app and process, every
+//!   instance shares it) and its thread; [`start_run`]: a debug run.
+//! - [`export`]: one shareable, redacted file of all that.
 
+mod export;
+pub use export::{Redact, export, report};
+
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::load::{DspLoad, LoadReading, rss_bytes};
@@ -48,6 +58,8 @@ pub struct Monitor {
     voices: AtomicU32,
     stretch_voices: AtomicU32,
     head: AtomicU64,
+    /// The plugin instance whose audio thread reports (0: none yet).
+    owner: AtomicU64,
     started: Instant,
 }
 
@@ -66,6 +78,7 @@ pub fn enable() -> &'static Monitor {
         voices: AtomicU32::new(0),
         stretch_voices: AtomicU32::new(0),
         head: AtomicU64::new(0),
+        owner: AtomicU64::new(0),
         started: Instant::now(),
     })
 }
@@ -73,6 +86,31 @@ pub fn enable() -> &'static Monitor {
 /// The monitor, when diagnostics are on.
 pub fn monitor() -> Option<&'static Monitor> {
     MONITOR.get()
+}
+
+/// A number for a plugin instance (see [`monitor_for`]), never 0.
+pub fn instance_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Relaxed)
+}
+
+/// The monitor for instance `id`'s audio thread: the first instance to ask
+/// reports, the others get `None` (several instances in one host share a
+/// log; their blocks would mix). Atomics only.
+pub fn monitor_for(id: u64) -> Option<&'static Monitor> {
+    let m = MONITOR.get()?;
+    let owner = m.owner.load(Relaxed);
+    if owner == id || owner == 0 && m.owner.compare_exchange(0, id, Relaxed, Relaxed).is_ok() {
+        return Some(m);
+    }
+    None
+}
+
+/// Instance `id` goes away: the next instance to ask reports.
+pub fn release(id: u64) {
+    if let Some(m) = MONITOR.get() {
+        let _ = m.owner.compare_exchange(id, 0, Relaxed, Relaxed);
+    }
 }
 
 /// Ends a block when dropped (see [`Monitor::block`]).
@@ -482,8 +520,8 @@ pub fn log_dir(app: &str) -> Option<PathBuf> {
 const ROTATE_BYTES: u64 = 5 << 20;
 const KEEP: usize = 3;
 
-/// Where events go: a log file (rotated by size) and stderr, as text or
-/// JSON lines.
+/// Where events go: a log file (text lines, rotated by size) and stderr
+/// (text or JSON lines).
 pub struct Log {
     file: Option<(PathBuf, File, u64)>,
     stderr: bool,
@@ -493,7 +531,7 @@ pub struct Log {
 
 impl Log {
     /// Events to `path` (appended; `None`: no file) and to stderr when
-    /// `stderr`.
+    /// `stderr`, as JSON there when `json`.
     pub fn open(path: Option<&Path>, stderr: bool, json: bool) -> Log {
         let file = path.and_then(|p| {
             if let Some(d) = p.parent() {
@@ -511,16 +549,28 @@ impl Log {
         self.file.as_ref().map(|f| f.0.as_path())
     }
 
+    /// Echo to stderr (JSON lines when `json`) from now on.
+    pub fn echo(&mut self, stderr: bool, json: bool) {
+        (self.stderr, self.json) = (stderr, json);
+    }
+
     pub fn write(&mut self, e: &Event) {
-        let line = if self.json { e.json(SystemTime::now(), self.started.elapsed()) } else { e.text(SystemTime::now(), self.started.elapsed()) };
+        let (wall, elapsed) = (SystemTime::now(), self.started.elapsed());
+        let line = e.text(wall, elapsed);
         if self.stderr {
-            eprintln!("{line}");
+            if self.json {
+                eprintln!("{}", e.json(wall, elapsed));
+            } else {
+                eprintln!("{line}");
+            }
         }
         if let Some((path, f, len)) = self.file.as_mut() {
             if writeln!(f, "{line}").is_ok() {
                 *len += line.len() as u64 + 1;
             }
-            if *len > ROTATE_BYTES {
+            // Another process (a second host) may share the file: rotate
+            // by its real length.
+            if *len > ROTATE_BYTES && f.metadata().map_or(true, |m| m.len() > ROTATE_BYTES) {
                 let path = path.clone();
                 rotate(&path);
                 if let Ok(nf) = File::create(&path) {
@@ -545,17 +595,126 @@ fn rotate(path: &Path) {
 /// fields.
 pub fn system_info() -> Event {
     let cpus = std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(0);
-    let mut e = Event::new("start").with("os", std::env::consts::OS).with("arch", std::env::consts::ARCH).with("cpus", cpus);
+    let mut e = Event::new("start").with("os", std::env::consts::OS);
+    if let Some(v) = platform::os_version() {
+        e = e.with("os_version", v);
+    }
+    e = e.with("arch", std::env::consts::ARCH);
+    // An Intel build on Apple Silicon (Rosetta).
+    if platform::translated() {
+        e = e.with("translated", "yes");
+    }
+    e = e.with("cpus", cpus);
     if let Ok(k) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
         e = e.with("kernel", k.trim());
     }
-    if let Some(model) = std::fs::read_to_string("/proc/cpuinfo").ok().and_then(|s| s.lines().find(|l| l.starts_with("model name")).and_then(|l| l.split(':').nth(1)).map(|m| m.trim().to_string())) {
+    if let Some(model) = platform::cpu_model() {
         e = e.with("cpu", model);
+    }
+    if let Some(m) = platform::memory_bytes() {
+        e = e.with("memory_gb", m as f64 / (1u64 << 30) as f64);
     }
     if let Ok(g) = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor") {
         e = e.with("governor", g.trim());
     }
-    e
+    e.with("pid", std::process::id())
+}
+
+/// The system facts the platform tells (none of them per user).
+mod platform {
+    #[cfg(target_os = "macos")]
+    fn sysctl(name: &str) -> Option<Vec<u8>> {
+        let name = std::ffi::CString::new(name).ok()?;
+        let mut len = 0usize;
+        // SAFETY: a size query (null buffer), then a read into a buffer of
+        // that size; `name` is a valid C string.
+        unsafe {
+            if libc::sysctlbyname(name.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) != 0 || len == 0 {
+                return None;
+            }
+            let mut buf = vec![0u8; len];
+            if libc::sysctlbyname(name.as_ptr(), buf.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) != 0 {
+                return None;
+            }
+            buf.truncate(len);
+            Some(buf)
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sysctl_str(name: &str) -> Option<String> {
+        let b = sysctl(name)?;
+        Some(String::from_utf8_lossy(&b).trim_end_matches('\0').trim().to_string()).filter(|s| !s.is_empty())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sysctl_int(name: &str) -> Option<u64> {
+        let b = sysctl(name)?;
+        Some(match b.len() {
+            4 => u32::from_ne_bytes(b.try_into().ok()?) as u64,
+            8 => u64::from_ne_bytes(b.try_into().ok()?),
+            _ => return None,
+        })
+    }
+
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    fn os_release() -> Option<String> {
+        let s = std::fs::read_to_string("/etc/os-release").ok()?;
+        let v = s.lines().find_map(|l| l.strip_prefix("PRETTY_NAME="))?;
+        Some(v.trim_matches('"').to_string())
+    }
+
+    pub fn os_version() -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            sysctl_str("kern.osproductversion")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            os_release()
+        }
+    }
+
+    pub fn cpu_model() -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            sysctl_str("machdep.cpu.brand_string")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let s = std::fs::read_to_string("/proc/cpuinfo").ok()?;
+            s.lines().find(|l| l.starts_with("model name")).and_then(|l| l.split(':').nth(1)).map(|m| m.trim().to_string())
+        }
+    }
+
+    pub fn memory_bytes() -> Option<u64> {
+        #[cfg(target_os = "macos")]
+        {
+            sysctl_int("hw.memsize")
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+            let kb: u64 = s.lines().find_map(|l| l.strip_prefix("MemTotal:"))?.trim().trim_end_matches("kB").trim().parse().ok()?;
+            Some(kb * 1024)
+        }
+    }
+
+    pub fn translated() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            sysctl_int("sysctl.proc_translated") == Some(1)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+}
+
+/// The host process's name (its program file's, without folders).
+pub fn host_name() -> String {
+    std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default()
 }
 
 /// What a run came to (see [`Recorder::summary`]).
@@ -583,15 +742,57 @@ pub struct Recorder {
     late_from: u64,
     summary: Summary,
     started: Instant,
+    /// Stats every second, playing or not (debug runs).
+    every_second: bool,
+    /// The latest lines, for [`export`].
+    recent: VecDeque<(SystemTime, Event)>,
+    /// The latest `audio` line (the audio setup).
+    audio: Option<Event>,
 }
+
+/// Lines kept for an export.
+const RECENT: usize = 600;
 
 impl Recorder {
     pub fn new(log: Log, monitor: &'static Monitor) -> Recorder {
-        Recorder { log, monitor, seen_second: 0, late_from: 0, summary: Summary::default(), started: Instant::now() }
+        Recorder { log, monitor, seen_second: 0, late_from: 0, summary: Summary::default(), started: Instant::now(), every_second: true, recent: VecDeque::new(), audio: None }
+    }
+
+    /// Stats every second (`true`), or only while playing or late and once
+    /// a minute otherwise (the always-on log).
+    pub fn every_second(&mut self, on: bool) {
+        self.every_second = on;
     }
 
     pub fn log(&mut self) -> &mut Log {
         &mut self.log
+    }
+
+    /// Write `e` to the log and keep it for an export.
+    pub fn write(&mut self, e: Event) {
+        self.log.write(&e);
+        if e.kind == "audio" {
+            self.audio = Some(e.clone());
+        }
+        if self.recent.len() == RECENT {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((SystemTime::now(), e));
+    }
+
+    /// The kept lines, oldest first.
+    pub fn recent(&self) -> impl Iterator<Item = &(SystemTime, Event)> {
+        self.recent.iter()
+    }
+
+    /// The latest audio setup line.
+    pub fn audio(&self) -> Option<&Event> {
+        self.audio.as_ref()
+    }
+
+    /// What the run came to so far.
+    pub fn summary_so_far(&self) -> Summary {
+        Summary { seconds: self.started.elapsed().as_secs_f64(), ..self.summary.clone() }
     }
 
     /// Write what is new (call about every 100 ms).
@@ -608,7 +809,7 @@ impl Recorder {
             } else {
                 self.summary.slow += 1;
             }
-            self.log.write(&block_event(&b));
+            self.write(block_event(&b));
         }
         let second = m.load.seconds();
         if second != self.seen_second {
@@ -630,6 +831,11 @@ impl Recorder {
         if r.peak > s.worst_block {
             (s.worst_block, s.worst_block_at) = (r.peak, pos);
         }
+        // The always-on log: every second only while there is something
+        // to see.
+        if !self.every_second && !m.playing() && r.late == 0 && !self.seen_second.is_multiple_of(60) {
+            return;
+        }
         let mut e = Event::new("stats")
             .with("pos", bar_beat(pos))
             .with("playing", if m.playing() { "yes" } else { "no" })
@@ -641,7 +847,7 @@ impl Recorder {
         if let Some(u) = m.ui_load() {
             e = e.with("ui", u * 100.0);
         }
-        self.log.write(&e);
+        self.write(e);
     }
 
     /// Write the summary and return it.
@@ -659,7 +865,7 @@ impl Recorder {
             .with("worst_block", s.worst_block * 100.0)
             .with("worst_block_at", bar_beat(s.worst_block_at))
             .with("peak_rss_mb", s.peak_rss as f64 / (1 << 20) as f64);
-        self.log.write(&e);
+        self.write(e);
         s
     }
 }
@@ -726,10 +932,11 @@ mod tests {
     fn the_log_rotates_and_keeps_its_lines() {
         let dir = std::env::temp_dir().join(format!("dreist-diag-test-{}", std::process::id()));
         let path = dir.join("app.log");
+        // JSON goes to stderr only: the file keeps text lines.
         let mut log = Log::open(Some(&path), false, true);
         log.write(&Event::new("start").with("os", "test"));
         let s = std::fs::read_to_string(&path).unwrap();
-        assert!(s.starts_with("{\"t\":") && s.contains("\"kind\":\"start\""), "{s}");
+        assert!(s.ends_with(" start os=test\n") && s.as_bytes()[4] == b'-', "{s}");
         rotate(&path);
         assert!(dir.join("app.log.1").exists() && !path.exists());
         let _ = std::fs::remove_dir_all(&dir);
@@ -748,11 +955,8 @@ mod tests {
 pub struct DebugArgs {
     /// `--debug`: diagnostics on, events to stderr and the log file.
     pub debug: bool,
-    /// `--debug-json`: JSON lines instead of text.
+    /// `--debug-json`: JSON lines on stderr instead of text.
     pub json: bool,
-    /// `--debug-log <path>`: the log file (default: the platform's log
-    /// folder, `<app>-debug.log`).
-    pub log: Option<PathBuf>,
     /// `--play <file>`: open this project and start playback.
     pub play: Option<PathBuf>,
     /// `--duration <seconds>`: quit after this long.
@@ -781,7 +985,6 @@ impl DebugArgs {
             match flag.as_str() {
                 "--debug" => d.debug = true,
                 "--debug-json" => d.json = true,
-                "--debug-log" => d.log = Some(PathBuf::from(value("--debug-log")?)),
                 "--play" => d.play = Some(PathBuf::from(value("--play")?)),
                 "--duration" => d.duration = Some(value("--duration")?.parse().map_err(|_| "--duration takes seconds".to_string())?),
                 "--until-end" => d.until_end = true,
@@ -802,76 +1005,130 @@ impl DebugArgs {
     }
 }
 
-/// A debug run's recorder, shared by its thread and the end of `main`.
-static RUN: OnceLock<(std::sync::Mutex<Recorder>, DebugArgs)> = OnceLock::new();
+/// The app's diagnostics session: its recorder, shared by the thread that
+/// polls it, the app and an [`export`].
+struct Session {
+    app: String,
+    version: String,
+    rec: Mutex<Recorder>,
+    /// A debug run's options.
+    run: OnceLock<DebugArgs>,
+}
 
-/// Start a debug run for `app` (`args` from [`DebugArgs::split`], `launch`
-/// the remaining command line for the start-up line): the monitor, the log
-/// and a thread that records every 100 ms and ends the process after
-/// `--duration` or, with `--until-end`, once playback stopped.
-pub fn start_run(app: &str, version: &str, args: DebugArgs, launch: &[String]) -> &'static Monitor {
+static SESSION: OnceLock<Session> = OnceLock::new();
+
+/// Start the always-on diagnostics log for `app` (version `version`) in
+/// this process: the monitor, `<log folder>/<app>.log` with a `start` line
+/// (the system and `fields`), and a thread that records every 100 ms. The
+/// first call wins: every plugin instance and the standalone share it.
+pub fn start(app: &str, version: &str, fields: Vec<(String, Value)>) -> &'static Monitor {
+    start_session(app, version, fields, None)
+}
+
+fn start_session(app: &str, version: &str, fields: Vec<(String, Value)>, run: Option<&DebugArgs>) -> &'static Monitor {
     let monitor = enable();
-    let path = args.log.clone().or_else(|| log_dir(app).map(|d| d.join(format!("{}-debug.log", app.to_lowercase()))));
-    let mut log = Log::open(path.as_deref(), true, args.json);
-    let mut e = system_info().with("app", app).with("version", version).with("args", launch.get(1..).unwrap_or_default().join(" "));
-    if let Some(p) = log.path() {
-        e = e.with("log", p.display().to_string());
+    let mut fresh = false;
+    let session = SESSION.get_or_init(|| {
+        fresh = true;
+        let path = log_dir(app).map(|d| d.join(format!("{}.log", app.to_lowercase())));
+        let mut log = Log::open(path.as_deref(), false, false);
+        if let Some(r) = run {
+            log.echo(true, r.json);
+        }
+        let mut rec = Recorder::new(log, monitor);
+        rec.every_second(run.is_some());
+        let mut e = system_info().with("app", app).with("version", version);
+        e.fields.extend(fields.clone());
+        rec.write(e);
+        Session { app: app.to_string(), version: version.to_string(), rec: Mutex::new(rec), run: OnceLock::new() }
+    });
+    if fresh {
+        std::thread::Builder::new().name("diagnostics".into()).spawn(poll_loop).ok();
     }
-    if let Some(p) = &args.play {
-        e = e.with("play", p.display().to_string());
-    }
-    log.write(&e);
-    if args.play.is_some() {
-        monitor.request_play();
-    }
-    let _ = RUN.set((std::sync::Mutex::new(Recorder::new(log, monitor)), args));
-    std::thread::Builder::new()
-        .name("diagnostics".into())
-        .spawn(|| {
-            let Some((rec, args)) = RUN.get() else { return };
-            let started = Instant::now();
-            let (mut was_playing, mut last) = (false, 0.0f64);
-            signals::catch();
-            loop {
-                std::thread::sleep(Duration::from_millis(100));
-                if let Ok(mut r) = rec.lock() {
-                    r.poll();
-                }
-                let (playing, pos) = (monitor.playing(), monitor.position());
-                let ended = args.until_end && was_playing && (!playing || pos < last - 1.0);
-                (was_playing, last) = (was_playing || playing, pos);
-                if let Some(sig) = signals::caught() {
-                    if let Ok(mut r) = rec.lock() {
-                        r.log().write(&Event::new("signal").with("signal", sig));
-                    }
-                    let _ = end_run();
-                    std::process::exit(128 + sig as i32);
-                }
-                if ended || args.duration.is_some_and(|d| started.elapsed().as_secs_f64() >= d) {
-                    std::process::exit(end_run().unwrap_or(0));
-                }
-            }
-        })
-        .ok();
+    let _ = session;
     monitor
 }
 
-/// Write a `kind` line with `text` to the debug run's log, when one runs
-/// (e.g. the power profile held while playing).
-pub fn note(kind: &str, text: &str) {
-    if let Some((rec, _)) = RUN.get() {
-        if let Ok(mut r) = rec.lock() {
-            r.log().write(&Event::new(kind).with("text", text));
+/// The session's thread: record, and end a debug run when it is over.
+fn poll_loop() {
+    let Some(session) = SESSION.get() else { return };
+    let monitor = enable();
+    let started = Instant::now();
+    let (mut was_playing, mut last) = (false, 0.0f64);
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        if let Ok(mut r) = session.rec.lock() {
+            r.poll();
+        }
+        let Some(args) = session.run.get() else { continue };
+        let (playing, pos) = (monitor.playing(), monitor.position());
+        let ended = args.until_end && was_playing && (!playing || pos < last - 1.0);
+        (was_playing, last) = (was_playing || playing, pos);
+        if let Some(sig) = signals::caught() {
+            write(Event::new("signal").with("signal", sig));
+            let _ = end_run();
+            std::process::exit(128 + sig as i32);
+        }
+        if ended || args.duration.is_some_and(|d| started.elapsed().as_secs_f64() >= d) {
+            std::process::exit(end_run().unwrap_or(0));
         }
     }
 }
 
-/// End the debug run: write the summary; its exit status (`None` without
-/// a run).
+/// Start a debug run for `app` (`args` from [`DebugArgs::split`], `launch`
+/// the remaining command line for the start-up line): the session log,
+/// echoed to stderr with stats every second, and the run's end after
+/// `--duration` or, with `--until-end`, once playback stopped.
+pub fn start_run(app: &str, version: &str, args: DebugArgs, launch: &[String]) -> &'static Monitor {
+    let mut fields = vec![("args".to_string(), Value::from(launch.get(1..).unwrap_or_default().join(" ")))];
+    if let Some(p) = &args.play {
+        fields.push(("play".into(), Value::from(p.display().to_string())));
+    }
+    let monitor = start_session(app, version, fields, Some(&args));
+    if let Some(s) = SESSION.get() {
+        if let Ok(mut r) = s.rec.lock() {
+            r.log().echo(true, args.json);
+            r.every_second(true);
+            if let Some(p) = r.log().path().map(|p| p.display().to_string()) {
+                r.write(Event::new("run").with("log", p));
+            }
+        }
+        if args.play.is_some() {
+            monitor.request_play();
+        }
+        signals::catch();
+        let _ = s.run.set(args);
+    }
+    monitor
+}
+
+/// Write `e` to the session log, when one runs (not on the audio thread).
+pub fn write(e: Event) {
+    if let Some(s) = SESSION.get() {
+        if let Ok(mut r) = s.rec.lock() {
+            r.write(e);
+        }
+    }
+}
+
+/// Write a `kind` line with `text` to the session log, when one runs
+/// (e.g. the power profile held while playing).
+pub fn note(kind: &str, text: &str) {
+    write(Event::new(kind).with("text", text));
+}
+
+/// Record the audio setup (an `audio` line: format, host, sample rate,
+/// block size, device ...); the latest goes into an [`export`].
+pub fn audio(fields: Vec<(String, Value)>) {
+    write(Event { kind: "audio".into(), fields });
+}
+
+/// End the session: write the summary; a debug run's exit status (`None`
+/// without a run).
 pub fn end_run() -> Option<i32> {
-    let (rec, args) = RUN.get()?;
-    let s = rec.lock().ok()?.summary();
-    Some(args.status(&s))
+    let s = SESSION.get()?;
+    let summary = s.rec.lock().ok()?.summary();
+    s.run.get().map(|args| args.status(&summary))
 }
 
 /// SIGINT and SIGTERM end a debug run with its summary (Unix).
@@ -922,8 +1179,9 @@ mod launcher_tests {
         assert_eq!(d.play.as_deref(), Some(Path::new("song.geist")));
         assert_eq!(d.fail_on_late, Some(0));
         let (d, rest) = split(&["dreist", "--duration", "90", "--debug-log=/tmp/x.log"]).unwrap();
-        assert_eq!(rest, ["dreist"]);
-        assert_eq!((d.duration, d.log.as_deref()), (Some(90.0), Some(Path::new("/tmp/x.log"))));
+        // The log is always the platform's: `--debug-log` is not taken.
+        assert_eq!(rest, ["dreist", "--debug-log=/tmp/x.log"]);
+        assert_eq!(d.duration, Some(90.0));
         let (d, rest) = split(&["dreist", "--sample-rate", "44100"]).unwrap();
         assert!(!d.debug && rest.len() == 3);
         assert!(split(&["dreist", "--play"]).is_err());
