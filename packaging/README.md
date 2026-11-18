@@ -56,7 +56,7 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 
 ## Packages
 
-- **Homebrew** (macOS): `cask.sh` writes the cask for the macOS archive; the apps' release workflow pushes it to `koeves/homebrew-tap`.
+- **Homebrew** (macOS): `cask.sh` writes the cask for the Apple Silicon and Intel archives (Homebrew picks the Mac's); the apps' release workflow pushes it to `koeves/homebrew-tap`.
 - **apt** (Debian, Ubuntu): `deb.sh` builds a `.deb` from the Linux archive (`--system` layout under `/usr`, the app in `/opt/<App>`); `apt-publish.sh` adds it to the signed repository tree in `koeves/apt`.
 - **Release secrets** (each app repository): `HOMEBREW_TAP_TOKEN` and `APT_REPO_TOKEN`, fine-grained tokens with contents write access to `koeves/homebrew-tap` and `koeves/apt`, and `APT_GPG_PRIVATE_KEY`, the armored signing key.
 - **Without a secret** the release skips that step.

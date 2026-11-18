@@ -1,24 +1,29 @@
 #!/bin/sh
-# Write the Homebrew cask for an app's macOS release archive
-# (<App>-v<version>-macOS.zip: install.sh, <App>.app, <App>.vst3, <App>.clap)
-# to standard output. The install locations match packaging/README.md.
+# Write the Homebrew cask for an app's macOS release archives, one per kind
+# of Mac (<App>-v<version>-macOS-AppleSilicon.zip and -macOS-Intel.zip:
+# install.sh, <App>.app, <App>.vst3, <App>.clap) to standard output; Homebrew
+# picks the one for the Mac. The install locations match packaging/README.md.
 #
-#   packaging/cask.sh <App> <version> <sha256> <owner/repo> [description]
+#   packaging/cask.sh <App> <version> <arm64 sha256> <Intel sha256> <owner/repo> [description]
 set -eu
 
-[ $# -ge 4 ] || { sed -n '2,6p' "$0" >&2; exit 2; }
+[ $# -ge 5 ] || { sed -n '2,7p' "$0" >&2; exit 2; }
 app=$1
 version=${2#v}
-sha=$3
-repo=$4
-desc=${5:-"$app instrument: standalone app, VST3 and CLAP"}
+sha_arm=$3
+sha_intel=$4
+repo=$5
+desc=${6:-"$app instrument: standalone app, VST3 and CLAP"}
 token=$(printf '%s' "$app" | tr '[:upper:]' '[:lower:]')
-dir="$app-v#{version}-macOS"
+dir="$app-v#{version}-macOS-#{arch}"
 
 cat <<CASK
 cask "$token" do
+  arch arm: "AppleSilicon", intel: "Intel"
+
   version "$version"
-  sha256 "$sha"
+  sha256 arm:   "$sha_arm",
+         intel: "$sha_intel"
 
   url "https://github.com/$repo/releases/download/v#{version}/$dir.zip"
   name "$app"
@@ -30,7 +35,6 @@ cask "$token" do
     strategy :github_latest
   end
 
-  depends_on arch: :arm64
   depends_on macos: ">= :big_sur"
 
   app "$dir/$app.app"
