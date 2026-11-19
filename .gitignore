@@ -2,5 +2,7 @@
 .DS_Store
 crates/**/* [0-9].rs
 __pycache__/
-# Agent worktrees and local settings
-.claude/
+# Agent worktrees and local settings; the shared hooks are committed (AGENTS.md)
+.claude/*
+!.claude/settings.json
+!.claude/hooks/

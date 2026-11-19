@@ -58,6 +58,36 @@ jobs:
           done < <(git log --no-merges --format='%h %s' "$range")
           exit $bad
 
+  attribution:
+    # No Claude attribution or claude.ai links in the pull request's title,
+    # body or commits (AGENTS.md). Re-runs when the body is edited.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the title, body and commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          re='co-authored-by:[[:space:]]*claude|claude-session:|generated (with|by) \[?claude|claude-projects-attribution|claude\.ai/(code|project)|\[project thread\]'
+          bad=0
+          if printf '%s\n%s\n' "$TITLE" "$BODY" | grep -Eiq "$re"; then
+            echo "::error::The pull request title or body contains Claude attribution or a claude.ai link; remove it"
+            bad=1
+          fi
+          while IFS= read -r sha; do
+            if git log -1 --format=%B "$sha" | grep -Eiq "$re"; then
+              echo "::error::$sha: the commit message contains Claude attribution or a claude.ai link"
+              bad=1
+            fi
+          done < <(git rev-list --no-merges "$BASE..$HEAD")
+          exit $bad
+
   release-version:
     # On the release pull request (into main): the version its merge releases
     # (.github/release/next-version.sh; `Release-As: X.Y.Z` in the body or a
