@@ -20,6 +20,21 @@ pub(crate) fn sat(x: f32) -> f32 {
 pub(crate) fn cubic(buf: &[f32], mask: u32, pos: f32) -> f32 {
     let i = pos.floor() as i32 as u32;
     let t = pos - (i as i32) as f32;
+    cubic_from(buf, mask, i, t)
+}
+
+/// [`cubic`] at `back` samples behind ring index `idx`. The fraction is
+/// taken from `back` alone: past 2^21 an f32 `idx - back` keeps only
+/// quarter-sample steps.
+#[inline]
+pub(crate) fn cubic_back(buf: &[f32], mask: u32, idx: u32, back: f32) -> f32 {
+    let whole = back.ceil();
+    cubic_from(buf, mask, idx.wrapping_sub(whole as i32 as u32), whole - back)
+}
+
+/// The cubic between ring samples `i` and `i + 1`, at fraction `t`.
+#[inline]
+fn cubic_from(buf: &[f32], mask: u32, i: u32, t: f32) -> f32 {
     let a = buf[(i.wrapping_sub(1) & mask) as usize];
     let b = buf[(i & mask) as usize];
     let c = buf[(i.wrapping_add(1) & mask) as usize];
