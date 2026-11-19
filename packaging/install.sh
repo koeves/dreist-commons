@@ -13,7 +13,8 @@
 # Next to this script, each part installed when present:
 #   Linux: <App>.vst3, <App>-CLAP/ (<App>.clap + Resources/),
 #          <App>-App/ (<App>, Resources/, <app>.desktop, icons/)
-#   macOS: <App>.vst3, <App>.clap, <App>.app
+#   macOS: <App>.vst3, <App>.clap, <App>.app (Apple Silicon, Intel or
+#          universal; a build for the other kind of Mac is refused)
 #
 # The install locations are listed in packaging/README.md; settings and
 # content are left alone. DESTDIR=<dir> stages the same layout under <dir>
@@ -223,10 +224,33 @@ check_build() {
     echo "Not a complete build, nothing changed: $1" >&2
     exit 1
 }
+# macOS: a build for one architecture (the Apple Silicon or Intel archive)
+# must be this Mac's; a universal build fits both. Under Rosetta the Mac is
+# still Apple Silicon.
+if [ "$os" = Darwin ]; then
+    machine=$(uname -m)
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ] && machine=arm64
+fi
+mac_name() { if [ "$1" = arm64 ]; then echo "Apple Silicon"; else echo Intel; fi; }
+check_arch() {
+    [ "$os" = Darwin ] || return 0
+    case $(od -An -tx1 -N8 "$1" 2>/dev/null | tr -d ' \n' || true) in
+        cffaedfe0c000001) arch=arm64 ;;
+        cffaedfe07000001) arch=x86_64 ;;
+        *) return 0 ;;
+    esac
+    [ "$arch" = "$machine" ] && return 0
+    want=$(mac_name "$machine" | tr -d ' ')
+    echo "This build is for $(mac_name "$arch") Macs, this Mac is $(mac_name "$machine"): use the $app-<version>-macOS-$want archive; nothing changed" >&2
+    exit 1
+}
 found=0
 [ -d "$vst3" ] && { check_build "${vst3_bin:-$vst3/Contents}"; found=1; }
 [ -d "$clap" ] && { check_build "$clap_bin"; found=1; }
 [ -d "$appsrc" ] && { check_build "$app_bin"; found=1; }
+for f in "$vst3_bin" "$clap_bin" "$app_bin"; do
+    [ -f "$f" ] && check_arch "$f"
+done
 if [ "$found" = 0 ]; then
     echo "Nothing to install for $os next to this script ($here)" >&2
     exit 2

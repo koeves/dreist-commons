@@ -6,6 +6,7 @@ Install scripts the apps ship in their release archives: `install.sh` (Linux, ma
 - The same options everywhere: `--user`, `--system` (all users), `--uninstall`, `--purge` (with `--uninstall`: the diagnostics logs too), `--app <Name>` (uninstall without the files), `--help`.
 - Default: all users on Windows (administrator PowerShell), this user on Linux and macOS.
 - Every part is checked to be a complete build before anything installed is touched; a reinstall replaces the old version whole.
+- macOS: a build for the other kind of Mac (Apple Silicon or Intel) is refused and the right archive named; Rosetta counts as Apple Silicon.
 - Settings, content and the diagnostics logs stay on uninstall; `--purge` removes the logs of the user running it.
 - `DESTDIR=<dir>` (install.sh) stages the layout under `<dir>` for packages and tests.
 
@@ -47,11 +48,13 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 
 ## Archive layout
 
+One archive per system, `<App>-v<version>-<system>.zip` (Linux `.tar.gz`, keeping executable bits), unpacking into a folder of that name.
+
 | System | Next to the script |
 |---|---|
-| macOS | `<App>.vst3`, `<App>.clap`, `<App>.app` |
-| Windows | `<App>.vst3`, `<App>-CLAP\` (`<App>.clap`, `Resources\`), `<App>-App\` (`<App>.exe`, `Resources\`) |
-| Linux | `<App>.vst3`, `<App>-CLAP/` (`<App>.clap`, `Resources/`), `<App>-App/` (`<App>`, `Resources/`, `<app>.desktop`, `icons/`) |
+| `macOS-AppleSilicon`, `macOS-Intel` | `<App>.vst3`, `<App>.clap`, `<App>.app` |
+| `Windows` | `<App>.vst3`, `<App>-CLAP\` (`<App>.clap`, `Resources\`), `<App>-App\` (`<App>.exe`, `Resources\`) |
+| `Linux` | `<App>.vst3`, `<App>-CLAP/` (`<App>.clap`, `Resources/`), `<App>-App/` (`<App>`, `Resources/`, `<app>.desktop`, `icons/`) |
 
 ## Tests
 
