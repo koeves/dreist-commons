@@ -3,6 +3,10 @@
 //! menus.
 
 pub mod command;
+pub mod fxtext;
+pub mod options;
+pub mod swing;
 pub mod tabs;
+pub mod timeline;
 pub mod transmodvis;
 pub mod undo;

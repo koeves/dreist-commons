@@ -39,7 +39,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 | `dreist-engine` | Step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
 | `dreist-gui` | Skin-driven GUI toolkit (tiny-skia, baseview) |
 | `dreist-testkit` | Golden fingerprints and allocation counting for tests |
-| `dreist-editor-core` | Editor parts the apps share: commands to the engine, undo history, tab panels, modulator graphs |
+| `dreist-editor-core` | Editor parts the apps share: commands to the engine, undo history, options, tab panels, effect value texts, graphs |
 | `dreist-host` | Audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's session; features `audio`, `midi`, `dialog`, `session`, `clap-sys` |
 
 `vendor/` holds patched dependencies, added by the apps as `[patch]` entries:
