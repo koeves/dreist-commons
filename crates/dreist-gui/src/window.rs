@@ -101,6 +101,26 @@ struct Handler<T: WindowApp> {
     /// Frame counts and render time over each second: [`App::ui_load`],
     /// printed with `DREIST_GUI_STATS=1`.
     stats: FrameStats,
+    /// The least time between two frames drawn without input (see
+    /// [`pace`]), when the last one was drawn, and whether an input event
+    /// arrived since.
+    pace: std::time::Duration,
+    drawn_at: std::time::Instant,
+    input: bool,
+}
+
+/// The share of a core that frames nobody asked for (meters, playheads,
+/// animations) may take, and the slowest they are then drawn.
+const ANIMATION_SHARE: f64 = 0.25;
+const SLOWEST_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The least time between two frames drawn without input, when one takes
+/// `cost` to draw: none while every display frame fits in
+/// [`ANIMATION_SHARE`] of a core, else what keeps them within it (at most
+/// [`SLOWEST_FRAME`]). The audio thread shares the cores with these frames.
+fn pace(cost: std::time::Duration) -> std::time::Duration {
+    let spaced = cost.div_f64(ANIMATION_SHARE);
+    if spaced <= std::time::Duration::from_micros(16_667) { std::time::Duration::ZERO } else { spaced.min(SLOWEST_FRAME) }
 }
 
 /// What the window's frames did over the last second (a diagnostic).
@@ -108,6 +128,7 @@ struct FrameStats {
     since: std::time::Instant,
     frames: u32,
     idle: u32,
+    held: u32,
     full: u32,
     partial: u32,
     resizes: u32,
@@ -117,22 +138,32 @@ struct FrameStats {
 
 impl FrameStats {
     fn new(print: bool) -> FrameStats {
-        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, held: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
     }
 
     /// Each second: the share of a core the frames took (and the counts
-    /// printed when asked for).
-    fn report(&mut self) -> Option<f32> {
+    /// printed when asked for), and the mean time of a drawn frame.
+    fn report(&mut self) -> Option<(f32, std::time::Duration)> {
         let t = self.since.elapsed();
         if t.as_secs_f64() < 1.0 {
             return None;
         }
         let share = (self.busy.as_secs_f64() / t.as_secs_f64()) as f32;
         if self.print {
-            eprintln!("gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core", self.frames, self.idle, self.full, self.partial, self.resizes, share * 100.0);
+            eprintln!(
+                "gui: {} frames/s, {} idle, {} held, {} full, {} partial, {} resizes, {:.1} % of a core",
+                self.frames,
+                self.idle,
+                self.held,
+                self.full,
+                self.partial,
+                self.resizes,
+                share * 100.0
+            );
         }
+        let cost = self.busy.checked_div(self.full + self.partial).unwrap_or_default();
         *self = FrameStats::new(self.print);
-        Some(share)
+        Some((share, cost))
     }
 }
 
@@ -146,6 +177,7 @@ impl<T: WindowApp> Handler<T> {
             window.resize(Size::new(w as f64 * ui, h as f64 * ui));
             self.app.app().dirty = true;
             self.stats.resizes += 1;
+            self.input = true;
         }
         if !self.app.app().needs_redraw() {
             self.stats.idle += 1;
@@ -155,6 +187,14 @@ impl<T: WindowApp> Handler<T> {
         if self.surface.is_none() {
             return;
         }
+        // Costly frames nobody asked for wait their turn; what they would
+        // have drawn stays pending.
+        if !self.input && self.drawn_at.elapsed() < self.pace {
+            self.stats.held += 1;
+            return;
+        }
+        self.input = false;
+        self.drawn_at = std::time::Instant::now();
         let ui = self.app.app().ui_scale.max(0.25);
         self.app.render(scale * ui);
         // The device pixels the frame changed, when not all of them. A
@@ -242,12 +282,14 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         self.frame(window);
         self.stats.frames += 1;
         self.stats.busy += started.elapsed();
-        if let Some(share) = self.stats.report() {
+        if let Some((share, cost)) = self.stats.report() {
             self.app.app().ui_load = Some(share);
+            self.pace = pace(cost);
         }
     }
 
     fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
+        self.input = true;
         let set_mods = |app: &mut App, m: keyboard_types::Modifiers| {
             app.mods = crate::app::Mods {
                 shift: m.contains(keyboard_types::Modifiers::SHIFT),
@@ -422,7 +464,17 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()) }
+        Handler {
+            app,
+            surface,
+            scale: 1.0,
+            physical: (0, 0),
+            cursor: crate::cursor::Cursor::Arrow,
+            stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()),
+            pace: std::time::Duration::ZERO,
+            drawn_at: std::time::Instant::now(),
+            input: true,
+        }
     }
 }
 
@@ -449,4 +501,21 @@ pub fn open_parented_scaled<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut
 pub fn open_blocking<T: WindowApp>(mut app: T, title: &str) {
     let opts = options(&mut app, title, WindowScalePolicy::SystemScaleFactor);
     Window::open_blocking(opts, build(app));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Cheap frames are drawn every display frame; costly ones are spaced
+    /// to a quarter of a core, no slower than ten a second.
+    #[test]
+    fn costly_frames_are_spaced() {
+        assert_eq!(pace(Duration::ZERO), Duration::ZERO);
+        assert_eq!(pace(Duration::from_millis(4)), Duration::ZERO);
+        assert_eq!(pace(Duration::from_millis(8)), Duration::from_millis(32));
+        assert_eq!(pace(Duration::from_millis(20)), Duration::from_millis(80));
+        assert_eq!(pace(Duration::from_millis(60)), SLOWEST_FRAME);
+    }
 }
