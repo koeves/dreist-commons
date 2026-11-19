@@ -89,6 +89,30 @@ impl Redact {
         }
     }
 
+    /// A log line's [`Event::body`] (`kind key=value key="a b" ...`) with
+    /// each value redacted, as [`Redact::event`] would.
+    pub fn body(&self, body: &str) -> String {
+        let (kind, mut rest) = body.split_once(' ').unwrap_or((body, ""));
+        let mut out = kind.to_string();
+        while let Some((key, after)) = rest.split_once('=') {
+            let (value, next) = match after.strip_prefix('"') {
+                Some(q) => {
+                    let end = q.find('"').unwrap_or(q.len());
+                    (&q[..end], q.get(end + 1..).unwrap_or("").trim_start())
+                }
+                None => {
+                    let end = after.find(' ').unwrap_or(after.len());
+                    (&after[..end], after[end..].trim_start())
+                }
+            };
+            let v = self.text(value);
+            let v = if v.contains(' ') || v.is_empty() { format!("\"{v}\"") } else { v };
+            out.push_str(&format!(" {key}={v}"));
+            rest = next;
+        }
+        out
+    }
+
     /// An event with its text fields redacted.
     pub fn event(&self, e: &Event) -> Event {
         Event {
@@ -182,9 +206,9 @@ pub fn report(settings: &[(String, String)], keep: &[PathBuf]) -> String {
         out.push(String::new());
         out.push("# log".into());
         let first = rec.recent().next().map(|(t, _)| *t);
-        for (t, e) in rec.recent() {
+        for (t, body) in rec.recent() {
             let since = first.and_then(|f| t.duration_since(f).ok()).unwrap_or_default();
-            out.push(r.event(e).text(*t, since));
+            out.push(format!("{} +{:.3}s {}", iso_utc(*t), since.as_secs_f64(), r.body(body)));
         }
     }
     out.push(String::new());
@@ -202,7 +226,24 @@ pub fn export(settings: &[(String, String)], keep: &[PathBuf]) -> std::io::Resul
     let stamp: String = iso_utc(SystemTime::now()).chars().take(19).filter(|c| c.is_ascii_digit() || *c == 'T').collect();
     let path = dir.join(format!("{app}-diagnostics-{stamp}.txt"));
     std::fs::write(&path, report(settings, keep))?;
+    prune_exports(&dir, &app, KEEP_EXPORTS);
     Ok(path)
+}
+
+/// Exports kept in the log folder; older ones go when a new one is written.
+pub const KEEP_EXPORTS: usize = 5;
+
+/// Remove all but the newest `keep` `<app>-diagnostics-*.txt` in `dir`
+/// (their names sort by time).
+fn prune_exports(dir: &std::path::Path, app: &str, keep: usize) {
+    let prefix = format!("{app}-diagnostics-");
+    let mut names: Vec<_> =
+        std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(&prefix) && n.ends_with(".txt")).collect();
+    names.sort();
+    let old = names.len().saturating_sub(keep);
+    for n in &names[..old] {
+        let _ = std::fs::remove_file(dir.join(n));
+    }
 }
 
 #[cfg(test)]
@@ -222,6 +263,36 @@ mod tests {
         assert_eq!(r.text("48000"), "48000");
         // A kept folder's look-alike is not kept.
         assert_eq!(r.text("/Users/kim/Library/Logs/Einst2/x"), "<path>");
+    }
+
+    #[test]
+    fn stored_lines_redact_as_their_events() {
+        let r = Redact::with("/Users/kim", "kim", &["/Users/kim/Library/Logs/Einst"]);
+        for e in [
+            Event::new("start").with("args", "--play /Users/kim/My Song.geist --sample-rate 48000").with("cpus", 8u64).with("cpu", "Apple M3"),
+            Event::new("run").with("log", "/Users/kim/Library/Logs/Einst/einst.log"),
+            Event::new("audio").with("host", "Kim's Host").with("rate", 48_000.0f32).with("empty", ""),
+            Event::new("stats").with("pos", "3.2").with("dsp", 31.25f64),
+            Event::new("summary"),
+        ] {
+            assert_eq!(r.body(&e.body()), r.event(&e).body(), "{e:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_newest_exports_stay() {
+        let dir = std::env::temp_dir().join(format!("dreist-prune-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..8 {
+            std::fs::write(dir.join(format!("einst-diagnostics-20261119T0800{i:02}.txt")), "x").unwrap();
+        }
+        std::fs::write(dir.join("einst.log"), "x").unwrap();
+        prune_exports(&dir, "einst", 5);
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(left.len(), 6, "{left:?}");
+        assert!(left.contains(&"einst.log".to_string()) && left[0] == "einst-diagnostics-20261119T080003.txt", "{left:?}");
     }
 
     #[test]

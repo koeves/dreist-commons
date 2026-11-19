@@ -80,13 +80,16 @@ sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-de
 
 Every app and plugin keeps a diagnostics log (`dreist_engine::diag`), and the main menu exports it as one file to share.
 
-- **Log**: `~/Library/Logs/<App>/<app>.log` (macOS), `$XDG_STATE_HOME/<App>/<app>.log` (Linux), `%LOCALAPPDATA%\<App>\Logs\<app>.log` (Windows); 5 MB, three older files kept.
-- **Shared**: one log per app; with several plugin instances in a host, the first one's audio thread reports.
+- **Log**: `~/Library/Logs/<App>/<app>.log` (macOS), `$XDG_STATE_HOME/<App>/<app>.log` (Linux), `%LOCALAPPDATA%\<App>\Logs\<app>.log` (Windows); 5 MB, three older files kept, 20 MB at most.
+- **Shared**: one log per app; with several plugin instances in a host, the first one's audio thread reports, and a writer that finds the log rotated by another follows it.
+- **Memory**: about 27 KB fixed and up to about 100 KB for the last 600 lines an export holds.
+- **Thread**: one per process, waking every 100 ms while playing or in a debug run and every second otherwise.
 - **Audio thread**: block timing, the song position and late blocks go through atomics only, without locks or allocations.
 - **Line format**: `<UTC time> +<seconds>s <kind> key=value ...`, values with spaces in double quotes.
 - **Kinds**: `start` (system, versions, pid), `audio` (format, host, sample rate, block size), `stats` (DSP load %, worst block %, late blocks, memory, output peak), `late` and `slow` blocks (song position, timing), `summary`.
 - **Stats**: every second while playing or after a late block, else once a minute.
-- **Export**: "Export diagnostics" writes `<app>-diagnostics-<time>.txt` next to the log and shows it; "Copy diagnostics" puts the same text on the clipboard.
+- **Export**: "Export diagnostics" writes `<app>-diagnostics-<time>.txt` next to the log and shows it, keeping the newest five; "Copy diagnostics" puts the same text on the clipboard.
+- **Cleanup**: rotation caps the log, older exports go, the `<app>-debug.log` files of earlier debug runs go at start; `install.sh --uninstall --purge` removes the folder.
 - **Export format**: `# system`, `# audio`, `# run`, `# settings` and `# log` sections of `key=value` or log lines.
 - **Redaction**: paths outside the app's settings and log folders become `<path>`, the login name `<user>`.
 - **Debug runs**: `--debug` echoes the log to stderr (`--debug-json`: JSON lines) with stats every second; `--play`, `--duration`, `--until-end` and `--fail-on-late` drive playback tests.

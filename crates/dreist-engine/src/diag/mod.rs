@@ -437,7 +437,12 @@ impl Event {
 
     /// `2026-11-15T16:20:01.123Z +12.345s stats dsp=31.2 ...`
     pub fn text(&self, wall: SystemTime, elapsed: Duration) -> String {
-        let mut s = format!("{} +{:.3}s {}", iso_utc(wall), elapsed.as_secs_f64(), self.kind);
+        format!("{} +{:.3}s {}", iso_utc(wall), elapsed.as_secs_f64(), self.body())
+    }
+
+    /// The line after its times: `stats dsp=31.2 ...`.
+    pub fn body(&self) -> String {
+        let mut s = self.kind.clone();
         for (k, v) in &self.fields {
             let v = match v {
                 Value::Text(t) if t.contains(' ') || t.is_empty() => format!("\"{}\"", t.replace('"', "'")),
@@ -565,12 +570,19 @@ impl Log {
             }
         }
         if let Some((path, f, len)) = self.file.as_mut() {
+            // Another writer (a second host, or the other plugin format in
+            // this one) may have rotated the file: follow it to the new one.
+            if moved(path, f) {
+                if let Ok(nf) = std::fs::OpenOptions::new().create(true).append(true).open(&*path) {
+                    *len = nf.metadata().map(|m| m.len()).unwrap_or(0);
+                    *f = nf;
+                }
+            }
             if writeln!(f, "{line}").is_ok() {
                 *len += line.len() as u64 + 1;
             }
-            // Another process (a second host) may share the file: rotate
-            // by its real length.
-            if *len > ROTATE_BYTES && f.metadata().map_or(true, |m| m.len() > ROTATE_BYTES) {
+            // Rotate by the file's real length (others append to it too).
+            if *len > ROTATE_BYTES && std::fs::metadata(&*path).map_or(true, |m| m.len() > ROTATE_BYTES) {
                 let path = path.clone();
                 rotate(&path);
                 if let Ok(nf) = File::create(&path) {
@@ -578,6 +590,25 @@ impl Log {
                 }
             }
         }
+    }
+}
+
+/// Whether `path` no longer names the open file `f` (renamed by a rotation
+/// elsewhere; Unix, where an open file can be renamed).
+fn moved(path: &Path, f: &File) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(path), f.metadata()) {
+            (Ok(p), Ok(o)) => (p.dev(), p.ino()) != (o.dev(), o.ino()),
+            (Err(_), _) => true,
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, f);
+        false
     }
 }
 
@@ -744,8 +775,8 @@ pub struct Recorder {
     started: Instant,
     /// Stats every second, playing or not (debug runs).
     every_second: bool,
-    /// The latest lines, for [`export`].
-    recent: VecDeque<(SystemTime, Event)>,
+    /// The latest lines (their time and [`Event::body`]), for [`export`].
+    recent: VecDeque<(SystemTime, String)>,
     /// The latest `audio` line (the audio setup).
     audio: Option<Event>,
 }
@@ -777,11 +808,13 @@ impl Recorder {
         if self.recent.len() == RECENT {
             self.recent.pop_front();
         }
-        self.recent.push_back((SystemTime::now(), e));
+        let mut body = e.body();
+        body.shrink_to_fit();
+        self.recent.push_back((SystemTime::now(), body));
     }
 
-    /// The kept lines, oldest first.
-    pub fn recent(&self) -> impl Iterator<Item = &(SystemTime, Event)> {
+    /// The kept lines (time, [`Event::body`]), oldest first.
+    pub fn recent(&self) -> impl Iterator<Item = &(SystemTime, String)> {
         self.recent.iter()
     }
 
@@ -943,6 +976,48 @@ mod tests {
     }
 
     #[test]
+    fn two_writers_of_one_log_follow_its_rotation() {
+        let dir = std::env::temp_dir().join(format!("dreist-diag-shared-{}", std::process::id()));
+        let path = dir.join("app.log");
+        let (mut a, mut b) = (Log::open(Some(&path), false, false), Log::open(Some(&path), false, false));
+        a.write(&Event::new("start").with("who", "a"));
+        b.write(&Event::new("start").with("who", "b"));
+        // A rotates (as it would past ROTATE_BYTES); B's next line goes to
+        // the new file, not into the rotated one.
+        rotate(&path);
+        a.write(&Event::new("stats").with("who", "a"));
+        b.write(&Event::new("stats").with("who", "b"));
+        let now = std::fs::read_to_string(&path).unwrap();
+        let old = std::fs::read_to_string(dir.join("app.log.1")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        if cfg!(unix) {
+            assert!(now.contains("stats who=a") && now.contains("stats who=b") && !old.contains("stats"), "{now}\n--\n{old}");
+        }
+        assert!(old.contains("start who=a") && old.contains("start who=b"), "{old}");
+    }
+
+    #[test]
+    fn old_debug_logs_go_at_start() {
+        let dir = std::env::temp_dir().join(format!("dreist-debug-logs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["einst-debug.log", "einst-debug.log.2", "einst.log", "einst-diagnostics-1.txt"] {
+            std::fs::write(dir.join(n), "x").unwrap();
+        }
+        remove_debug_logs(&dir, "Einst");
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(left, ["einst-diagnostics-1.txt", "einst.log"]);
+    }
+
+    #[test]
+    fn the_thread_sleeps_longer_while_idle() {
+        assert_eq!(poll_interval(true, false), Duration::from_millis(100));
+        assert_eq!(poll_interval(false, true), Duration::from_millis(100));
+        assert_eq!(poll_interval(false, false), Duration::from_secs(1));
+    }
+
+    #[test]
     fn logs_go_to_the_platform_folder() {
         let d = log_dir("Dreist").unwrap();
         assert!(d.ends_with("Dreist") || d.ends_with("Dreist/Logs") || d.ends_with("Dreist\\Logs"), "{d:?}");
@@ -1030,7 +1105,11 @@ fn start_session(app: &str, version: &str, fields: Vec<(String, Value)>, run: Op
     let mut fresh = false;
     let session = SESSION.get_or_init(|| {
         fresh = true;
-        let path = log_dir(app).map(|d| d.join(format!("{}.log", app.to_lowercase())));
+        let dir = log_dir(app);
+        if let Some(d) = &dir {
+            remove_debug_logs(d, app);
+        }
+        let path = dir.map(|d| d.join(format!("{}.log", app.to_lowercase())));
         let mut log = Log::open(path.as_deref(), false, false);
         if let Some(r) = run {
             log.echo(true, r.json);
@@ -1049,6 +1128,23 @@ fn start_session(app: &str, version: &str, fields: Vec<(String, Value)>, run: Op
     monitor
 }
 
+/// Remove the `<app>-debug.log*` files the debug runs wrote before the
+/// session log replaced them.
+fn remove_debug_logs(dir: &Path, app: &str) {
+    let prefix = format!("{}-debug.log", app.to_lowercase());
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// How long the session's thread sleeps: 100 ms while playing or in a
+/// debug run (late blocks come out right away), 1 s otherwise.
+fn poll_interval(playing: bool, run: bool) -> Duration {
+    Duration::from_millis(if playing || run { 100 } else { 1000 })
+}
+
 /// The session's thread: record, and end a debug run when it is over.
 fn poll_loop() {
     let Some(session) = SESSION.get() else { return };
@@ -1056,7 +1152,7 @@ fn poll_loop() {
     let started = Instant::now();
     let (mut was_playing, mut last) = (false, 0.0f64);
     loop {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(poll_interval(monitor.playing(), session.run.get().is_some()));
         if let Ok(mut r) = session.rec.lock() {
             r.poll();
         }
