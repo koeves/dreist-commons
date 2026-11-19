@@ -1,0 +1,16 @@
+[package]
+name = "dreist-editor-core"
+description = "Editor parts the apps share: the commands to the engine, undo history, tab panels and modulator graphs"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+dreist-formats = { path = "../dreist-formats" }
+dreist-dsp = { path = "../dreist-dsp" }
+dreist-engine = { path = "../dreist-engine" }
+dreist-gui = { path = "../dreist-gui" }
+
+[lints]
+workspace = true
