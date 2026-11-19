@@ -197,15 +197,11 @@ impl<T: WindowApp> Handler<T> {
         self.drawn_at = std::time::Instant::now();
         let ui = self.app.app().ui_scale.max(0.25);
         self.app.render(scale * ui);
-        // The device pixels the frame changed, when not all of them. A
-        // rectangle off the device pixel grid (a fractional scale) makes
-        // the whole frame go out instead; empty ones are left out.
+        // The device pixels the frame changed, when not all of them (every
+        // pixel a rectangle touches, at fractional scales).
         let damage: Option<Vec<(u32, u32, u32, u32)>> = {
             let app = self.app.app();
-            let root = app.root.rect;
-            app.frame_damage
-                .as_ref()
-                .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+            app.frame_damage.as_ref().map(|rs| rs.iter().filter_map(|&r| crate::device_cover(&app.root, scale * ui, r)).collect())
         };
         match damage {
             Some(_) => self.stats.partial += 1,
