@@ -48,7 +48,8 @@ pub struct Renderer<'s> {
 /// depends on (the control's [`Ctrl::draw_hash`], the scale, its parent
 /// being on): a frame composites a control that drew the same before
 /// instead of rasterising it again. A drawing is kept the second time it
-/// is seen, so controls that change every frame (meters) do not churn it.
+/// is seen, so controls that change every frame (meters) do not churn it,
+/// and only as the pixels it painted.
 #[derive(Default)]
 pub struct DrawCache {
     inner: std::cell::RefCell<CacheInner>,
@@ -57,16 +58,78 @@ pub struct DrawCache {
 #[derive(Default)]
 struct CacheInner {
     seen: std::collections::HashSet<CacheKey>,
-    pixels: std::collections::HashMap<CacheKey, tiny_skia::Pixmap>,
+    pixels: std::collections::HashMap<CacheKey, Kept>,
     bytes: usize,
+    /// Counts lookups: a kept drawing's `used` is the last one that hit it.
+    clock: u64,
+}
+
+/// A kept drawing: the part of the control's layer that holds any pixels
+/// (`None`: the control draws nothing itself) and where that part sits in
+/// the layer.
+struct Kept {
+    part: Option<(tiny_skia::Pixmap, (i32, i32))>,
+    used: u64,
 }
 
 type CacheKey = (u64, u32, bool);
 
-/// Bytes of pixels kept (cleared when exceeded) and drawings remembered as
-/// seen once.
-const CACHE_BYTES: usize = 64 << 20;
+/// Bytes of pixels kept (the least recently used go first when exceeded)
+/// and drawings remembered as seen once.
+const CACHE_BYTES: usize = 96 << 20;
 const CACHE_SEEN: usize = 1 << 16;
+
+/// The rows and columns of `layer` that hold any pixel, as their own
+/// pixmap with its offset in the layer; `None` when the layer is empty.
+fn painted_part(layer: &tiny_skia::Pixmap) -> Option<(tiny_skia::Pixmap, (i32, i32))> {
+    let (w, h) = (layer.width() as usize, layer.height() as usize);
+    let data = layer.data();
+    let empty = |row: &[u8]| row.as_chunks::<4>().0.iter().all(|p| u32::from_ne_bytes(*p) == 0);
+    let row = |y: usize| &data[y * w * 4..(y + 1) * w * 4];
+    let y0 = (0..h).find(|&y| !empty(row(y)))?;
+    let y1 = (y0..h).rfind(|&y| !empty(row(y)))? + 1;
+    let (mut x0, mut x1) = (w, 0);
+    for y in y0..y1 {
+        let px = row(y).as_chunks::<4>().0;
+        if let Some(a) = px[..x0].iter().position(|p| u32::from_ne_bytes(*p) != 0) {
+            x0 = a;
+        }
+        if let Some(b) = px[x1..].iter().rposition(|p| u32::from_ne_bytes(*p) != 0) {
+            x1 += b + 1;
+        }
+    }
+    if (x0, y0, x1, y1) == (0, 0, w, h) {
+        return Some((layer.clone(), (0, 0)));
+    }
+    let mut part = tiny_skia::Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32)?;
+    let pw = (x1 - x0) * 4;
+    for y in y0..y1 {
+        part.data_mut()[(y - y0) * pw..(y - y0 + 1) * pw].copy_from_slice(&data[(y * w + x0) * 4..(y * w + x1) * 4]);
+    }
+    Some((part, (x0 as i32, y0 as i32)))
+}
+
+impl CacheInner {
+    /// Drop the least recently used drawings until `need` more bytes fit
+    /// in three quarters of `budget` (so the next ones do not evict again
+    /// at once).
+    fn make_room(&mut self, need: usize, budget: usize) {
+        if self.bytes + need <= budget {
+            return;
+        }
+        let mut by_age: Vec<(u64, CacheKey, usize)> = self.pixels.iter().map(|(k, v)| (v.used, *k, v.part.as_ref().map_or(0, |(pm, _)| pm.data().len()))).collect();
+        by_age.sort_unstable_by_key(|e| e.0);
+        for (_, k, size) in by_age {
+            if self.bytes + need <= budget / 4 * 3 {
+                break;
+            }
+            if size > 0 {
+                self.pixels.remove(&k);
+                self.bytes -= size;
+            }
+        }
+    }
+}
 
 impl DrawCache {
     pub fn clear(&self) {
@@ -312,14 +375,20 @@ impl<'s> Renderer<'s> {
         }
         let key = (c.draw_hash(), s.to_bits(), self.parent_on.get());
         // Only the part inside the clip (whole device pixels at whole scales).
-        let blit = |p: &mut Painter, px: &tiny_skia::Pixmap| {
-            let (cx0, cy0) = ((cx as f32 * s).floor() as i32, (cy as f32 * s).floor() as i32);
-            let (cx1, cy1) = (((cx + cw) as f32 * s).ceil() as i32, ((cy + ch) as f32 * s).ceil() as i32);
-            let area = (cx0.max(dx as i32), cy0.max(dy as i32), cx1.min(dx as i32 + lw as i32), cy1.min(dy as i32 + lh as i32));
-            crate::paint::blend_over(p.pm, px, (dx as i32 - m, dy as i32 - m), area);
-        };
-        if let Some(px) = cache.inner.borrow().pixels.get(&key) {
-            return blit(p, px);
+        let (cx0, cy0) = ((cx as f32 * s).floor() as i32, (cy as f32 * s).floor() as i32);
+        let (cx1, cy1) = (((cx + cw) as f32 * s).ceil() as i32, ((cy + ch) as f32 * s).ceil() as i32);
+        let area = (cx0.max(dx as i32), cy0.max(dy as i32), cx1.min(dx as i32 + lw as i32), cy1.min(dy as i32 + lh as i32));
+        {
+            let mut inner = cache.inner.borrow_mut();
+            inner.clock += 1;
+            let now = inner.clock;
+            if let Some(kept) = inner.pixels.get_mut(&key) {
+                kept.used = now;
+                if let Some((px, (ox, oy))) = &kept.part {
+                    crate::paint::blend_over(p.pm, px, (dx as i32 - m + ox, dy as i32 - m + oy), area);
+                }
+                return;
+            }
         }
         // Always through a layer, so a frame draws the same pixels whether
         // the drawing was kept or not; kept the second time it is seen.
@@ -330,7 +399,7 @@ impl<'s> Renderer<'s> {
             lp.clip = (M, M, c.rect.w, c.rect.h);
             self.draw_self(&mut lp, c);
         }
-        blit(p, &layer);
+        crate::paint::blend_over(p.pm, &layer, (dx as i32 - m, dy as i32 - m), area);
         let mut inner = cache.inner.borrow_mut();
         if !inner.seen.contains(&key) {
             if inner.seen.len() >= CACHE_SEEN {
@@ -339,13 +408,18 @@ impl<'s> Renderer<'s> {
             inner.seen.insert(key);
             return;
         }
-        let size = layer.data().len();
-        if inner.bytes + size > CACHE_BYTES {
-            inner.pixels.clear();
-            inner.bytes = 0;
+        // Only the pixels it painted are kept: most panels paint nothing
+        // of their own, or a small part of their rectangle.
+        let part = painted_part(&layer);
+        let size = part.as_ref().map_or(0, |(pm, _)| pm.data().len());
+        inner.make_room(size, CACHE_BYTES);
+        // Drawings without pixels cost no bytes; they go by count.
+        if inner.pixels.len() >= CACHE_SEEN {
+            inner.pixels.retain(|_, k| k.part.is_some());
         }
         inner.bytes += size;
-        inner.pixels.insert(key, layer);
+        let used = inner.clock;
+        inner.pixels.insert(key, Kept { part, used });
     }
 
     /// [re:527038]: draw `c` into a layer, composite it.
@@ -2481,6 +2555,51 @@ mod tests {
     use crate::style::Style;
 
     /// A stylesheet with `name` of element class `class` holding `attrs`.
+    /// A kept drawing is the painted part of its layer, with where it
+    /// sits; a layer without pixels keeps none.
+    #[test]
+    fn kept_drawings_hold_only_painted_pixels() {
+        let mut layer = tiny_skia::Pixmap::new(40, 30).unwrap();
+        assert!(painted_part(&layer).is_none());
+        for (x, y) in [(7, 5), (20, 11), (12, 18)] {
+            layer.data_mut()[(y * 40 + x) * 4..(y * 40 + x) * 4 + 4].copy_from_slice(&[10, 20, 30, 255]);
+        }
+        let (part, at) = painted_part(&layer).unwrap();
+        assert_eq!((part.width(), part.height(), at), (14, 14, (7, 5)));
+        let mut whole = tiny_skia::Pixmap::new(40, 30).unwrap();
+        blend_whole(&mut whole, &part, at);
+        assert_eq!(whole.data(), layer.data());
+        layer.fill(tiny_skia::Color::WHITE);
+        let (part, at) = painted_part(&layer).unwrap();
+        assert_eq!((part.width(), part.height(), at), (40, 30, (0, 0)));
+    }
+
+    fn blend_whole(dst: &mut tiny_skia::Pixmap, src: &tiny_skia::Pixmap, at: (i32, i32)) {
+        let area = (0, 0, dst.width() as i32, dst.height() as i32);
+        crate::paint::blend_over(dst, src, at, area);
+    }
+
+    /// Past the budget the drawings used longest ago go; the recent ones
+    /// and those without pixels stay.
+    #[test]
+    fn a_full_cache_drops_the_least_recently_used() {
+        let mut inner = CacheInner::default();
+        let kept = |used| Kept { part: tiny_skia::Pixmap::new(10, 10).map(|pm| (pm, (0, 0))), used };
+        for k in 0..8u64 {
+            inner.pixels.insert((k, 0, false), kept(k));
+            inner.bytes += 400;
+        }
+        inner.pixels.insert((99, 0, false), Kept { part: None, used: 0 });
+        inner.make_room(400, 3200);
+        assert_eq!(inner.bytes, 2000);
+        for k in 0..8u64 {
+            assert_eq!(inner.pixels.contains_key(&(k, 0, false)), k >= 3, "drawing {k}");
+        }
+        assert!(inner.pixels.contains_key(&(99, 0, false)));
+        inner.make_room(400, 3200);
+        assert_eq!(inner.bytes, 2000, "room already");
+    }
+
     fn sheet(styles: &[(&str, &str, &[(&str, &str)])]) -> StyleSheet {
         let mut s = StyleSheet::new();
         for (name, class, attrs) in styles {
