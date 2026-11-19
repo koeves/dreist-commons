@@ -527,7 +527,7 @@ impl App {
         self.hide_tooltip();
         let (ax, ay) = self.origin(anchor);
         let (aw, ah) = self.ctrl(anchor).map(|c| (c.rect.w, c.rect.h)).unwrap_or((100, 20));
-        let w = crate::menu::menu_width(&self.skin.styles, &mut self.fonts, &items, aw as f32);
+        let w = crate::menu::menu_width(&self.skin.styles, &mut self.fonts, &items, checked, aw as f32);
         let attached = self.ctrl(anchor).is_some_and(|c| c.class == "CtrlPopupButton");
         let mut m = crate::menu::Menu { anchor: anchor.to_vec(), items, checked, x: ax as f32, y: (ay + ah) as f32, w, hover: None, attached };
         let (rw, rh) = (self.root.rect.w as f32, self.root.rect.h as f32);
@@ -2515,6 +2515,19 @@ mod tests {
         app.mouse_move(20.0, 20.0);
         assert!(app.mouse_down(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { name, .. } if name == "P")));
         assert!(!app.mouse_up(MouseButton::Left).iter().any(|e| matches!(e, UiEvent::Clicked { .. })));
+    }
+
+    /// A popup button's menu marks its current item with a check, so it
+    /// gets the icon column: its text must still fit (issue: "Engine group
+    /// 1" in the choke menu lost its number).
+    #[test]
+    fn checked_menus_make_room_for_the_check() {
+        let mut app = v2_app(vec![v2_ctrl("CtrlPopupButton", "P", crate::ctrl::Rect::new(10, 10, 20, 20), 0.0)]);
+        let items = || vec!["Not cut".to_string(), "Engine group 1".into(), "Global group 8".into()];
+        app.open_menu(&[0], items(), None);
+        let plain = app.menu.as_ref().unwrap().w;
+        app.open_menu(&[0], items(), Some(1));
+        assert_eq!(app.menu.as_ref().unwrap().w, plain + 20.0);
     }
 
     /// [re:9c68e5]: second-generation menu items are picked on the
