@@ -120,14 +120,14 @@ pub fn metronome_sound() -> String {
 /// `~/.config/<settings_dir>`; `dreist_formats::paths::settings_base`). On first use a
 /// folder under one of the profile's earlier names is moved there.
 pub fn settings_dir() -> Option<PathBuf> {
-    // Unit tests get a scratch folder instead of the user's.
-    if let Some(d) = test_settings_dir() {
-        return Some(d);
-    }
-    // A separate settings folder (tools, fuzzing).
+    // A separate settings folder (tools, fuzzing, a test that names one).
     let app = dreist_formats::profile::get();
     if let Some(d) = std::env::var_os(app.settings_env) {
         return Some(PathBuf::from(d));
+    }
+    // Unit tests get a scratch folder instead of the user's.
+    if let Some(d) = test_settings_dir() {
+        return Some(d);
     }
     let base = dreist_formats::paths::settings_base()?;
     static MIGRATED: std::sync::Once = std::sync::Once::new();
