@@ -2002,7 +2002,8 @@ impl App {
                     }
                 }
             }
-            let damage_rects = merge_rects(std::mem::take(&mut damage));
+            // At a fractional scale, on the lines that fall on device pixels.
+            let damage_rects = merge_rects(std::mem::take(&mut damage).into_iter().map(|r| crate::device_aligned(&self.root, scale, r)).collect());
             // Anything else repainted under the menu makes the kept pixels
             // stale.
             if self.menu_under.as_ref().is_some_and(|(_, u, _)| damage_rects.iter().any(|r| r.intersects(u))) {
@@ -2166,7 +2167,7 @@ mod tests {
         let button = Ctrl { class: "CtrlPanel".into(), name: "Opener".into(), rect: crate::ctrl::Rect::new(20, 10, 40, 16), visible: true, enabled: true, ..Ctrl::default() };
         let kids = vec![panel("Under", crate::ctrl::Rect::new(10, 30, 120, 90), "#336699"), panel("Beside", crate::ctrl::Rect::new(160, 30, 30, 30), "#996633"), button];
         let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 200, 160), visible: true, enabled: true, children: kids, ..Ctrl::default() };
-        for scale in [1.0f32, 2.0] {
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
             let mut app = App::new(skin.clone(), root.clone());
             let _ = app.render_frame_with(scale, None);
             app.open_menu(&[2], vec!["One".into(), "Two".into(), String::new(), "Three".into()], None);
@@ -2215,7 +2216,7 @@ mod tests {
             children: vec![back, button("Toggle", 10, false), button("Opener", 60, true)],
             ..Ctrl::default()
         };
-        for scale in [1.0f32, 2.0] {
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
             let mut app = App::new(skin.clone(), root.clone());
             let _ = app.render_frame_with(scale, None);
             let check = |app: &mut App, what: &str| {
@@ -2289,7 +2290,7 @@ mod tests {
         label.set_attr("fillColour", "#204060".into());
         let root = Ctrl { class: "root".into(), rect: crate::ctrl::Rect::new(0, 0, 120, 80), visible: true, enabled: true, children: vec![bar("BarA", 10), bar("BarB", 30), label], ..Ctrl::default() };
         let state = std::cell::Cell::new([30u8, 50]);
-        for scale in [1.0f32, 2.0] {
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
             let mut app = App::new(skin.clone(), root.clone());
             let d = Bars(&state);
             let _ = app.render_frame_with(scale, Some(&d));
