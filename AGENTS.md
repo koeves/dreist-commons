@@ -39,7 +39,6 @@ resources, IDs, menus, readers) in the apps, not here.
 
 ## Build
 
-    export PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --features dreist-gui/window -- -D warnings
