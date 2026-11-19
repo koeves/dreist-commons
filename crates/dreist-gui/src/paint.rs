@@ -124,16 +124,58 @@ pub fn blend_over(dst: &mut Pixmap, src: &Pixmap, at: (i32, i32), area: (i32, i3
         let sy = (y - at.1) as usize;
         let srow = &s[(sy * sw + (x0 - at.0) as usize) * 4..(sy * sw + (x1 - at.0) as usize) * 4];
         let drow = &mut d[(y as usize * dw + x0 as usize) * 4..(y as usize * dw + x1 as usize) * 4];
-        for (dp, sp) in drow.as_chunks_mut::<4>().0.iter_mut().zip(srow.as_chunks::<4>().0) {
-            let sa = sp[3] as u32;
-            if sa == 255 {
-                dp.copy_from_slice(sp);
-            } else if sa != 0 {
-                let inv = 255 - sa;
-                for k in 0..4 {
-                    let v = dp[k] as u32 * inv + 128;
-                    dp[k] = (sp[k] as u32 + ((v + (v >> 8)) >> 8)).min(255) as u8;
-                }
+        // Eight pixels at a time: kept drawings are mostly runs of clear
+        // or of opaque pixels, which need no arithmetic.
+        let (d8, dtail) = drow.as_chunks_mut::<32>();
+        let (s8, stail) = srow.as_chunks::<32>();
+        for (dp, sp) in d8.iter_mut().zip(s8) {
+            match alpha_run(sp) {
+                AlphaRun::Clear => {}
+                AlphaRun::Opaque => *dp = *sp,
+                AlphaRun::Mixed => blend_pixels(dp, sp),
+            }
+        }
+        blend_pixels(dtail, stail);
+    }
+}
+
+enum AlphaRun {
+    Clear,
+    Opaque,
+    Mixed,
+}
+
+/// Whether eight premultiplied pixels are all clear, all opaque or neither.
+#[inline]
+fn alpha_run(px: &[u8; 32]) -> AlphaRun {
+    const ALPHA: u64 = 0xff00_0000_ff00_0000;
+    let (mut any, mut all) = (0u64, ALPHA);
+    for w in px.as_chunks::<8>().0 {
+        let w = u64::from_le_bytes(*w);
+        any |= w;
+        all &= w;
+    }
+    if any == 0 {
+        AlphaRun::Clear
+    } else if all == ALPHA {
+        AlphaRun::Opaque
+    } else {
+        AlphaRun::Mixed
+    }
+}
+
+/// Source-over of premultiplied pixels, one at a time.
+#[inline]
+fn blend_pixels(dst: &mut [u8], src: &[u8]) {
+    for (dp, sp) in dst.as_chunks_mut::<4>().0.iter_mut().zip(src.as_chunks::<4>().0) {
+        let sa = sp[3] as u32;
+        if sa == 255 {
+            dp.copy_from_slice(sp);
+        } else if sa != 0 {
+            let inv = 255 - sa;
+            for k in 0..4 {
+                let v = dp[k] as u32 * inv + 128;
+                dp[k] = (sp[k] as u32 + ((v + (v >> 8)) >> 8)).min(255) as u8;
             }
         }
     }
@@ -1049,5 +1091,35 @@ mod mask_tests {
             assert_eq!(pm.pixel(r as u32, (b - 1) as u32).unwrap().red(), 10, "({x}, {y}) right of it");
             assert_eq!(pm.pixel((r - 1) as u32, b as u32).unwrap().red(), 10, "({x}, {y}) below it");
         }
+    }
+
+    /// Runs of clear and of opaque pixels blend as one pixel at a time does.
+    #[test]
+    fn blended_runs_match_single_pixels() {
+        let (w, h) = (53u32, 7u32);
+        let mut src = Pixmap::new(w, h).unwrap();
+        let mut seed = 0x2545_f491u32;
+        for (i, px) in src.data_mut().as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            // Stretches of clear, opaque and partly covered pixels.
+            let a = match (i / 11) % 4 {
+                0 => 0,
+                1 => 255,
+                2 => (seed >> 24) as u8,
+                _ => [0, 255, 128][i % 3],
+            };
+            let c = |k: u32| ((seed >> k) as u8 as u32 * a as u32 / 255) as u8;
+            *px = [c(0), c(8), c(16), a];
+        }
+        let mut fast = Pixmap::new(w + 6, h + 4).unwrap();
+        fast.fill(tiny_skia::Color::from_rgba8(40, 90, 160, 255));
+        let mut slow = fast.clone();
+        blend_over(&mut fast, &src, (3, 2), (0, 0, w as i32 + 6, h as i32 + 4));
+        let sw = slow.width() as usize;
+        for y in 0..h as usize {
+            let d0 = ((y + 2) * sw + 3) * 4;
+            blend_pixels(&mut slow.data_mut()[d0..d0 + w as usize * 4], &src.data()[y * w as usize * 4..(y + 1) * w as usize * 4]);
+        }
+        assert_eq!(fast.data(), slow.data());
     }
 }
