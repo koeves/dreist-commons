@@ -2,7 +2,7 @@
 # Check packaging/install.sh on this system (Linux or macOS) with a fake app,
 # in a scratch home folder and DESTDIR, so nothing real is touched:
 # install, reinstall over an older version, a refused incomplete build,
-# --system staging and uninstall.
+# --system staging, uninstall and --purge.
 #
 #   packaging/test-install.sh
 # shellcheck disable=SC2015 # ok and bad always succeed
@@ -101,6 +101,20 @@ gone "CLAP" "$clap"
 gone "app" "$appd"
 [ "$os" = Linux ] && gone "command link" "$link" && gone "launcher" "$desk"
 grep -q "removed" "$work/out" && ok "message" || bad "message: $(cat "$work/out")"
+
+echo "== uninstall --purge also removes the logs"
+run >/dev/null 2>&1
+if [ "$os" = Linux ]; then logs=$R$H/.local/state/$app; else logs=$R$H/Library/Logs/$app; fi
+mkdir -p "$logs"
+: >"$logs/fake.log"
+run --uninstall >"$work/out" 2>&1
+has "logs kept without --purge" "$logs/fake.log"
+grep -q "logs in" "$work/out" && ok "says where the logs stay" || bad "message: $(cat "$work/out")"
+run >/dev/null 2>&1
+run --uninstall --purge >"$work/out" 2>&1 || bad "--purge exits 0"
+gone "logs" "$logs"
+gone "VST3" "$vst3"
+grep -q "with its logs" "$work/out" && ok "message" || bad "message: $(cat "$work/out")"
 
 echo "== uninstall by name, with nothing next to the script"
 run >/dev/null 2>&1
