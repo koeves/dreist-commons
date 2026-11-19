@@ -48,7 +48,8 @@ pub struct Renderer<'s> {
 /// depends on (the control's [`Ctrl::draw_hash`], the scale, its parent
 /// being on): a frame composites a control that drew the same before
 /// instead of rasterising it again. A drawing is kept the second time it
-/// is seen, so controls that change every frame (meters) do not churn it.
+/// is seen, so controls that change every frame (meters) do not churn it,
+/// and only as the pixels it painted.
 #[derive(Default)]
 pub struct DrawCache {
     inner: std::cell::RefCell<CacheInner>,
@@ -57,16 +58,142 @@ pub struct DrawCache {
 #[derive(Default)]
 struct CacheInner {
     seen: std::collections::HashSet<CacheKey>,
-    pixels: std::collections::HashMap<CacheKey, tiny_skia::Pixmap>,
+    pixels: std::collections::HashMap<CacheKey, Kept>,
     bytes: usize,
+    /// Counts lookups: a kept drawing's `used` is the last one that hit it.
+    clock: u64,
+}
+
+/// A kept drawing: the part of the control's layer that holds any pixels
+/// (`None`: the control draws nothing itself) and where that part sits in
+/// the layer.
+struct Kept {
+    part: Option<(tiny_skia::Pixmap, (i32, i32))>,
+    used: u64,
+    /// A rectangle of the control (device pixels from its corner) the
+    /// drawing covers with opaque pixels: nothing drawn under it shows.
+    cover: Option<DeviceRect>,
+}
+
+/// x0, y0, x1, y1 in device pixels.
+type DeviceRect = (i32, i32, i32, i32);
+
+/// The smallest opaque rectangle worth leaving out of what lies under it.
+const COVER_MIN: usize = 64 * 64;
+
+/// The widest band of rows, or of columns, that is opaque across the
+/// control's `w` × `h` pixels (at margin `m` in its `layer`).
+fn opaque_cover(layer: &tiny_skia::Pixmap, m: usize, w: usize, h: usize) -> Option<DeviceRect> {
+    let lw = layer.width() as usize;
+    if w * h < COVER_MIN || m + w > lw || m + h > layer.height() as usize {
+        return None;
+    }
+    let longest = |flags: &mut dyn Iterator<Item = bool>| {
+        let (mut best, mut from) = ((0, 0), 0);
+        for (i, on) in flags.enumerate() {
+            if !on {
+                from = i + 1;
+            } else if i + 1 - from > best.1 - best.0 {
+                best = (from, i + 1);
+            }
+        }
+        best
+    };
+    let mut cols = vec![true; w];
+    let mut rows = vec![true; h];
+    for (y, row_on) in rows.iter_mut().enumerate() {
+        let row = &layer.data()[((y + m) * lw + m) * 4..((y + m) * lw + m + w) * 4];
+        for (px, col_on) in row.as_chunks::<4>().0.iter().zip(&mut cols) {
+            if px[3] != 255 {
+                *row_on = false;
+                *col_on = false;
+            }
+        }
+    }
+    let (r, c) = (longest(&mut rows.iter().copied()), longest(&mut cols.iter().copied()));
+    let (by_rows, by_cols) = ((r.1 - r.0) * w, (c.1 - c.0) * h);
+    if by_rows.max(by_cols) < COVER_MIN {
+        None
+    } else if by_rows >= by_cols {
+        Some((0, r.0 as i32, w as i32, r.1 as i32))
+    } else {
+        Some((c.0 as i32, 0, c.1 as i32, h as i32))
+    }
+}
+
+/// `rects` without `cut`.
+fn cut_out(rects: &mut Vec<DeviceRect>, cut: DeviceRect) {
+    let mut out = Vec::with_capacity(rects.len() + 3);
+    for r in rects.drain(..) {
+        let (x0, y0, x1, y1) = (r.0.max(cut.0), r.1.max(cut.1), r.2.min(cut.2), r.3.min(cut.3));
+        if x1 <= x0 || y1 <= y0 {
+            out.push(r);
+            continue;
+        }
+        let pieces = [(r.0, r.1, r.2, y0), (r.0, y1, r.2, r.3), (r.0, y0, x0, y1), (x1, y0, r.2, y1)];
+        out.extend(pieces.into_iter().filter(|p| p.2 > p.0 && p.3 > p.1));
+    }
+    *rects = out;
 }
 
 type CacheKey = (u64, u32, bool);
 
-/// Bytes of pixels kept (cleared when exceeded) and drawings remembered as
-/// seen once.
-const CACHE_BYTES: usize = 64 << 20;
+/// Bytes of pixels kept (the least recently used go first when exceeded)
+/// and drawings remembered as seen once.
+const CACHE_BYTES: usize = 96 << 20;
 const CACHE_SEEN: usize = 1 << 16;
+
+/// The rows and columns of `layer` that hold any pixel, as their own
+/// pixmap with its offset in the layer; `None` when the layer is empty.
+fn painted_part(layer: &tiny_skia::Pixmap) -> Option<(tiny_skia::Pixmap, (i32, i32))> {
+    let (w, h) = (layer.width() as usize, layer.height() as usize);
+    let data = layer.data();
+    let empty = |row: &[u8]| row.as_chunks::<4>().0.iter().all(|p| u32::from_ne_bytes(*p) == 0);
+    let row = |y: usize| &data[y * w * 4..(y + 1) * w * 4];
+    let y0 = (0..h).find(|&y| !empty(row(y)))?;
+    let y1 = (y0..h).rfind(|&y| !empty(row(y)))? + 1;
+    let (mut x0, mut x1) = (w, 0);
+    for y in y0..y1 {
+        let px = row(y).as_chunks::<4>().0;
+        if let Some(a) = px[..x0].iter().position(|p| u32::from_ne_bytes(*p) != 0) {
+            x0 = a;
+        }
+        if let Some(b) = px[x1..].iter().rposition(|p| u32::from_ne_bytes(*p) != 0) {
+            x1 += b + 1;
+        }
+    }
+    if (x0, y0, x1, y1) == (0, 0, w, h) {
+        return Some((layer.clone(), (0, 0)));
+    }
+    let mut part = tiny_skia::Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32)?;
+    let pw = (x1 - x0) * 4;
+    for y in y0..y1 {
+        part.data_mut()[(y - y0) * pw..(y - y0 + 1) * pw].copy_from_slice(&data[(y * w + x0) * 4..(y * w + x1) * 4]);
+    }
+    Some((part, (x0 as i32, y0 as i32)))
+}
+
+impl CacheInner {
+    /// Drop the least recently used drawings until `need` more bytes fit
+    /// in three quarters of `budget` (so the next ones do not evict again
+    /// at once).
+    fn make_room(&mut self, need: usize, budget: usize) {
+        if self.bytes + need <= budget {
+            return;
+        }
+        let mut by_age: Vec<(u64, CacheKey, usize)> = self.pixels.iter().map(|(k, v)| (v.used, *k, v.part.as_ref().map_or(0, |(pm, _)| pm.data().len()))).collect();
+        by_age.sort_unstable_by_key(|e| e.0);
+        for (_, k, size) in by_age {
+            if self.bytes + need <= budget / 4 * 3 {
+                break;
+            }
+            if size > 0 {
+                self.pixels.remove(&k);
+                self.bytes -= size;
+            }
+        }
+    }
+}
 
 impl DrawCache {
     pub fn clear(&self) {
@@ -312,14 +439,25 @@ impl<'s> Renderer<'s> {
         }
         let key = (c.draw_hash(), s.to_bits(), self.parent_on.get());
         // Only the part inside the clip (whole device pixels at whole scales).
-        let blit = |p: &mut Painter, px: &tiny_skia::Pixmap| {
-            let (cx0, cy0) = ((cx as f32 * s).floor() as i32, (cy as f32 * s).floor() as i32);
-            let (cx1, cy1) = (((cx + cw) as f32 * s).ceil() as i32, ((cy + ch) as f32 * s).ceil() as i32);
-            let area = (cx0.max(dx as i32), cy0.max(dy as i32), cx1.min(dx as i32 + lw as i32), cy1.min(dy as i32 + lh as i32));
-            crate::paint::blend_over(p.pm, px, (dx as i32 - m, dy as i32 - m), area);
-        };
-        if let Some(px) = cache.inner.borrow().pixels.get(&key) {
-            return blit(p, px);
+        let (cx0, cy0) = ((cx as f32 * s).floor() as i32, (cy as f32 * s).floor() as i32);
+        let (cx1, cy1) = (((cx + cw) as f32 * s).ceil() as i32, ((cy + ch) as f32 * s).ceil() as i32);
+        let area = (cx0.max(dx as i32), cy0.max(dy as i32), cx1.min(dx as i32 + lw as i32), cy1.min(dy as i32 + lh as i32));
+        {
+            let mut inner = cache.inner.borrow_mut();
+            inner.clock += 1;
+            let now = inner.clock;
+            let rest = inner.pixels.get(&key).filter(|k| k.part.is_some()).and_then(|_| self.uncovered(&inner, c, s, (dx as i32, dy as i32), area));
+            if let Some(kept) = inner.pixels.get_mut(&key) {
+                kept.used = now;
+                if let Some((px, (ox, oy))) = &kept.part {
+                    let at = (dx as i32 - m + ox, dy as i32 - m + oy);
+                    match rest {
+                        Some(rects) => rects.into_iter().for_each(|r| crate::paint::blend_over(p.pm, px, at, r)),
+                        None => crate::paint::blend_over(p.pm, px, at, area),
+                    }
+                }
+                return;
+            }
         }
         // Always through a layer, so a frame draws the same pixels whether
         // the drawing was kept or not; kept the second time it is seen.
@@ -330,7 +468,7 @@ impl<'s> Renderer<'s> {
             lp.clip = (M, M, c.rect.w, c.rect.h);
             self.draw_self(&mut lp, c);
         }
-        blit(p, &layer);
+        crate::paint::blend_over(p.pm, &layer, (dx as i32 - m, dy as i32 - m), area);
         let mut inner = cache.inner.borrow_mut();
         if !inner.seen.contains(&key) {
             if inner.seen.len() >= CACHE_SEEN {
@@ -339,13 +477,67 @@ impl<'s> Renderer<'s> {
             inner.seen.insert(key);
             return;
         }
-        let size = layer.data().len();
-        if inner.bytes + size > CACHE_BYTES {
-            inner.pixels.clear();
-            inner.bytes = 0;
+        // Only the pixels it painted are kept: most panels paint nothing
+        // of their own, or a small part of their rectangle.
+        let part = painted_part(&layer);
+        let size = part.as_ref().map_or(0, |(pm, _)| pm.data().len());
+        inner.make_room(size, CACHE_BYTES);
+        // Drawings without pixels cost no bytes; they go by count.
+        if inner.pixels.len() >= CACHE_SEEN {
+            inner.pixels.retain(|_, k| k.part.is_some());
         }
         inner.bytes += size;
-        inner.pixels.insert(key, layer);
+        let used = inner.clock;
+        let cover = part.as_ref().and_then(|_| opaque_cover(&layer, m as usize, lw as usize, lh as usize));
+        inner.pixels.insert(key, Kept { part, used, cover });
+    }
+
+    /// `area` of `c`'s own drawing (at device `at`) without what its
+    /// children then cover with opaque kept drawings; `None` when they
+    /// cover nothing of it. A child found here draws the same opaque
+    /// pixels over that part whether its drawing is still kept or not.
+    fn uncovered(&self, inner: &CacheInner, c: &Ctrl, s: f32, at: (i32, i32), area: DeviceRect) -> Option<Vec<DeviceRect>> {
+        let size = (area.2 - area.0).max(0) as usize * (area.3 - area.1).max(0) as usize;
+        if size < COVER_MIN || c.children.is_empty() || self.native_table(c) {
+            return None;
+        }
+        let mut rects: Option<Vec<DeviceRect>> = None;
+        let mut budget = 256;
+        self.cut_covers(inner, c, s, at, area, area, 0, &mut budget, &mut rects);
+        rects
+    }
+
+    /// Cut from `rects` (parts of `area`) the opaque covers of the
+    /// descendants of `c` (at device `at`, drawn within `clip`), as far as
+    /// `budget` controls and four levels down.
+    #[allow(clippy::too_many_arguments)]
+    fn cut_covers(&self, inner: &CacheInner, c: &Ctrl, s: f32, at: (i32, i32), area: DeviceRect, clip: DeviceRect, depth: u32, budget: &mut u32, rects: &mut Option<Vec<DeviceRect>>) {
+        for k in c.children.iter().filter(|k| k.visible && k.enabled && k.overload.is_empty() && k.attr_f32("alpha", 1.0) >= 1.0) {
+            if *budget == 0 || rects.as_ref().is_some_and(|r| r.len() > 64 || r.is_empty()) {
+                return;
+            }
+            *budget -= 1;
+            let (kx, ky) = (k.rect.x as f32 * s, k.rect.y as f32 * s);
+            if kx.fract() != 0.0 || ky.fract() != 0.0 {
+                continue;
+            }
+            let (x, y) = (at.0 + kx as i32, at.1 + ky as i32);
+            // What the child and everything in it can draw on.
+            let (w, h) = ((k.rect.w as f32 * s).ceil() as i32, (k.rect.h as f32 * s).ceil() as i32);
+            let within = (clip.0.max(x), clip.1.max(y), clip.2.min(x + w), clip.3.min(y + h));
+            if within.2 <= within.0 || within.3 <= within.1 || ((within.2 - within.0) as usize * (within.3 - within.1) as usize) < COVER_MIN {
+                continue;
+            }
+            if let Some(cover) = inner.pixels.get(&(k.draw_hash(), s.to_bits(), c.on)).and_then(|kept| kept.cover) {
+                let cut = ((x + cover.0).max(within.0), (y + cover.1).max(within.1), (x + cover.2).min(within.2), (y + cover.3).min(within.3));
+                if cut.2 > cut.0 && cut.3 > cut.1 {
+                    cut_out(rects.get_or_insert_with(|| vec![area]), cut);
+                }
+            }
+            if depth < 3 && !k.children.is_empty() && !self.native_table(k) {
+                self.cut_covers(inner, k, s, (x, y), area, within, depth + 1, budget, rects);
+            }
+        }
     }
 
     /// [re:527038]: draw `c` into a layer, composite it.
@@ -2481,6 +2673,80 @@ mod tests {
     use crate::style::Style;
 
     /// A stylesheet with `name` of element class `class` holding `attrs`.
+    /// A kept drawing is the painted part of its layer, with where it
+    /// sits; a layer without pixels keeps none.
+    #[test]
+    fn kept_drawings_hold_only_painted_pixels() {
+        let mut layer = tiny_skia::Pixmap::new(40, 30).unwrap();
+        assert!(painted_part(&layer).is_none());
+        for (x, y) in [(7, 5), (20, 11), (12, 18)] {
+            layer.data_mut()[(y * 40 + x) * 4..(y * 40 + x) * 4 + 4].copy_from_slice(&[10, 20, 30, 255]);
+        }
+        let (part, at) = painted_part(&layer).unwrap();
+        assert_eq!((part.width(), part.height(), at), (14, 14, (7, 5)));
+        let mut whole = tiny_skia::Pixmap::new(40, 30).unwrap();
+        blend_whole(&mut whole, &part, at);
+        assert_eq!(whole.data(), layer.data());
+        layer.fill(tiny_skia::Color::WHITE);
+        let (part, at) = painted_part(&layer).unwrap();
+        assert_eq!((part.width(), part.height(), at), (40, 30, (0, 0)));
+    }
+
+    /// The cover of a kept drawing is its widest opaque band, and what
+    /// lies under covers is cut out of the area drawn.
+    #[test]
+    fn opaque_bands_cover_what_is_under_them() {
+        // A 100 × 90 control at margin 2: opaque but for its top 10 rows.
+        let mut layer = tiny_skia::Pixmap::new(104, 94).unwrap();
+        for y in 12..92 {
+            for x in 2..102 {
+                layer.data_mut()[(y * 104 + x) * 4 + 3] = 255;
+            }
+        }
+        assert_eq!(opaque_cover(&layer, 2, 100, 90), Some((0, 10, 100, 90)));
+        // A clear column leaves no row opaque across, and the clear top
+        // rows no column opaque down.
+        for y in 0..94 {
+            layer.data_mut()[(y * 104 + 32) * 4 + 3] = 0;
+        }
+        assert_eq!(opaque_cover(&layer, 2, 100, 90), None);
+        // Too small to be worth it.
+        assert_eq!(opaque_cover(&tiny_skia::Pixmap::new(24, 24).unwrap(), 2, 20, 20), None);
+        let mut rects = vec![(0, 0, 100, 100)];
+        cut_out(&mut rects, (20, 30, 60, 200));
+        let area = |rs: &[DeviceRect]| rs.iter().map(|r| (r.2 - r.0) * (r.3 - r.1)).sum::<i32>();
+        assert_eq!(area(&rects), 100 * 100 - 40 * 70);
+        assert!(rects.iter().all(|r| r.2 <= 20 || r.0 >= 60 || r.3 <= 30));
+        cut_out(&mut rects, (-5, -5, 300, 300));
+        assert!(rects.is_empty());
+    }
+
+    fn blend_whole(dst: &mut tiny_skia::Pixmap, src: &tiny_skia::Pixmap, at: (i32, i32)) {
+        let area = (0, 0, dst.width() as i32, dst.height() as i32);
+        crate::paint::blend_over(dst, src, at, area);
+    }
+
+    /// Past the budget the drawings used longest ago go; the recent ones
+    /// and those without pixels stay.
+    #[test]
+    fn a_full_cache_drops_the_least_recently_used() {
+        let mut inner = CacheInner::default();
+        let kept = |used| Kept { part: tiny_skia::Pixmap::new(10, 10).map(|pm| (pm, (0, 0))), used, cover: None };
+        for k in 0..8u64 {
+            inner.pixels.insert((k, 0, false), kept(k));
+            inner.bytes += 400;
+        }
+        inner.pixels.insert((99, 0, false), Kept { part: None, used: 0, cover: None });
+        inner.make_room(400, 3200);
+        assert_eq!(inner.bytes, 2000);
+        for k in 0..8u64 {
+            assert_eq!(inner.pixels.contains_key(&(k, 0, false)), k >= 3, "drawing {k}");
+        }
+        assert!(inner.pixels.contains_key(&(99, 0, false)));
+        inner.make_room(400, 3200);
+        assert_eq!(inner.bytes, 2000, "room already");
+    }
+
     fn sheet(styles: &[(&str, &str, &[(&str, &str)])]) -> StyleSheet {
         let mut s = StyleSheet::new();
         for (name, class, attrs) in styles {

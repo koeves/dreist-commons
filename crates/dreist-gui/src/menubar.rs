@@ -5,7 +5,7 @@
 use std::sync::Mutex;
 
 /// One menu item: a title ("" = separator), its key equivalent (only
-/// given for keys with ⌘, so plain keys keep reaching the window) and a
+/// given for keys with ⌘ or ⌃, so plain keys keep reaching the window) and a
 /// tag. `submenu` items open further items instead.
 #[derive(Clone, Debug, Default)]
 pub struct Item {
@@ -83,7 +83,7 @@ pub fn install(app_name: &str, app_items: &[Item], menus: &[(String, Vec<Item>)]
             return msg_send![class!(NSMenuItem), separatorItem];
         }
         let i: *mut Object = msg_send![class!(NSMenuItem), alloc];
-        let key = if it.cmd { it.key.as_str() } else { "" };
+        let key = if it.cmd || it.ctrl { it.key.as_str() } else { "" };
         let action = if it.submenu.is_empty() { sel!(menuChosen:) } else { Sel::from_ptr(std::ptr::null()) };
         let i: *mut Object = msg_send![i, initWithTitle: nsstring(&it.title) action: action keyEquivalent: nsstring(key)];
         if it.submenu.is_empty() {

@@ -24,6 +24,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 - [Crates](#crates)
 - [App profile](#app-profile)
 - [Platforms](#platforms)
+- [Diagnostics](#diagnostics)
 - [Development](#development)
 - [Contributing](#contributing)
 - [Related projects](#related-projects)
@@ -38,6 +39,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 | `dreist-engine` | Step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
 | `dreist-gui` | Skin-driven GUI toolkit (tiny-skia, baseview) |
 | `dreist-testkit` | Golden fingerprints and allocation counting for tests |
+| `dreist-editor-core` | Editor parts the apps share: commands to the engine, undo history, options, tab panels, effect value texts, graphs |
 | `dreist-host` | Audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's session; features `audio`, `midi`, `dialog`, `session`, `clap-sys` |
 
 `vendor/` holds patched dependencies, added by the apps as `[patch]` entries:
@@ -74,6 +76,24 @@ Linux build packages (Debian / Ubuntu names; Clang builds the time-stretch bindi
 ```bash
 sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
 ```
+
+## Diagnostics
+
+Every app and plugin keeps a diagnostics log (`dreist_engine::diag`), and the main menu exports it as one file to share.
+
+- **Log**: `~/Library/Logs/<App>/<app>.log` (macOS), `$XDG_STATE_HOME/<App>/<app>.log` (Linux), `%LOCALAPPDATA%\<App>\Logs\<app>.log` (Windows); 5 MB, three older files kept, 20 MB at most.
+- **Shared**: one log per app; with several plugin instances in a host, the first one's audio thread reports, and a writer that finds the log rotated by another follows it.
+- **Memory**: about 27 KB fixed and up to about 100 KB for the last 600 lines an export holds.
+- **Thread**: one per process, waking every 100 ms while playing or in a debug run and every second otherwise.
+- **Audio thread**: block timing, the song position and late blocks go through atomics only, without locks or allocations.
+- **Line format**: `<UTC time> +<seconds>s <kind> key=value ...`, values with spaces in double quotes.
+- **Kinds**: `start` (system, versions, pid), `audio` (format, host, sample rate, block size), `stats` (DSP load %, worst block %, late blocks, memory, output peak), `late` and `slow` blocks (song position, timing), `summary`.
+- **Stats**: every second while playing or after a late block, else once a minute.
+- **Export**: "Export diagnostics" writes `<app>-diagnostics-<time>.txt` next to the log and shows it, keeping the newest five; "Copy diagnostics" puts the same text on the clipboard.
+- **Cleanup**: rotation caps the log, older exports go, the `<app>-debug.log` files of earlier debug runs go at start; `install.sh --uninstall --purge` removes the folder.
+- **Export format**: `# system`, `# audio`, `# run`, `# settings` and `# log` sections of `key=value` or log lines.
+- **Redaction**: paths outside the app's settings and log folders become `<path>`, the login name `<user>`.
+- **Debug runs**: `--debug` echoes the log to stderr (`--debug-json`: JSON lines) with stats every second; `--play`, `--duration`, `--until-end` and `--fail-on-late` drive playback tests.
 
 ## Development
 

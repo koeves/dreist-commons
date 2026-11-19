@@ -126,6 +126,14 @@ pub struct Profile {
     pub factory: Resources,
     /// The extension family the app saves.
     pub save: Extensions,
+    /// The settings folder's name (`~/Library/Application Support/<name>`,
+    /// `%APPDATA%\\<name>`, `$XDG_CONFIG_HOME/<name>`).
+    pub settings_dir: &'static str,
+    /// Earlier settings folder names: the first one found is moved to
+    /// `settings_dir` when that does not exist yet.
+    pub legacy_settings_dirs: &'static [&'static str],
+    /// Environment variable naming a separate settings folder.
+    pub settings_env: &'static str,
 }
 
 /// Dreist's logo mark, a "D": a stem and a bowl.
@@ -163,6 +171,9 @@ pub const BASE: Profile = Profile {
     ui: Resources { env: "DREIST_UI", bundle_dir: "Dreist", dev_dirs: &[concat!(env!("CARGO_MANIFEST_DIR"), "/../../../dreist/assets/ui")] },
     factory: Resources { env: "DREIST_RESOURCES", bundle_dir: "Factory", dev_dirs: &[concat!(env!("CARGO_MANIFEST_DIR"), "/../../../dreist/assets/factory")] },
     save: DREIST,
+    settings_dir: "Dreist",
+    legacy_settings_dirs: &[],
+    settings_env: "DREIST_SETTINGS_DIR",
 };
 
 static PROFILE: OnceLock<&'static Profile> = OnceLock::new();

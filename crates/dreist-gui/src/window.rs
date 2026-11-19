@@ -101,6 +101,26 @@ struct Handler<T: WindowApp> {
     /// Frame counts and render time over each second: [`App::ui_load`],
     /// printed with `DREIST_GUI_STATS=1`.
     stats: FrameStats,
+    /// The least time between two frames drawn without input (see
+    /// [`pace`]), when the last one was drawn, and whether an input event
+    /// arrived since.
+    pace: std::time::Duration,
+    drawn_at: std::time::Instant,
+    input: bool,
+}
+
+/// The share of a core that frames nobody asked for (meters, playheads,
+/// animations) may take, and the slowest they are then drawn.
+const ANIMATION_SHARE: f64 = 0.25;
+const SLOWEST_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The least time between two frames drawn without input, when one takes
+/// `cost` to draw: none while every display frame fits in
+/// [`ANIMATION_SHARE`] of a core, else what keeps them within it (at most
+/// [`SLOWEST_FRAME`]). The audio thread shares the cores with these frames.
+fn pace(cost: std::time::Duration) -> std::time::Duration {
+    let spaced = cost.div_f64(ANIMATION_SHARE);
+    if spaced <= std::time::Duration::from_micros(16_667) { std::time::Duration::ZERO } else { spaced.min(SLOWEST_FRAME) }
 }
 
 /// What the window's frames did over the last second (a diagnostic).
@@ -108,6 +128,7 @@ struct FrameStats {
     since: std::time::Instant,
     frames: u32,
     idle: u32,
+    held: u32,
     full: u32,
     partial: u32,
     resizes: u32,
@@ -117,22 +138,32 @@ struct FrameStats {
 
 impl FrameStats {
     fn new(print: bool) -> FrameStats {
-        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
+        FrameStats { since: std::time::Instant::now(), frames: 0, idle: 0, held: 0, full: 0, partial: 0, resizes: 0, busy: std::time::Duration::ZERO, print }
     }
 
     /// Each second: the share of a core the frames took (and the counts
-    /// printed when asked for).
-    fn report(&mut self) -> Option<f32> {
+    /// printed when asked for), and the mean time of a drawn frame.
+    fn report(&mut self) -> Option<(f32, std::time::Duration)> {
         let t = self.since.elapsed();
         if t.as_secs_f64() < 1.0 {
             return None;
         }
         let share = (self.busy.as_secs_f64() / t.as_secs_f64()) as f32;
         if self.print {
-            eprintln!("gui: {} frames/s, {} idle, {} full, {} partial, {} resizes, {:.1} % of a core", self.frames, self.idle, self.full, self.partial, self.resizes, share * 100.0);
+            eprintln!(
+                "gui: {} frames/s, {} idle, {} held, {} full, {} partial, {} resizes, {:.1} % of a core",
+                self.frames,
+                self.idle,
+                self.held,
+                self.full,
+                self.partial,
+                self.resizes,
+                share * 100.0
+            );
         }
+        let cost = self.busy.checked_div(self.full + self.partial).unwrap_or_default();
         *self = FrameStats::new(self.print);
-        Some(share)
+        Some((share, cost))
     }
 }
 
@@ -146,6 +177,7 @@ impl<T: WindowApp> Handler<T> {
             window.resize(Size::new(w as f64 * ui, h as f64 * ui));
             self.app.app().dirty = true;
             self.stats.resizes += 1;
+            self.input = true;
         }
         if !self.app.app().needs_redraw() {
             self.stats.idle += 1;
@@ -155,17 +187,21 @@ impl<T: WindowApp> Handler<T> {
         if self.surface.is_none() {
             return;
         }
+        // Costly frames nobody asked for wait their turn; what they would
+        // have drawn stays pending.
+        if !self.input && self.drawn_at.elapsed() < self.pace {
+            self.stats.held += 1;
+            return;
+        }
+        self.input = false;
+        self.drawn_at = std::time::Instant::now();
         let ui = self.app.app().ui_scale.max(0.25);
         self.app.render(scale * ui);
-        // The device pixels the frame changed, when not all of them. A
-        // rectangle off the device pixel grid (a fractional scale) makes
-        // the whole frame go out instead; empty ones are left out.
+        // The device pixels the frame changed, when not all of them (every
+        // pixel a rectangle touches, at fractional scales).
         let damage: Option<Vec<(u32, u32, u32, u32)>> = {
             let app = self.app.app();
-            let root = app.root.rect;
-            app.frame_damage
-                .as_ref()
-                .and_then(|rs| rs.iter().filter(|r| r.x.max(0) < (r.x + r.w).min(root.w) && r.y.max(0) < (r.y + r.h).min(root.h)).map(|&r| crate::device_rect(&app.root, scale * ui, r)).collect())
+            app.frame_damage.as_ref().map(|rs| rs.iter().filter_map(|&r| crate::device_cover(&app.root, scale * ui, r)).collect())
         };
         match damage {
             Some(_) => self.stats.partial += 1,
@@ -242,20 +278,15 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         self.frame(window);
         self.stats.frames += 1;
         self.stats.busy += started.elapsed();
-        if let Some(share) = self.stats.report() {
+        if let Some((share, cost)) = self.stats.report() {
             self.app.app().ui_load = Some(share);
+            self.pace = pace(cost);
         }
     }
 
     fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
-        let set_mods = |app: &mut App, m: keyboard_types::Modifiers| {
-            app.mods = crate::app::Mods {
-                shift: m.contains(keyboard_types::Modifiers::SHIFT),
-                cmd: m.contains(keyboard_types::Modifiers::META),
-                alt: m.contains(keyboard_types::Modifiers::ALT),
-                ctrl: m.contains(keyboard_types::Modifiers::CONTROL),
-            };
-        };
+        self.input = true;
+        let set_mods = |app: &mut App, m: keyboard_types::Modifiers| app.mods = mods_from(m, cfg!(target_os = "macos"));
         match &event {
             Event::Mouse(
                 MouseEvent::CursorMoved { modifiers, .. } | MouseEvent::ButtonPressed { modifiers, .. } | MouseEvent::ButtonReleased { modifiers, .. } | MouseEvent::WheelScrolled { modifiers, .. },
@@ -315,7 +346,10 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                         let cmd = self.app.app().mods.cmd;
                         let capture = self.app.captures_keys();
                         if cmd || !self.app.app().is_editing() {
-                            let ev = self.app.app().shortcut(&s.to_lowercase());
+                            let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) else {
+                                return if capture { EventStatus::Captured } else { EventStatus::Ignored };
+                            };
+                            let ev = self.app.app().shortcut(&key);
                             if ev.is_empty() {
                                 return if capture { EventStatus::Captured } else { EventStatus::Ignored };
                             }
@@ -388,6 +422,69 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
     }
 }
 
+/// The app's modifier set for the platform's keys: the shortcut modifier
+/// (`cmd`) is Command on macOS and Ctrl elsewhere, where `ctrl` is the
+/// Windows / Super key.
+fn mods_from(m: keyboard_types::Modifiers, mac: bool) -> crate::app::Mods {
+    use keyboard_types::Modifiers as M;
+    let (cmd, ctrl) = if mac { (M::META, M::CONTROL) } else { (M::CONTROL, M::META) };
+    crate::app::Mods { shift: m.contains(M::SHIFT), cmd: m.contains(cmd), alt: m.contains(M::ALT), ctrl: m.contains(ctrl) }
+}
+
+/// The name `App::shortcut` takes for a typed character, or `None` when the
+/// key is no shortcut key: the keypad's keys are not the main block's, and
+/// with Option / Alt or Ctrl held the character is the layout's third level
+/// (`®` for `r`) or a control code, so the key's position names it.
+fn shortcut_key(typed: &str, code: keyboard_types::Code, location: keyboard_types::Location, m: keyboard_types::Modifiers) -> Option<String> {
+    use keyboard_types::Code as C;
+    if location == keyboard_types::Location::Numpad {
+        return None;
+    }
+    if m.intersects(keyboard_types::Modifiers::ALT | keyboard_types::Modifiers::CONTROL) {
+        const LETTERS: [C; 26] = [
+            C::KeyA,
+            C::KeyB,
+            C::KeyC,
+            C::KeyD,
+            C::KeyE,
+            C::KeyF,
+            C::KeyG,
+            C::KeyH,
+            C::KeyI,
+            C::KeyJ,
+            C::KeyK,
+            C::KeyL,
+            C::KeyM,
+            C::KeyN,
+            C::KeyO,
+            C::KeyP,
+            C::KeyQ,
+            C::KeyR,
+            C::KeyS,
+            C::KeyT,
+            C::KeyU,
+            C::KeyV,
+            C::KeyW,
+            C::KeyX,
+            C::KeyY,
+            C::KeyZ,
+        ];
+        const DIGITS: [C; 10] = [C::Digit0, C::Digit1, C::Digit2, C::Digit3, C::Digit4, C::Digit5, C::Digit6, C::Digit7, C::Digit8, C::Digit9];
+        if let Some(i) = LETTERS.iter().position(|c| *c == code) {
+            return Some(((b'a' + i as u8) as char).to_string());
+        }
+        if let Some(i) = DIGITS.iter().position(|c| *c == code) {
+            return Some(((b'0' + i as u8) as char).to_string());
+        }
+        match code {
+            C::Comma => return Some(",".into()),
+            C::Space => return Some(" ".into()),
+            _ => {}
+        }
+    }
+    Some(typed.to_lowercase())
+}
+
 impl<T: WindowApp> Handler<T> {
     fn apply_cursor(&mut self, window: &mut Window) {
         let want = self.app.app().cursor.clone();
@@ -422,7 +519,17 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             let ctx = softbuffer::Context::new(h).ok()?;
             softbuffer::Surface::new(&ctx, h2).ok()
         });
-        Handler { app, surface, scale: 1.0, physical: (0, 0), cursor: crate::cursor::Cursor::Arrow, stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()) }
+        Handler {
+            app,
+            surface,
+            scale: 1.0,
+            physical: (0, 0),
+            cursor: crate::cursor::Cursor::Arrow,
+            stats: FrameStats::new(std::env::var_os("DREIST_GUI_STATS").is_some()),
+            pace: std::time::Duration::ZERO,
+            drawn_at: std::time::Instant::now(),
+            input: true,
+        }
     }
 }
 
@@ -449,4 +556,50 @@ pub fn open_parented_scaled<P: HasRawWindowHandle, T: WindowApp>(parent: &P, mut
 pub fn open_blocking<T: WindowApp>(mut app: T, title: &str) {
     let opts = options(&mut app, title, WindowScalePolicy::SystemScaleFactor);
     Window::open_blocking(opts, build(app));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn shortcut_modifier_is_command_on_macos_and_ctrl_elsewhere() {
+        use keyboard_types::Modifiers as M;
+        let mac = mods_from(M::META | M::SHIFT, true);
+        assert!(mac.cmd && mac.shift && !mac.ctrl && !mac.alt);
+        assert!(mods_from(M::CONTROL, true).ctrl && !mods_from(M::CONTROL, true).cmd);
+        let other = mods_from(M::CONTROL | M::ALT, false);
+        assert!(other.cmd && other.alt && !other.ctrl);
+        assert!(mods_from(M::META, false).ctrl && !mods_from(M::META, false).cmd);
+    }
+
+    #[test]
+    fn shortcut_keys_are_named_by_position_under_alt_and_skip_the_keypad() {
+        use keyboard_types::{Code, Location, Modifiers as M};
+        let key = |typed, code, location, m| shortcut_key(typed, code, location, m);
+        assert_eq!(key("R", Code::KeyR, Location::Standard, M::SHIFT).as_deref(), Some("r"));
+        // Option changes the character, not the key.
+        assert_eq!(key("\u{ae}", Code::KeyR, Location::Standard, M::ALT).as_deref(), Some("r"));
+        assert_eq!(key("\u{f8}", Code::KeyO, Location::Standard, M::ALT | M::META).as_deref(), Some("o"));
+        assert_eq!(key("\u{a1}", Code::Digit1, Location::Standard, M::ALT | M::CONTROL).as_deref(), Some("1"));
+        assert_eq!(key("\u{2264}", Code::Comma, Location::Standard, M::ALT).as_deref(), Some(","));
+        assert_eq!(key("\u{1a}", Code::KeyZ, Location::Standard, M::CONTROL).as_deref(), Some("z"));
+        // A key without a name by position keeps its character.
+        assert_eq!(key("\u{2013}", Code::Minus, Location::Standard, M::ALT).as_deref(), Some("\u{2013}"));
+        // The keypad's digits are not the page keys.
+        assert_eq!(key("1", Code::Numpad1, Location::Numpad, M::empty()), None);
+        assert_eq!(key("1", Code::Digit1, Location::Standard, M::empty()).as_deref(), Some("1"));
+    }
+
+    /// Cheap frames are drawn every display frame; costly ones are spaced
+    /// to a quarter of a core, no slower than ten a second.
+    #[test]
+    fn costly_frames_are_spaced() {
+        assert_eq!(pace(Duration::ZERO), Duration::ZERO);
+        assert_eq!(pace(Duration::from_millis(4)), Duration::ZERO);
+        assert_eq!(pace(Duration::from_millis(8)), Duration::from_millis(32));
+        assert_eq!(pace(Duration::from_millis(20)), Duration::from_millis(80));
+        assert_eq!(pace(Duration::from_millis(60)), SLOWEST_FRAME);
+    }
 }
