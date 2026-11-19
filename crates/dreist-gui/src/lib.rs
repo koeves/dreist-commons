@@ -3,11 +3,14 @@
 //! See the dreist-re GUI notes.
 
 pub mod app;
+#[cfg(feature = "window")]
+pub mod clipboard;
 pub mod collapse;
 pub mod colour;
 pub mod ctrl;
 pub mod cursor;
 pub mod dragout;
+pub mod edit;
 pub mod menu;
 pub mod menubar;
 pub mod meter;

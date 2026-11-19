@@ -342,6 +342,38 @@ impl Shape {
     }
 }
 
+/// The style a control draws with.
+fn style_name<'c>(styles: &StyleSheet, c: &'c Ctrl) -> &'c str {
+    if !c.style.is_empty() && styles.styles.contains_key(&c.style) {
+        &c.style
+    } else if c.style.is_empty() && (!c.overload.is_empty() || c.class == "CtrlPanel") {
+        // Code-built panels without a skin style draw nothing themselves.
+        "InvisibleStyle"
+    } else {
+        "ApplicationStyle"
+    }
+}
+
+/// The text of a box being edited: its font, where it starts and the
+/// width it has (a search box keeps its icons' squares free).
+pub(crate) fn edit_layout(styles: &StyleSheet, c: &Ctrl) -> (crate::style::FontSpec, f32, f32) {
+    let st = style_name(styles, c);
+    let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+    let (x0, tw) = if c.class == "CtrlSearchBox" {
+        let x0 = if styles.bool(st, "optSearchIcon", true) { h } else { 3.0 };
+        (x0, w - x0 - 2.0 - h)
+    } else {
+        (3.0, w - 6.0)
+    };
+    (styles.font(st), x0, tw.max(0.0))
+}
+
+/// How far an edited text is moved left to keep the caret in its `width`.
+pub(crate) fn edit_scroll(fonts: &mut crate::text::Fonts, font: &crate::style::FontSpec, text: &str, caret: usize, width: f32) -> f32 {
+    let before: String = text.chars().take(caret).collect();
+    (fonts.measure(font, &before).0 - (width - 1.0).max(0.0)).max(0.0)
+}
+
 /// Fader cap shape (`enumHandleShape`): the stock round handle, or a
 /// rectangular cap `realHandleLength` long along the travel.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -356,14 +388,7 @@ impl<'s> Renderer<'s> {
     }
 
     pub fn style<'c>(&self, c: &'c Ctrl) -> &'c str {
-        if !c.style.is_empty() && self.styles.styles.contains_key(&c.style) {
-            &c.style
-        } else if c.style.is_empty() && (!c.overload.is_empty() || c.class == "CtrlPanel") {
-            // Code-built panels without a skin style draw nothing themselves.
-            "InvisibleStyle"
-        } else {
-            "ApplicationStyle"
-        }
+        style_name(self.styles, c)
     }
 
     /// Draw `c` (whose rect is relative to the painter's current origin) and
@@ -1317,8 +1342,7 @@ impl<'s> Renderer<'s> {
         let x0 = if icon { h } else { 3.0 };
         let tr = RectF::new(x0, 0.0, (b.w - x0 - 2.0 - h).max(0.0), h);
         if editing {
-            let font = self.styles.font(st);
-            p.text(tr, &format!("{}|", c.text), Colour::BLACK, &font, crate::style::HAlign::Left, crate::style::VAlign::Center);
+            self.edit_text(p, c);
         } else {
             let text = if c.text.is_empty() { c.attr("placeholder").unwrap_or("").to_string() } else { c.text.clone() };
             self.draw_text(p, c, tr, &text, "colText");
@@ -1347,6 +1371,28 @@ impl<'s> Renderer<'s> {
         }
     }
 
+    /// The text of a box being edited, moved left as far as the caret
+    /// needs, with the selection behind it and the caret as a 1 px line.
+    fn edit_text(&self, p: &mut Painter, c: &Ctrl) {
+        let (font, x0, w) = edit_layout(self.styles, c);
+        let h = c.rect.h as f32;
+        let chars = c.text.chars().count();
+        let pos = |name: &str| c.attr(name).and_then(|v| v.parse::<usize>().ok()).unwrap_or(chars).min(chars);
+        let (caret, anchor) = (pos(crate::edit::CARET), pos(crate::edit::ANCHOR));
+        let scroll = edit_scroll(p.fonts, &font, &c.text, caret, w);
+        let mut x_of = |n: usize| x0 + p.text_width(&font, &c.text.chars().take(n).collect::<String>(), 0.0) - scroll;
+        let (xc, xa) = (x_of(caret), x_of(anchor));
+        let line = p.fonts.measure(&font, "Ag").1.min(h - 2.0).max(1.0);
+        let y = ((h - line) * 0.5).floor();
+        let prev = p.push_clip((p.tx + x0).floor() as i32, p.ty as i32, w.ceil() as i32 + 1, c.rect.h);
+        if caret != anchor {
+            p.fill_rect(RectF::new(xc.min(xa), y, (xc - xa).abs(), line), std_col("StandardControlHighlight").with_alpha(0.35));
+        }
+        p.text(RectF::new(x0 - scroll, 0.0, w + scroll, h), &c.text, Colour::BLACK, &font, crate::style::HAlign::Left, crate::style::VAlign::Center);
+        p.fill_rect(RectF::new(xc.floor(), y, 1.0, line), Colour::BLACK);
+        p.pop_clip(prev);
+    }
+
     /// [re:51d4eb] (rotation not supported yet). Text
     /// boxes being edited get a highlight frame and a caret.
     fn label(&self, p: &mut Painter, c: &Ctrl) {
@@ -1355,10 +1401,7 @@ impl<'s> Renderer<'s> {
             let b = Self::bounds(c);
             p.fill_rect(b, Colour::WHITE);
             p.stroke_rect(b.inset(0.5), std_col("StandardControlHighlight"), 1.0);
-            let st = self.style(c);
-            let font = self.styles.font(st);
-            let text = format!("{}|", c.text);
-            p.text(RectF::new(3.0, 0.0, b.w - 6.0, b.h), &text, Colour::BLACK, &font, crate::style::HAlign::Left, crate::style::VAlign::Center);
+            self.edit_text(p, c);
             return;
         }
         if !self.draws_text(c) {
