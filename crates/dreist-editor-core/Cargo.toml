@@ -1,6 +1,6 @@
 [package]
 name = "dreist-editor-core"
-description = "Editor parts the apps share: the commands to the engine, undo history, tab panels and modulator graphs"
+description = "Editor parts the apps share: the commands to the engine, undo history, options, tab panels, effect value texts and graphs"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,6 +11,11 @@ dreist-formats = { path = "../dreist-formats" }
 dreist-dsp = { path = "../dreist-dsp" }
 dreist-engine = { path = "../dreist-engine" }
 dreist-gui = { path = "../dreist-gui" }
+
+[features]
+# For the apps' own tests: options and settings stay in memory and in a
+# scratch folder, never in the user's settings folder.
+test-settings = []
 
 [lints]
 workspace = true
