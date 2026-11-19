@@ -106,6 +106,14 @@ impl<'a> Window<'a> {
         self.window.has_focus()
     }
 
+    /// Dreist patch: on macOS, whether the view takes keys with command
+    /// ahead of the menus while it has the keyboard (a text field being
+    /// edited). Other systems send those keys to the window anyway.
+    pub fn set_key_equivalents(&mut self, _on: bool) {
+        #[cfg(target_os = "macos")]
+        self.window.set_key_equivalents(_on);
+    }
+
     pub fn focus(&mut self) {
         self.window.focus()
     }

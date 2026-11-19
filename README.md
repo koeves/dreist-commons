@@ -44,7 +44,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 
 `vendor/` holds patched dependencies, added by the apps as `[patch]` entries:
 
-- **`baseview`**: re-entrancy guard for modal dialogs, background mode for tests on macOS and X11.
+- **`baseview`**: re-entrancy guard for modal dialogs, background mode for tests on macOS and X11, keys with Command for a text box being edited.
 - **`softbuffer`**: a per-library macOS observer class name.
 - **`nih-plug`**: the plugin framework, with fixes for the standalone's audio setup.
 - **`nih_log`**: nih-plug's logger, with `std::io::IsTerminal` in place of the unmaintained `atty`.

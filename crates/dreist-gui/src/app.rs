@@ -150,8 +150,10 @@ pub struct App {
     /// pattern grid): moves send `Drag`, the release `Up`.
     custom_right: Option<Vec<usize>>,
     pub menu: Option<crate::menu::Menu>,
-    /// Text box being edited: path, original text.
-    editing: Option<(Vec<usize>, String)>,
+    /// The text box being edited.
+    editing: Option<crate::edit::Edit>,
+    /// A press in the edited box is held: moves extend the selection.
+    edit_drag: bool,
     mouse: (f32, f32),
     /// Keyboard modifiers held during the last input event.
     pub mods: Mods,
@@ -272,6 +274,7 @@ impl App {
             custom_right: None,
             menu: None,
             editing: None,
+            edit_drag: false,
             mouse: (0.0, 0.0),
             mods: Mods::default(),
             ui_scale: 1.0,
@@ -593,6 +596,12 @@ impl App {
         self.mouse = (x, y);
         self.clear_wheel_part();
         let mut out = Vec::new();
+        if self.edit_drag {
+            if let Some(pos) = self.edit_pos_at(x) {
+                self.with_edit(|e, t| e.set_caret(t, pos, true));
+            }
+            return out;
+        }
         if let (Some(i), Some(m)) = (self.menu_slider, self.menu.as_mut()) {
             if let Some(v) = m.slider_at(i, x) {
                 m.items[i] = crate::menu::slider_item(v);
@@ -1086,12 +1095,110 @@ impl App {
     /// Start editing a text box (as if it was clicked).
     pub fn begin_edit(&mut self, path: &[usize]) {
         let _ = self.commit_edit();
-        if let Some(c) = self.ctrl_mut(path) {
-            let orig = c.text.clone();
-            c.set_attr("editing", "true".into());
-            self.editing = Some((path.to_vec(), orig));
-            self.dirty = true;
+        self.start_edit(path.to_vec());
+    }
+
+    /// Edit the text box at `path` with its text selected.
+    fn start_edit(&mut self, path: Vec<usize>) {
+        let Some(c) = self.ctrl_mut(&path) else { return };
+        c.set_attr("editing", "true".into());
+        let e = crate::edit::Edit::new(path, &c.text);
+        self.editing = Some(e);
+        self.show_edit();
+    }
+
+    /// Hand the caret and the selection to the drawing.
+    fn show_edit(&mut self) {
+        let Some(e) = self.editing.take() else { return };
+        if let Some(c) = self.ctrl_mut(&e.path) {
+            c.set_attr(crate::edit::CARET, e.caret.to_string());
+            c.set_attr(crate::edit::ANCHOR, e.anchor.to_string());
         }
+        self.editing = Some(e);
+        self.dirty = true;
+    }
+
+    /// Change the edited text or its selection.
+    fn with_edit<R>(&mut self, f: impl FnOnce(&mut crate::edit::Edit, &mut String) -> R) -> Option<R> {
+        let mut e = self.editing.take()?;
+        let r = self.ctrl_mut(&e.path).map(|c| f(&mut e, &mut c.text));
+        self.editing = Some(e);
+        self.show_edit();
+        r
+    }
+
+    /// The edited box's selected text (for the clipboard).
+    pub fn edit_selection(&self) -> Option<String> {
+        let e = self.editing.as_ref()?;
+        let s = e.selected(&self.ctrl(&e.path)?.text);
+        (!s.is_empty()).then(|| s.to_string())
+    }
+
+    /// Cut the edited box's selection.
+    pub fn edit_cut(&mut self) -> Option<String> {
+        self.with_edit(|e, t| e.cut(t)).flatten()
+    }
+
+    pub fn edit_select_all(&mut self) {
+        self.with_edit(|e, t| e.select_all(t));
+    }
+
+    pub fn edit_undo(&mut self, redo: bool) {
+        self.with_edit(|e, t| if redo { e.redo(t) } else { e.undo(t) });
+    }
+
+    /// The character boundary of the edited text nearest to root `x`.
+    fn edit_pos_at(&mut self, x: f32) -> Option<usize> {
+        let e = self.editing.as_ref()?;
+        let (path, caret) = (e.path.clone(), e.caret);
+        let ox = self.origin(&path).0 as f32;
+        let mut c = &self.root;
+        for &i in &path {
+            c = c.children.get(i)?;
+        }
+        let (font, x0, w) = crate::render::edit_layout(&self.skin.styles, c);
+        let chars: Vec<char> = c.text.chars().collect();
+        let scroll = crate::render::edit_scroll(&mut self.fonts, &font, &c.text, caret, w);
+        let lx = x - ox - x0 + scroll;
+        let mut at = 0.0;
+        let mut buf = [0u8; 4];
+        for (i, ch) in chars.iter().enumerate() {
+            let adv = self.fonts.measure(&font, ch.encode_utf8(&mut buf)).0;
+            if lx < at + adv * 0.5 {
+                return Some(i);
+            }
+            at += adv;
+        }
+        Some(chars.len())
+    }
+
+    /// The next (`back`: previous) text box after `path` in the nearest
+    /// enclosing panel that holds another one, at most two levels up.
+    fn next_field(&self, path: &[usize], back: bool) -> Option<Vec<usize>> {
+        fn boxes(c: &Ctrl, path: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+            for (i, k) in c.children.iter().enumerate().filter(|(_, k)| k.visible) {
+                path.push(i);
+                if matches!(k.class.as_str(), "CtrlTextBox" | "CtrlValueBox" | "CtrlSearchBox") && k.enabled && !k.passive {
+                    out.push(path.clone());
+                }
+                boxes(k, path, out);
+                path.pop();
+            }
+        }
+        if !self.ctrl(path).is_some_and(|c| matches!(c.class.as_str(), "CtrlTextBox" | "CtrlValueBox" | "CtrlSearchBox")) {
+            return None;
+        }
+        for up in 1..=path.len().min(2) {
+            let mut host = path[..path.len() - up].to_vec();
+            let mut found = Vec::new();
+            boxes(self.ctrl(&host)?, &mut host, &mut found);
+            let Some(i) = found.iter().position(|p| p == path) else { continue };
+            if found.len() > 1 {
+                let n = found.len();
+                return Some(found.swap_remove(if back { (i + n - 1) % n } else { (i + 1) % n }));
+            }
+        }
+        None
     }
 
     /// An inline edit box ([re:c8b896] and the rename
@@ -1118,53 +1225,82 @@ impl App {
     }
 
     fn commit_edit(&mut self) -> Vec<UiEvent> {
-        let Some((path, _)) = self.editing.take() else { return Vec::new() };
+        let Some(crate::edit::Edit { path, .. }) = self.editing.take() else { return Vec::new() };
+        self.edit_drag = false;
         self.dirty = true;
         let Some(c) = self.ctrl_mut(&path) else { return Vec::new() };
-        c.remove_attr("editing");
+        Self::end_edit(c);
         vec![UiEvent::TextCommitted { name: c.name.clone(), text: c.text.clone(), path }]
     }
 
     fn cancel_edit(&mut self) {
-        if let Some((path, orig)) = self.editing.take() {
+        if let Some(crate::edit::Edit { path, orig, .. }) = self.editing.take() {
             if let Some(c) = self.ctrl_mut(&path) {
                 c.text = orig;
-                c.remove_attr("editing");
+                Self::end_edit(c);
             }
+            self.edit_drag = false;
             self.dirty = true;
         }
     }
 
-    /// Typed text for the focused text box; returns false when nothing has
-    /// the keyboard (so the host gets the key).
+    fn end_edit(c: &mut Ctrl) {
+        c.remove_attr("editing");
+        c.remove_attr(crate::edit::CARET);
+        c.remove_attr(crate::edit::ANCHOR);
+    }
+
+    /// Typed or pasted text for the focused text box, in place of its
+    /// selection; returns false when nothing has the keyboard (so the host
+    /// gets the key).
     pub fn key_text(&mut self, text: &str) -> bool {
-        let Some((path, _)) = self.editing.clone() else { return false };
-        if let Some(c) = self.ctrl_mut(&path) {
-            c.text.push_str(text);
-            self.dirty = true;
-        }
-        true
+        self.with_edit(|e, t| e.insert(t, text)).is_some()
     }
 
-    /// Editing keys: "Enter", "Escape", "Backspace". Returns events and
-    /// whether the key was used.
+    /// Editing keys ([re:f26c4b], [re:e25508]): "Enter" commits, "Tab"
+    /// commits and edits the next text box (with shift the previous one),
+    /// "Escape" cancels, "Backspace" and "Delete" delete, "Left" / "Right"
+    /// move the caret (with option by word, with command to the line's
+    /// ends; off macOS the shortcut modifier moves by word), "Home" /
+    /// "End" go to the line's ends, and shift extends the selection. Other
+    /// keys are swallowed. Returns events and whether the key was used.
     pub fn key_named(&mut self, key: &str) -> (Vec<UiEvent>, bool) {
-        let Some((path, _)) = self.editing.clone() else { return (Vec::new(), false) };
+        use crate::edit::Move;
+        let Some(path) = self.editing.as_ref().map(|e| e.path.clone()) else { return (Vec::new(), false) };
+        let m = self.mods;
+        let mac = cfg!(target_os = "macos");
+        let (word, line) = (m.alt || (!mac && m.cmd), mac && m.cmd);
+        let step = |left: bool| match (line, word, left) {
+            (true, _, true) => Move::Start,
+            (true, _, false) => Move::End,
+            (_, true, true) => Move::WordLeft,
+            (_, true, false) => Move::WordRight,
+            (_, _, true) => Move::Left,
+            (_, _, false) => Move::Right,
+        };
         match key {
-            "Enter" | "Tab" => (self.commit_edit(), true),
-            "Escape" => {
-                self.cancel_edit();
-                (Vec::new(), true)
-            }
-            "Backspace" => {
-                if let Some(c) = self.ctrl_mut(&path) {
-                    c.text.pop();
-                    self.dirty = true;
+            "Enter" => return (self.commit_edit(), true),
+            "Tab" => {
+                let next = self.next_field(&path, m.shift);
+                let out = self.commit_edit();
+                if let Some(p) = next {
+                    self.start_edit(p);
                 }
-                (Vec::new(), true)
+                return (out, true);
             }
-            _ => (Vec::new(), true),
+            "Escape" => self.cancel_edit(),
+            "Backspace" | "Delete" => {
+                self.with_edit(|e, t| e.delete(t, key == "Delete"));
+            }
+            "Left" | "Right" => {
+                self.with_edit(|e, t| e.move_caret(t, step(key == "Left"), m.shift));
+            }
+            "Home" | "End" => {
+                self.with_edit(|e, t| e.move_caret(t, if key == "Home" { Move::Start } else { Move::End }, m.shift));
+            }
+            _ => {}
         }
+        (Vec::new(), true)
     }
 
     pub fn mouse_down(&mut self, button: MouseButton) -> Vec<UiEvent> {
@@ -1179,9 +1315,29 @@ impl App {
             self.left_held = true;
         }
         let (x, y) = self.mouse;
-        // A click anywhere commits a pending text edit.
-        let mut committed = self.commit_edit();
         let hit = self.hit(x, y);
+        // A press in the box being edited places the caret (shift extends
+        // the selection, a double click selects the word); its drag
+        // selects. A search box's icons keep their own clicks.
+        if button == MouseButton::Left {
+            if let Some(p) = self.editing.as_ref().map(|e| e.path.clone()).filter(|p| hit.starts_with(p)) {
+                let icon = self.ctrl(&p).filter(|c| c.class == "CtrlSearchBox").is_some_and(|c| {
+                    let (lx, w, h) = (x - self.origin(&p).0 as f32, c.rect.w as f32, c.rect.h as f32);
+                    lx < h || (lx >= w - h && !c.text.is_empty())
+                });
+                if !icon {
+                    let word = self.double_click(&p).is_some();
+                    let shift = self.mods.shift;
+                    if let Some(pos) = self.edit_pos_at(x) {
+                        self.with_edit(|e, t| if word { e.select_word(t, pos) } else { e.set_caret(t, pos, shift) });
+                        self.edit_drag = !word;
+                    }
+                    return Vec::new();
+                }
+            }
+        }
+        // A click anywhere else commits a pending text edit.
+        let mut committed = self.commit_edit();
         let text_box = (0..=hit.len())
             .rev()
             .map(|n| hit[..n].to_vec())
@@ -1225,12 +1381,10 @@ impl App {
                         return committed;
                     }
                 }
-                if let Some(c) = self.ctrl_mut(&p) {
-                    let orig = c.text.clone();
-                    c.set_attr("editing", "true".into());
-                    self.editing = Some((p, orig));
-                    self.dirty = true;
-                }
+                // The press also counts as the first of a double click
+                // in the box.
+                self.last_press = Some((p.clone(), std::time::Instant::now()));
+                self.start_edit(p);
                 return committed;
             }
         }
@@ -1728,6 +1882,9 @@ impl App {
         }
         if button != MouseButton::Left {
             return self.custom_right.take().map(|p| vec![self.custom_event(p, MouseKind::Up)]).unwrap_or_default();
+        }
+        if std::mem::take(&mut self.edit_drag) {
+            return Vec::new();
         }
         self.hide_tooltip_delayed();
         let (x, y) = self.mouse;
@@ -2668,5 +2825,179 @@ mod tests {
         app.open_menu(&[0], vec!["One".into()], None);
         assert!(app.escape());
         assert!(app.menu.is_none());
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    fn text_box(name: &str, x: i32, text: &str) -> Ctrl {
+        Ctrl { class: "CtrlTextBox".into(), name: name.into(), rect: Rect::new(x, 10, 100, 16), visible: true, enabled: true, text: text.into(), ..Ctrl::default() }
+    }
+
+    fn app(children: Vec<Ctrl>) -> App {
+        let skin = Skin { dir: "/nonexistent".into(), ours: "/nonexistent".into(), theme: String::new(), styles: crate::style::StyleSheet::new(), cache: Default::default() };
+        let root = Ctrl { class: "root".into(), rect: Rect::new(0, 0, 400, 400), visible: true, enabled: true, children, ..Ctrl::default() };
+        App::new(skin, root)
+    }
+
+    fn click(app: &mut App, x: f32) -> Vec<UiEvent> {
+        app.mouse_move(x, 18.0);
+        let mut ev = app.mouse_down(MouseButton::Left);
+        ev.extend(app.mouse_up(MouseButton::Left));
+        ev
+    }
+
+    fn text(app: &App, i: usize) -> &str {
+        &app.ctrl(&[i]).unwrap().text
+    }
+
+    #[test]
+    fn a_click_edits_with_the_text_selected_and_typing_replaces_it() {
+        let mut app = app(vec![text_box("A", 10, "Kick 1")]);
+        click(&mut app, 50.0);
+        assert!(app.is_editing());
+        assert_eq!(app.edit_selection().as_deref(), Some("Kick 1"));
+        assert_eq!(app.ctrl(&[0]).unwrap().attr(crate::edit::ANCHOR), Some("0"));
+        assert_eq!(app.ctrl(&[0]).unwrap().attr(crate::edit::CARET), Some("6"));
+        assert!(app.key_text("Snare"));
+        assert_eq!(text(&app, 0), "Snare");
+        let (ev, used) = app.key_named("Enter");
+        assert!(used && !app.is_editing());
+        assert!(matches!(&ev[..], [UiEvent::TextCommitted { text, .. }] if text == "Snare"));
+        let c = app.ctrl(&[0]).unwrap();
+        assert_eq!((c.attr("editing"), c.attr(crate::edit::CARET), c.attr(crate::edit::ANCHOR)), (None, None, None));
+    }
+
+    #[test]
+    fn keys_move_the_caret_select_and_delete() {
+        let mut app = app(vec![text_box("A", 10, "Hat open")]);
+        app.begin_edit(&[0]);
+        app.key_named("End");
+        app.key_named("Left");
+        app.key_text("-");
+        assert_eq!(text(&app, 0), "Hat ope-n");
+        app.key_named("Home");
+        app.key_named("Delete");
+        assert_eq!(text(&app, 0), "at ope-n");
+        app.mods.shift = true;
+        app.key_named("Right");
+        app.key_named("Right");
+        assert_eq!(app.edit_selection().as_deref(), Some("at"));
+        app.mods.shift = false;
+        app.key_named("Backspace");
+        assert_eq!(text(&app, 0), " ope-n");
+        app.mods.alt = true;
+        app.key_named("Right");
+        app.mods.alt = false;
+        app.key_text("!");
+        assert_eq!(text(&app, 0), " ope!-n");
+        // Keys a text box has no use for are swallowed.
+        assert_eq!(app.key_named("Up"), (Vec::new(), true));
+        app.key_named("Escape");
+        assert_eq!(text(&app, 0), "Hat open");
+        assert!(!app.is_editing());
+    }
+
+    #[test]
+    fn clipboard_commands_and_undo_work_on_the_selection() {
+        let mut app = app(vec![text_box("A", 10, "Tom low")]);
+        app.begin_edit(&[0]);
+        app.key_named("End");
+        app.mods.shift = true;
+        app.mods.alt = true;
+        app.key_named("Left");
+        app.mods = Mods::default();
+        assert_eq!(app.edit_cut().as_deref(), Some("low"));
+        assert_eq!((text(&app, 0), app.edit_selection()), ("Tom ", None));
+        app.key_text("high\n");
+        assert_eq!(text(&app, 0), "Tom high");
+        app.edit_undo(false);
+        app.edit_undo(false);
+        assert_eq!(text(&app, 0), "Tom low");
+        app.edit_undo(true);
+        assert_eq!(text(&app, 0), "Tom ");
+        app.edit_select_all();
+        assert_eq!(app.edit_selection().as_deref(), Some("Tom "));
+    }
+
+    #[test]
+    fn the_mouse_places_the_caret_and_selects() {
+        let mut app = app(vec![text_box("A", 10, "Clap wide")]);
+        click(&mut app, 50.0);
+        // A press in the box keeps the edit: at the far right the caret is
+        // behind the text, at the left edge before it.
+        std::thread::sleep(DOUBLE_CLICK);
+        assert!(click(&mut app, 108.0).is_empty());
+        assert!(app.is_editing());
+        assert_eq!(app.ctrl(&[0]).unwrap().attr(crate::edit::CARET), Some("9"));
+        assert_eq!(app.edit_selection(), None);
+        // Dragging to the left edge selects everything before the caret.
+        std::thread::sleep(DOUBLE_CLICK);
+        app.mouse_move(108.0, 18.0);
+        app.mouse_down(MouseButton::Left);
+        app.mouse_move(11.0, 18.0);
+        assert_eq!(app.edit_selection().as_deref(), Some("Clap wide"));
+        app.mouse_up(MouseButton::Left);
+        app.mouse_move(60.0, 18.0);
+        assert_eq!(app.edit_selection().as_deref(), Some("Clap wide"));
+        // Shift and a click extend the selection from its anchor.
+        std::thread::sleep(DOUBLE_CLICK);
+        click(&mut app, 11.0);
+        assert_eq!(app.edit_selection(), None);
+        app.mods.shift = true;
+        std::thread::sleep(DOUBLE_CLICK);
+        click(&mut app, 108.0);
+        app.mods.shift = false;
+        assert_eq!(app.edit_selection().as_deref(), Some("Clap wide"));
+        // A double click selects the word under it.
+        std::thread::sleep(DOUBLE_CLICK);
+        click(&mut app, 14.0);
+        click(&mut app, 14.0);
+        assert_eq!(app.edit_selection().as_deref(), Some("Clap"));
+        // A click outside commits.
+        let ev = click(&mut app, 300.0);
+        assert!(matches!(&ev[..], [UiEvent::TextCommitted { .. }]));
+    }
+
+    #[test]
+    fn tab_commits_and_edits_the_next_text_box() {
+        let mut hidden = text_box("H", 230, "hidden");
+        hidden.visible = false;
+        let mut label = text_box("L", 10, "label");
+        label.class = "CtrlLabel".into();
+        label.rect.y = 40;
+        let mut app = app(vec![text_box("A", 10, "one"), hidden, text_box("B", 120, "two"), label]);
+        app.begin_edit(&[0]);
+        app.key_text("1");
+        let (ev, used) = app.key_named("Tab");
+        assert!(used && matches!(&ev[..], [UiEvent::TextCommitted { name, text, .. }] if name == "A" && text == "1"));
+        assert_eq!(app.edit_selection().as_deref(), Some("two"));
+        // Past the last one it starts over; with shift it goes back.
+        app.key_named("Tab");
+        assert_eq!(app.edit_selection().as_deref(), Some("1"));
+        app.mods.shift = true;
+        app.key_named("Tab");
+        assert_eq!(app.edit_selection().as_deref(), Some("two"));
+        // An inline edit box only commits.
+        app.mods.shift = false;
+        app.begin_edit(&[3]);
+        app.key_named("Tab");
+        assert!(!app.is_editing());
+    }
+
+    #[test]
+    fn an_edited_box_draws_its_selection_and_caret() {
+        let mut app = app(vec![text_box("A", 10, "Ride")]);
+        let plain = crate::render_ctrl(&app.skin, &mut app.fonts, &app.root, 1.0);
+        app.begin_edit(&[0]);
+        let selected = crate::render_ctrl(&app.skin, &mut app.fonts, &app.root, 1.0);
+        app.key_named("Home");
+        let caret = crate::render_ctrl(&app.skin, &mut app.fonts, &app.root, 1.0);
+        assert!(plain.data() != selected.data() && selected.data() != caret.data());
+        // The caret is a black line at the text's start.
+        let px = caret.pixel(13, 18).unwrap();
+        assert_eq!((px.red(), px.green(), px.blue(), px.alpha()), (0, 0, 0, 255));
     }
 }

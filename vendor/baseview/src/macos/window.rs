@@ -75,6 +75,9 @@ pub(super) struct WindowInner {
     ns_window: Cell<Option<id>>,
     /// Our subclassed NSView
     ns_view: id,
+    /// Dreist patch: the view takes key equivalents (keys with command)
+    /// ahead of the menus while it is first responder.
+    pub(super) key_equivalents: Cell<bool>,
 
     #[cfg(feature = "opengl")]
     gl_context: Option<GlContext>,
@@ -165,6 +168,7 @@ impl<'a> Window<'a> {
         let ns_view = unsafe { create_view(&options) };
 
         let window_inner = WindowInner {
+            key_equivalents: Cell::new(false),
             open: Cell::new(true),
             ns_app: Cell::new(None),
             ns_window: Cell::new(None),
@@ -253,6 +257,7 @@ impl<'a> Window<'a> {
         let ns_view = unsafe { create_view(&options) };
 
         let window_inner = WindowInner {
+            key_equivalents: Cell::new(false),
             open: Cell::new(true),
             ns_app: Cell::new(Some(app)),
             ns_window: Cell::new(Some(ns_window)),
@@ -308,6 +313,13 @@ impl<'a> Window<'a> {
 
     pub fn close(&mut self) {
         self.inner.close();
+    }
+
+    /// Dreist patch: whether the view takes key equivalents (keys with
+    /// command) ahead of the menus while it is first responder, as a text
+    /// field being edited does.
+    pub fn set_key_equivalents(&mut self, on: bool) {
+        self.inner.key_equivalents.set(on);
     }
 
     pub fn has_focus(&mut self) -> bool {

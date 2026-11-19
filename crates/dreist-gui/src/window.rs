@@ -265,6 +265,34 @@ impl<T: WindowApp> Handler<T> {
         }
     }
 
+    /// A shortcut while a text box is edited ([re:f26c4b]): cut, copy,
+    /// paste, select all, undo and redo (shift, or Y off macOS).
+    fn edit_shortcut(&mut self, key: &str) {
+        let app = self.app.app();
+        let shift = app.mods.shift;
+        match key {
+            "a" => app.edit_select_all(),
+            "c" => {
+                if let Some(s) = app.edit_selection() {
+                    crate::clipboard::set(&s);
+                }
+            }
+            "x" => {
+                if let Some(s) = app.edit_cut() {
+                    crate::clipboard::set(&s);
+                }
+            }
+            "v" => {
+                if let Some(s) = crate::clipboard::get() {
+                    app.key_text(&s);
+                }
+            }
+            "z" => app.edit_undo(shift),
+            "y" if !cfg!(target_os = "macos") => app.edit_undo(true),
+            _ => {}
+        }
+    }
+
     /// Ask for the tooltip of the control under the pointer.
     fn tooltip(&mut self) {
         let path = self.app.app().tooltip_target();
@@ -275,6 +303,9 @@ impl<T: WindowApp> Handler<T> {
 impl<T: WindowApp> WindowHandler for Handler<T> {
     fn on_frame(&mut self, window: &mut Window) {
         let started = std::time::Instant::now();
+        // A text box being edited takes the keys with command ahead of
+        // the menus ([re:f26c4b]).
+        window.set_key_equivalents(self.app.app().is_editing());
         self.frame(window);
         self.stats.frames += 1;
         self.stats.busy += started.elapsed();
@@ -345,6 +376,14 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                     keyboard_types::Key::Character(s) => {
                         let cmd = self.app.app().mods.cmd;
                         let capture = self.app.captures_keys();
+                        // [re:f26c4b]: a text box being edited takes the
+                        // editing shortcuts and lets no other one through.
+                        if cmd && self.app.app().is_editing() {
+                            if let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) {
+                                self.edit_shortcut(&key);
+                            }
+                            return EventStatus::Captured;
+                        }
                         if cmd || !self.app.app().is_editing() {
                             let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) else {
                                 return if capture { EventStatus::Captured } else { EventStatus::Ignored };
@@ -379,6 +418,11 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                             keyboard_types::Key::Enter => "Enter",
                             keyboard_types::Key::Escape => "Escape",
                             keyboard_types::Key::Backspace => "Backspace",
+                            keyboard_types::Key::Delete => "Delete",
+                            keyboard_types::Key::ArrowLeft => "Left",
+                            keyboard_types::Key::ArrowRight => "Right",
+                            keyboard_types::Key::Home => "Home",
+                            keyboard_types::Key::End => "End",
                             keyboard_types::Key::Tab => "Tab",
                             _ => "",
                         };
