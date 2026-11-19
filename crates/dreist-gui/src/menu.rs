@@ -270,14 +270,14 @@ impl Menu {
 }
 
 /// Width needed for `items` in the menu font: icon column (20 when any item
-/// is a check item) + text column (widest text + 10) + sub menu column
-/// (24 when any item has a sub menu), at least `min`.
-pub fn menu_width(styles: &StyleSheet, fonts: &mut crate::text::Fonts, items: &[String], min: f32) -> f32 {
+/// is a check item or `checked` marks one) + text column (widest text + 10)
+/// + sub menu column (24 when any item has a sub menu), at least `min`.
+pub fn menu_width(styles: &StyleSheet, fonts: &mut crate::text::Fonts, items: &[String], checked: Option<usize>, min: f32) -> f32 {
     if let Some(g) = items.first().and_then(|i| grid(i)) {
         return (g.cols as f32 * PITCH + 6.0 + 4.0).max(min.min(g.cols as f32 * PITCH + 10.0));
     }
     let font = styles.font(MENU_STYLE);
-    let checks = items.iter().any(|i| i.starts_with(CHECK) || has_block(i));
+    let checks = checked.is_some() || items.iter().any(|i| i.starts_with(CHECK) || has_block(i));
     let text = items
         .iter()
         .map(|s| {
