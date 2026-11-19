@@ -1107,15 +1107,20 @@ impl App {
         self.show_edit();
     }
 
-    /// Hand the caret and the selection to the drawing.
+    /// Hand the caret and the selection to the drawing; only the box is
+    /// repainted.
     fn show_edit(&mut self) {
         let Some(e) = self.editing.take() else { return };
-        if let Some(c) = self.ctrl_mut(&e.path) {
+        let (x, y) = self.origin(&e.path);
+        let size = self.ctrl_mut(&e.path).map(|c| {
             c.set_attr(crate::edit::CARET, e.caret.to_string());
             c.set_attr(crate::edit::ANCHOR, e.anchor.to_string());
+            (c.rect.w, c.rect.h)
+        });
+        if let Some((w, h)) = size {
+            self.invalidate_rect(Rect::new(x, y, w, h));
         }
         self.editing = Some(e);
-        self.dirty = true;
     }
 
     /// Change the edited text or its selection.
@@ -2868,6 +2873,18 @@ mod edit_tests {
         assert!(matches!(&ev[..], [UiEvent::TextCommitted { text, .. }] if text == "Snare"));
         let c = app.ctrl(&[0]).unwrap();
         assert_eq!((c.attr("editing"), c.attr(crate::edit::CARET), c.attr(crate::edit::ANCHOR)), (None, None, None));
+    }
+
+    #[test]
+    fn editing_repaints_the_box_alone() {
+        let mut app = app(vec![text_box("A", 10, "Kick 1")]);
+        click(&mut app, 50.0);
+        app.render_frame_with(1.0, None);
+        app.key_text("S");
+        app.key_named("Left");
+        app.edit_select_all();
+        assert!(!app.dirty);
+        assert!(!app.pending_damage().is_empty() && app.pending_damage().iter().all(|r| *r == Rect::new(10, 10, 100, 16)));
     }
 
     #[test]
