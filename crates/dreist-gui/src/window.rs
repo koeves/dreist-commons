@@ -286,14 +286,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
 
     fn on_event(&mut self, window: &mut Window, event: Event) -> EventStatus {
         self.input = true;
-        let set_mods = |app: &mut App, m: keyboard_types::Modifiers| {
-            app.mods = crate::app::Mods {
-                shift: m.contains(keyboard_types::Modifiers::SHIFT),
-                cmd: m.contains(keyboard_types::Modifiers::META),
-                alt: m.contains(keyboard_types::Modifiers::ALT),
-                ctrl: m.contains(keyboard_types::Modifiers::CONTROL),
-            };
-        };
+        let set_mods = |app: &mut App, m: keyboard_types::Modifiers| app.mods = mods_from(m, cfg!(target_os = "macos"));
         match &event {
             Event::Mouse(
                 MouseEvent::CursorMoved { modifiers, .. } | MouseEvent::ButtonPressed { modifiers, .. } | MouseEvent::ButtonReleased { modifiers, .. } | MouseEvent::WheelScrolled { modifiers, .. },
@@ -353,7 +346,10 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                         let cmd = self.app.app().mods.cmd;
                         let capture = self.app.captures_keys();
                         if cmd || !self.app.app().is_editing() {
-                            let ev = self.app.app().shortcut(&s.to_lowercase());
+                            let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) else {
+                                return if capture { EventStatus::Captured } else { EventStatus::Ignored };
+                            };
+                            let ev = self.app.app().shortcut(&key);
                             if ev.is_empty() {
                                 return if capture { EventStatus::Captured } else { EventStatus::Ignored };
                             }
@@ -424,6 +420,69 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         self.apply_cursor(window);
         EventStatus::Captured
     }
+}
+
+/// The app's modifier set for the platform's keys: the shortcut modifier
+/// (`cmd`) is Command on macOS and Ctrl elsewhere, where `ctrl` is the
+/// Windows / Super key.
+fn mods_from(m: keyboard_types::Modifiers, mac: bool) -> crate::app::Mods {
+    use keyboard_types::Modifiers as M;
+    let (cmd, ctrl) = if mac { (M::META, M::CONTROL) } else { (M::CONTROL, M::META) };
+    crate::app::Mods { shift: m.contains(M::SHIFT), cmd: m.contains(cmd), alt: m.contains(M::ALT), ctrl: m.contains(ctrl) }
+}
+
+/// The name `App::shortcut` takes for a typed character, or `None` when the
+/// key is no shortcut key: the keypad's keys are not the main block's, and
+/// with Option / Alt or Ctrl held the character is the layout's third level
+/// (`®` for `r`) or a control code, so the key's position names it.
+fn shortcut_key(typed: &str, code: keyboard_types::Code, location: keyboard_types::Location, m: keyboard_types::Modifiers) -> Option<String> {
+    use keyboard_types::Code as C;
+    if location == keyboard_types::Location::Numpad {
+        return None;
+    }
+    if m.intersects(keyboard_types::Modifiers::ALT | keyboard_types::Modifiers::CONTROL) {
+        const LETTERS: [C; 26] = [
+            C::KeyA,
+            C::KeyB,
+            C::KeyC,
+            C::KeyD,
+            C::KeyE,
+            C::KeyF,
+            C::KeyG,
+            C::KeyH,
+            C::KeyI,
+            C::KeyJ,
+            C::KeyK,
+            C::KeyL,
+            C::KeyM,
+            C::KeyN,
+            C::KeyO,
+            C::KeyP,
+            C::KeyQ,
+            C::KeyR,
+            C::KeyS,
+            C::KeyT,
+            C::KeyU,
+            C::KeyV,
+            C::KeyW,
+            C::KeyX,
+            C::KeyY,
+            C::KeyZ,
+        ];
+        const DIGITS: [C; 10] = [C::Digit0, C::Digit1, C::Digit2, C::Digit3, C::Digit4, C::Digit5, C::Digit6, C::Digit7, C::Digit8, C::Digit9];
+        if let Some(i) = LETTERS.iter().position(|c| *c == code) {
+            return Some(((b'a' + i as u8) as char).to_string());
+        }
+        if let Some(i) = DIGITS.iter().position(|c| *c == code) {
+            return Some(((b'0' + i as u8) as char).to_string());
+        }
+        match code {
+            C::Comma => return Some(",".into()),
+            C::Space => return Some(" ".into()),
+            _ => {}
+        }
+    }
+    Some(typed.to_lowercase())
 }
 
 impl<T: WindowApp> Handler<T> {
@@ -503,6 +562,35 @@ pub fn open_blocking<T: WindowApp>(mut app: T, title: &str) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn shortcut_modifier_is_command_on_macos_and_ctrl_elsewhere() {
+        use keyboard_types::Modifiers as M;
+        let mac = mods_from(M::META | M::SHIFT, true);
+        assert!(mac.cmd && mac.shift && !mac.ctrl && !mac.alt);
+        assert!(mods_from(M::CONTROL, true).ctrl && !mods_from(M::CONTROL, true).cmd);
+        let other = mods_from(M::CONTROL | M::ALT, false);
+        assert!(other.cmd && other.alt && !other.ctrl);
+        assert!(mods_from(M::META, false).ctrl && !mods_from(M::META, false).cmd);
+    }
+
+    #[test]
+    fn shortcut_keys_are_named_by_position_under_alt_and_skip_the_keypad() {
+        use keyboard_types::{Code, Location, Modifiers as M};
+        let key = |typed, code, location, m| shortcut_key(typed, code, location, m);
+        assert_eq!(key("R", Code::KeyR, Location::Standard, M::SHIFT).as_deref(), Some("r"));
+        // Option changes the character, not the key.
+        assert_eq!(key("\u{ae}", Code::KeyR, Location::Standard, M::ALT).as_deref(), Some("r"));
+        assert_eq!(key("\u{f8}", Code::KeyO, Location::Standard, M::ALT | M::META).as_deref(), Some("o"));
+        assert_eq!(key("\u{a1}", Code::Digit1, Location::Standard, M::ALT | M::CONTROL).as_deref(), Some("1"));
+        assert_eq!(key("\u{2264}", Code::Comma, Location::Standard, M::ALT).as_deref(), Some(","));
+        assert_eq!(key("\u{1a}", Code::KeyZ, Location::Standard, M::CONTROL).as_deref(), Some("z"));
+        // A key without a name by position keeps its character.
+        assert_eq!(key("\u{2013}", Code::Minus, Location::Standard, M::ALT).as_deref(), Some("\u{2013}"));
+        // The keypad's digits are not the page keys.
+        assert_eq!(key("1", Code::Numpad1, Location::Numpad, M::empty()), None);
+        assert_eq!(key("1", Code::Digit1, Location::Standard, M::empty()).as_deref(), Some("1"));
+    }
 
     /// Cheap frames are drawn every display frame; costly ones are spaced
     /// to a quarter of a core, no slower than ten a second.
