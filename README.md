@@ -24,6 +24,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 - [Crates](#crates)
 - [App profile](#app-profile)
 - [Platforms](#platforms)
+- [Limitations](#limitations)
 - [Diagnostics](#diagnostics)
 - [Development](#development)
 - [Contributing](#contributing)
@@ -69,7 +70,6 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 - **Windows**: 10 or newer, x64.
 - **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40); X11, Wayland through XWayland.
 - **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
-- **macOS only**: native drags out of the window, the app-wide menu bar and REX files.
 
 Build setup:
 
@@ -80,6 +80,12 @@ Build setup:
 ```bash
 sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
 ```
+
+## Limitations
+
+- **Drags out of the window**: macOS only.
+- **Drops into the window**: macOS and Windows only.
+- **REX files**: macOS only.
 
 ## Diagnostics
 
