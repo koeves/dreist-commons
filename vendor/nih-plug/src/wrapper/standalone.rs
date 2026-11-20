@@ -71,7 +71,7 @@ pub fn nih_export_standalone_with_args<P: Plugin, Args: IntoIterator<Item = Stri
     )
     .unwrap_or_else(|err| err.exit());
     if config.period_size == 0 {
-        config.period_size = if pulseaudio_is_running() { 1024 } else { 512 };
+        config.period_size = if sound_server_is_running() { 1024 } else { 512 };
     }
 
     match config.backend {
@@ -209,9 +209,11 @@ fn print_error(error: WrapperError) {
     }
 }
 
-/// Whether PulseAudio (not PipeWire's replacement for it) is the sound server, so that ALSA's
-/// default device goes through PulseAudio's ALSA plugin.
-fn pulseaudio_is_running() -> bool {
+/// Whether a sound server (PulseAudio or PipeWire) sits behind ALSA's default device, so that
+/// the standalone's periods go through the server's ALSA plugin. PulseAudio's plugin underruns at
+/// smaller periods; PipeWire pulls a whole graph quantum (1024 frames at 48 kHz by default) per
+/// cycle, more than two 512-frame periods hold, so the buffer has no headroom left for a busy UI.
+fn sound_server_is_running() -> bool {
     if !cfg!(target_os = "linux") {
         return false;
     }
@@ -219,5 +221,11 @@ fn pulseaudio_is_running() -> bool {
         .into_iter()
         .flatten()
         .flatten()
-        .any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| c.trim() == "pulseaudio"))
+        .any(|e| std::fs::read_to_string(e.path().join("comm")).is_ok_and(|c| is_sound_server(c.trim())))
+}
+
+/// A sound server's process name in `/proc/<pid>/comm` (`pipewire-pulse` runs next to
+/// `pipewire`, so the latter is enough).
+fn is_sound_server(comm: &str) -> bool {
+    matches!(comm, "pulseaudio" | "pipewire")
 }
