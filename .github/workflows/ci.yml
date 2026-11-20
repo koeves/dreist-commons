@@ -137,6 +137,22 @@ jobs:
       - name: Test (host)
         run: cargo test --locked -p dreist-host --all-features
 
+  windows:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    # The window code on Windows (x64), drags out of the window included.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (window)
+        run: cargo clippy --locked -p dreist-gui --all-targets --features window -- -D warnings
+      - name: Test (window)
+        run: cargo test --locked -p dreist-gui --features window
+
   packaging:
     needs: changes
     if: needs.changes.outputs.code == 'true'

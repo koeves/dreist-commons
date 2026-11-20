@@ -69,7 +69,8 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 - **Windows**: 10 or newer, x64.
 - **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40); X11, Wayland through XWayland.
 - **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
-- **macOS only**: native drags out of the window, the app-wide menu bar and REX files.
+- **Drags out of the window**: macOS and Windows.
+- **macOS only**: the app-wide menu bar and REX files.
 
 Build setup (Clang builds the time-stretch bindings; the apps' READMEs list what they need in full):
 
