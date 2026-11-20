@@ -71,11 +71,11 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 - **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
 - **macOS only**: native drags out of the window, the app-wide menu bar and REX files.
 
-Build setup (Clang builds the time-stretch bindings; the apps' READMEs list what they need in full):
+Build setup:
 
-- **macOS**: Xcode Command Line Tools (`xcode-select --install`) and Rust through [rustup](https://rustup.rs); no Homebrew packages.
-- **Windows**: Rust through rustup (MSVC), Visual Studio Build Tools with "Desktop development with C++", and LLVM for libclang (`winget install LLVM.LLVM`).
-- **Linux**: Rust through rustup and these packages (Debian / Ubuntu names; the rest serve `dreist-gui/window` and the `dreist-host` features):
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`) and Rust through [rustup](https://rustup.rs).
+- **Windows**: Rust through rustup (MSVC), Visual Studio Build Tools with "Desktop development with C++", and LLVM (`winget install LLVM.LLVM`).
+- **Linux**: Rust through rustup and these packages (Debian / Ubuntu names):
 
 ```bash
 sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
