@@ -27,6 +27,11 @@ use super::WindowState;
 // These function pointers have to be stored in a (const) variable before they can be transmuted
 // Transmuting is needed because winapi has a bug where the pt parameter has an incorrect
 // type `*const POINTL`
+#[link(name = "ole32")]
+extern "system" {
+    fn ReleaseStgMedium(medium: *mut STGMEDIUM);
+}
+
 const DRAG_ENTER_PTR: unsafe extern "system" fn(
     this: *mut IDropTarget,
     pDataObj: *const IDataObject,
@@ -138,10 +143,13 @@ impl DropTarget {
                 return;
             }
 
-            let hdrop = *(*medium.u).hGlobal() as HDROP;
+            // winapi declares the medium's union as a pointer to it; the field holds the handle
+            // itself.
+            let hdrop = medium.u as HDROP;
 
             let item_count = DragQueryFileW(hdrop, 0xFFFFFFFF, null_mut(), 0);
             if item_count == 0 {
+                ReleaseStgMedium(&mut medium);
                 self.drop_data = DropData::None;
                 return;
             }
@@ -158,6 +166,7 @@ impl DropTarget {
                 paths.push(OsString::from_wide(&buffer[..characters as usize]).into())
             }
 
+            ReleaseStgMedium(&mut medium);
             self.drop_data = DropData::Files(paths);
         }
     }
