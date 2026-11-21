@@ -42,6 +42,7 @@ if [ "$os" = Linux ]; then
 else
     binary "$dist/$app.vst3/Contents/MacOS/$app"
     binary "$dist/$app.clap/Contents/MacOS/$app"
+    binary "$dist/$app.component/Contents/MacOS/$app"
     binary "$dist/$app.app/Contents/MacOS/$app"
 fi
 
@@ -59,6 +60,7 @@ if [ "$os" = Linux ]; then
 else
     vst3=$R$H/Library/Audio/Plug-Ins/VST3/$app.vst3
     clap=$R$H/Library/Audio/Plug-Ins/CLAP/$app.clap
+    au=$R$H/Library/Audio/Plug-Ins/Components/$app.component
     appd=$R/Applications/$app.app
 fi
 
@@ -67,6 +69,7 @@ run >"$work/out" 2>&1 || { cat "$work/out"; bad "install exits 0"; }
 has "VST3" "$vst3"
 has "CLAP" "$clap"
 has "app" "$appd"
+[ "$os" = Darwin ] && has "Audio Unit" "$au"
 if [ "$os" = Linux ]; then
     has "command link" "$link"
     [ "$(readlink "$link")" = "$H/.local/share/$app/$app" ] && ok "link points to the final place" || bad "link target $(readlink "$link")"
@@ -121,6 +124,7 @@ run --uninstall >"$work/out" 2>&1 || bad "uninstall exits 0"
 gone "VST3" "$vst3"
 gone "CLAP" "$clap"
 gone "app" "$appd"
+[ "$os" = Darwin ] && gone "Audio Unit" "$au"
 [ "$os" = Linux ] && gone "command link" "$link" && gone "launcher" "$desk"
 grep -q "removed" "$work/out" && ok "message" || bad "message: $(cat "$work/out")"
 
@@ -155,6 +159,7 @@ if [ "$os" = Linux ]; then
 else
     has "VST3" "$R/Library/Audio/Plug-Ins/VST3/$app.vst3"
     has "CLAP" "$R/Library/Audio/Plug-Ins/CLAP/$app.clap"
+    has "Audio Unit" "$R/Library/Audio/Plug-Ins/Components/$app.component"
     has "app" "$R/Applications/$app.app"
 fi
 run --system --uninstall >/dev/null 2>&1 || bad "--system --uninstall exits 0"

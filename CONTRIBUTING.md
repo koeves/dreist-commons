@@ -31,7 +31,7 @@ cargo test -p dreist-gui --features window
 cargo test -p dreist-host --all-features
 ```
 
-- **CI**: pull requests into `dev` run `linux` and the Linux `packaging` test. The release pull request and the release also run `macos` and the macOS and Windows `packaging` tests.
+- **CI**: pull requests into `dev` run `linux` and the Linux `packaging` test. The release pull request and the release also run `macos` and the macOS (with the Audio Unit check) and Windows `packaging` tests.
 - **Docs only**: a pull request that changes only Markdown skips the build and test jobs. A skipped job counts as passed.
 - **CodeQL**: runs on every pull request into `dev` and `main`.
 
