@@ -5,21 +5,21 @@ use winapi::um::combaseapi::CoCreateGuid;
 use winapi::um::ole2::{OleInitialize, RegisterDragDrop, RevokeDragDrop};
 use winapi::um::oleidl::LPDROPTARGET;
 use winapi::um::winuser::{
-    AdjustWindowRectEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    GetDpiForWindow, GetFocus, GetMessageW, GetWindowLongPtrW, LoadCursorW, PostMessageW,
-    RegisterClassW, ReleaseCapture, SetCapture, SetCursor, SetFocus, SetProcessDpiAwarenessContext,
-    SetTimer, SetWindowLongPtrW, SetWindowPos, TrackMouseEvent, TranslateMessage, UnregisterClassW,
-    CS_OWNDC, GET_XBUTTON_WPARAM, GWLP_USERDATA, HTCLIENT, IDC_ARROW, MSG, SWP_NOMOVE,
-    SWP_NOZORDER, TRACKMOUSEEVENT, WHEEL_DELTA, WM_CHAR, WM_CLOSE, WM_CREATE, WM_DPICHANGED,
-    WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-    WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCDESTROY,
-    WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SHOWWINDOW, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN,
-    WM_SYSKEYUP, WM_TIMER, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_CHILD,
-    WS_CLIPSIBLINGS, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUPWINDOW, WS_SIZEBOX, WS_VISIBLE,
-    XBUTTON1, XBUTTON2,
+    AdjustWindowRectEx, BeginPaint, CreateWindowExW, DefWindowProcW, DestroyWindow,
+    DispatchMessageW, EndPaint, GetDpiForWindow, GetFocus, GetMessageW, GetWindowLongPtrW,
+    LoadCursorW, PostMessageW, RegisterClassW, ReleaseCapture, SetCapture, SetCursor, SetFocus,
+    SetProcessDpiAwarenessContext, SetTimer, SetWindowLongPtrW, SetWindowPos, TrackMouseEvent,
+    TranslateMessage, UnregisterClassW, CS_OWNDC, GET_XBUTTON_WPARAM, GWLP_USERDATA, HTCLIENT,
+    IDC_ARROW, MSG, PAINTSTRUCT, SWP_NOMOVE, SWP_NOZORDER, TRACKMOUSEEVENT, WHEEL_DELTA, WM_CHAR,
+    WM_CLOSE, WM_CREATE, WM_DPICHANGED, WM_INPUTLANGCHANGE, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN,
+    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSELEAVE, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_NCDESTROY, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
+    WM_SHOWWINDOW, WM_SIZE, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_USER,
+    WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPSIBLINGS, WS_MAXIMIZEBOX,
+    WS_MINIMIZEBOX, WS_POPUPWINDOW, WS_SIZEBOX, WS_VISIBLE, XBUTTON1, XBUTTON2,
 };
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::VecDeque;
 use std::ffi::{c_void, OsStr};
 use std::os::windows::ffi::OsStrExt;
@@ -172,8 +172,8 @@ unsafe fn wnd_proc_inner(
         WM_MOUSEMOVE => {
             let mut window = crate::Window::new(window_state.create_window());
 
-            let mut mouse_was_outside_window = window_state.mouse_was_outside_window.borrow_mut();
-            if *mouse_was_outside_window {
+            // Not borrowed across the handler call: a modal loop it enters gets `WM_MOUSELEAVE`.
+            if window_state.mouse_was_outside_window.replace(false) {
                 // this makes Windows track whether the mouse leaves the window.
                 // When the mouse leaves it results in a `WM_MOUSELEAVE` event.
                 let mut track_mouse = TRACKMOUSEEVENT {
@@ -185,15 +185,11 @@ unsafe fn wnd_proc_inner(
                 // Couldn't find a good way to track whether the mouse enters,
                 // but if `WM_MOUSEMOVE` happens, the mouse must have entered.
                 TrackMouseEvent(&mut track_mouse);
-                *mouse_was_outside_window = false;
 
                 let enter_event = Event::Mouse(MouseEvent::CursorEntered);
-                window_state
-                    .handler
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .on_event(&mut window, enter_event);
+                window_state.with_handler(|h| {
+                    h.on_event(&mut window, enter_event);
+                });
             }
 
             let x = (lparam & 0xFFFF) as i16 as i32;
@@ -208,14 +204,18 @@ unsafe fn wnd_proc_inner(
                     .borrow()
                     .get_modifiers_from_mouse_wparam(wparam),
             });
-            window_state.handler.borrow_mut().as_mut().unwrap().on_event(&mut window, move_event);
+            window_state.with_handler(|h| {
+                h.on_event(&mut window, move_event);
+            });
             Some(0)
         }
 
         WM_MOUSELEAVE => {
             let mut window = crate::Window::new(window_state.create_window());
             let event = Event::Mouse(MouseEvent::CursorLeft);
-            window_state.handler.borrow_mut().as_mut().unwrap().on_event(&mut window, event);
+            window_state.with_handler(|h| {
+                h.on_event(&mut window, event);
+            });
 
             *window_state.mouse_was_outside_window.borrow_mut() = true;
             Some(0)
@@ -239,7 +239,9 @@ unsafe fn wnd_proc_inner(
                     .get_modifiers_from_mouse_wparam(wparam),
             });
 
-            window_state.handler.borrow_mut().as_mut().unwrap().on_event(&mut window, event);
+            window_state.with_handler(|h| {
+                h.on_event(&mut window, event);
+            });
 
             Some(0)
         }
@@ -297,12 +299,9 @@ unsafe fn wnd_proc_inner(
 
                 window_state.mouse_button_counter.set(mouse_button_counter);
 
-                window_state
-                    .handler
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .on_event(&mut window, Event::Mouse(event));
+                window_state.with_handler(|h| {
+                    h.on_event(&mut window, Event::Mouse(event));
+                });
             }
 
             None
@@ -311,7 +310,9 @@ unsafe fn wnd_proc_inner(
             let mut window = crate::Window::new(window_state.create_window());
 
             if wparam == WIN_FRAME_TIMER {
-                window_state.handler.borrow_mut().as_mut().unwrap().on_frame(&mut window);
+                window_state.with_handler(|h| {
+                    h.on_frame(&mut window);
+                });
             }
 
             Some(0)
@@ -321,12 +322,9 @@ unsafe fn wnd_proc_inner(
             {
                 let mut window = crate::Window::new(window_state.create_window());
 
-                window_state
-                    .handler
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .on_event(&mut window, Event::Window(WindowEvent::WillClose));
+                window_state.with_handler(|h| {
+                    h.on_event(&mut window, Event::Window(WindowEvent::WillClose));
+                });
             }
 
             // DestroyWindow(hwnd);
@@ -341,12 +339,9 @@ unsafe fn wnd_proc_inner(
                 window_state.keyboard_state.borrow_mut().process_message(hwnd, msg, wparam, lparam);
 
             if let Some(event) = opt_event {
-                window_state
-                    .handler
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .on_event(&mut window, Event::Keyboard(event));
+                window_state.with_handler(|h| {
+                    h.on_event(&mut window, Event::Keyboard(event));
+                });
             }
 
             if msg != WM_SYSKEYDOWN {
@@ -361,29 +356,29 @@ unsafe fn wnd_proc_inner(
             let width = (lparam & 0xFFFF) as u16 as u32;
             let height = ((lparam >> 16) & 0xFFFF) as u16 as u32;
 
-            let new_window_info = {
+            {
                 let mut window_info = window_state.window_info.borrow_mut();
-                let new_window_info =
+                *window_info =
                     WindowInfo::from_physical_size(PhySize { width, height }, window_info.scale());
+            }
 
-                // Only send the event if anything changed
-                if window_info.physical_size() == new_window_info.physical_size() {
-                    return None;
-                }
-
-                *window_info = new_window_info;
-
-                new_window_info
-            };
-
-            window_state
-                .handler
-                .borrow_mut()
-                .as_mut()
-                .unwrap()
-                .on_event(&mut window, Event::Window(WindowEvent::Resized(new_window_info)));
+            window_state.notify_resized(&mut window);
 
             None
+        }
+        // The window's contents were lost (shown, uncovered, restored): the handler draws them
+        // again in full. Nothing else paints this window, so validating it is all that is left.
+        WM_PAINT => {
+            let mut paint: PAINTSTRUCT = std::mem::zeroed();
+            BeginPaint(hwnd, &mut paint);
+            EndPaint(hwnd, &paint);
+
+            let mut window = crate::Window::new(window_state.create_window());
+            if let Ok(Some(handler)) = window_state.handler.try_borrow_mut().as_deref_mut() {
+                handler.on_event(&mut window, Event::Window(WindowEvent::Exposed));
+            }
+
+            Some(0)
         }
         WM_DPICHANGED => {
             // To avoid weirdness with the realtime borrow checker.
@@ -506,6 +501,11 @@ pub(super) struct WindowState {
     _drop_target: RefCell<Option<Rc<DropTarget>>>,
     scale_policy: WindowScalePolicy,
     dw_style: u32,
+    /// The physical size and scale the handler last got in a `Resized` event. `WM_SIZE` arrives
+    /// during `CreateWindowExW`, before there is a handler, and a scale change updates
+    /// `window_info` before the `WM_SIZE` it causes, so comparing against `window_info` would
+    /// never tell the handler its first size or a new scale.
+    notified: Cell<Option<(PhySize, f64)>>,
 
     /// Tasks that should be executed at the end of `wnd_proc`. This is needed to avoid mutably
     /// borrowing the fields from `WindowState` more than once. For instance, when the window
@@ -531,8 +531,26 @@ impl WindowState {
         self.keyboard_state.borrow()
     }
 
-    pub(super) fn handler_mut(&self) -> RefMut<Option<Box<dyn WindowHandler>>> {
-        self.handler.borrow_mut()
+    /// Call the handler, unless a call to it is already running: a modal loop entered from the
+    /// handler (an OLE drag, a file dialog) keeps dispatching this window's messages, and a
+    /// second borrow would panic inside `wnd_proc`, which cannot unwind. Those messages are
+    /// dropped.
+    pub(super) fn with_handler<R>(&self, f: impl FnOnce(&mut dyn WindowHandler) -> R) -> Option<R> {
+        let mut handler = self.handler.try_borrow_mut().ok()?;
+        Some(f(handler.as_deref_mut()?))
+    }
+
+    /// Send a `Resized` event when the size or scale differs from the last one sent.
+    fn notify_resized(&self, window: &mut crate::Window) {
+        let info = *self.window_info.borrow();
+        let now = (info.physical_size(), info.scale());
+        if self.notified.get() == Some(now) {
+            return;
+        }
+        if let Ok(Some(handler)) = self.handler.try_borrow_mut().as_deref_mut() {
+            self.notified.set(Some(now));
+            handler.on_event(window, Event::Window(WindowEvent::Resized(info)));
+        }
     }
 
     /// Handle a deferred task as described in [`Self::deferred_tasks`].
@@ -668,6 +686,12 @@ impl Window<'_> {
 
             if !parented {
                 AdjustWindowRectEx(&mut rect, flags, FALSE, 0);
+                // A window takes the process's DPI awareness when it is created, so this has to
+                // come first (Windows 10 and later). A plugin's window lives in the host's process,
+                // whose awareness is the host's to set.
+                SetProcessDpiAwarenessContext(
+                    winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
+                );
             }
 
             let hwnd = CreateWindowExW(
@@ -713,6 +737,7 @@ impl Window<'_> {
                 _drop_target: RefCell::new(None),
                 scale_policy: options.scale,
                 dw_style: flags,
+                notified: Cell::new(None),
 
                 deferred_tasks: RefCell::new(VecDeque::with_capacity(4)),
 
@@ -726,11 +751,6 @@ impl Window<'_> {
                 build(&mut window)
             };
             *window_state.handler.borrow_mut() = Some(Box::new(handler));
-
-            // Only works on Windows 10 unfortunately.
-            SetProcessDpiAwarenessContext(
-                winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE,
-            );
 
             // Now we can get the actual dpi of the window.
             let new_rect = if let WindowScalePolicy::SystemScaleFactor = options.scale {
@@ -763,7 +783,8 @@ impl Window<'_> {
             OleInitialize(null_mut());
             RegisterDragDrop(hwnd, Rc::as_ptr(&drop_target) as LPDROPTARGET);
 
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, Rc::into_raw(window_state) as *const _ as _);
+            let state_ptr = Rc::into_raw(window_state);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as *const _ as _);
             SetTimer(hwnd, WIN_FRAME_TIMER, 15, None);
 
             if let Some(mut new_rect) = new_rect {
@@ -783,6 +804,11 @@ impl Window<'_> {
                     SWP_NOZORDER | SWP_NOMOVE,
                 );
             }
+
+            // The handler's first size and scale: the `WM_SIZE` of `CreateWindowExW` came before
+            // there was a handler, and a parented window may never get another.
+            let state = &*state_ptr;
+            state.notify_resized(&mut crate::Window::new(state.create_window()));
 
             (window_handle, hwnd)
         }
