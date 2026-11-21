@@ -16,7 +16,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 ## Features
 
 - **One engine, two apps**: each app plugs in its names, resources, file family and effect nodes through an app profile.
-- **Own editor per app**: panels, dialogs, settings and the effect menu live in each app; the parts both share are in `dreist-editor-core`.
+- **Own editor per app**: panels, dialogs, settings and the effect menu live in each app.
 - **Opens every family**: `.geist*`, `.dreist*` and `.einst*` files load in both apps.
 - **Diagnostics**: every app and plugin keeps a log (`dreist_engine::diag`) and exports a shareable copy without the user name and private paths.
 
@@ -25,12 +25,12 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 | Crate | Role |
 |---|---|
 | `dreist-formats` | Document tree, project / kit / preset readers, effect tables, resource paths, the app profile and the legacy on-disk names |
-| `dreist-dsp` | Sampler voice DSP and the effect nodes; `fx::install_factory` lets an app supply its own nodes |
-| `dreist-engine` | Step and song sequencer, mixing, offline render, MIDI; `harness` runs the engine goldens |
+| `dreist-dsp` | Sampler voice DSP and the effect nodes, which an app can extend with its own (`fx::install_factory`) |
+| `dreist-engine` | Step and song sequencer, mixing, offline render, MIDI |
 | `dreist-gui` | Skin-driven GUI toolkit (tiny-skia, baseview) |
 | `dreist-testkit` | Golden fingerprints and allocation counting for tests |
 | `dreist-editor-core` | Editor parts the apps share: commands to the engine, undo history, options, tab panels, effect value texts, graphs |
-| `dreist-host` | Audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's session; features `audio`, `midi`, `dialog`, `session`, `clap-sys` |
+| `dreist-host` | Audio devices (cpal), MIDI ports (midir), file dialogs (rfd), the standalone's session |
 
 `vendor/` holds patched dependencies, added by the apps as `[patch]` entries:
 
@@ -62,7 +62,7 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 
 - **macOS**: 11 or newer, Apple Silicon or Intel.
 - **Windows**: 10 or newer, x64.
-- **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40); X11, Wayland through XWayland.
+- **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40), X11 or XWayland.
 
 ## Limitations
 
@@ -78,10 +78,10 @@ cargo clippy --workspace --all-targets --features dreist-gui/window -- -D warnin
 cargo fmt --all --check
 ```
 
-- **Tools**: Rust through [rustup](https://rustup.rs); on macOS the Xcode Command Line Tools, on Windows Visual Studio Build Tools (C++) and LLVM.
+- **Tools**: Rust through [rustup](https://rustup.rs), plus the Xcode Command Line Tools on macOS and Visual Studio Build Tools (C++) with LLVM on Windows.
 - **Linux packages** (Debian / Ubuntu): `sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev`.
-- **UI and content for tests**: taken from a Dreist checkout next to this one (`../dreist`; `DREIST_UI`, `DREIST_RESOURCES` and `DREIST_CONTENT` override); tests that need them skip without.
-- **Goldens**: `UPDATE_GOLDEN=1 cargo test ...` rewrites them; explain every change in the commit.
+- **UI and content for tests**: taken from a Dreist checkout next to this one (`../dreist`).
+- **Goldens**: `UPDATE_GOLDEN=1 cargo test ...` rewrites them.
 - **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Related projects
