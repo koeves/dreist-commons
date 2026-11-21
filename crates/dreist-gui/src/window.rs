@@ -361,6 +361,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 if let Some(files) = self.app.app().drag_out.take() {
                     let view = match window.raw_window_handle() {
                         rwh05::RawWindowHandle::AppKit(h) => h.ns_view,
+                        rwh05::RawWindowHandle::Win32(h) => h.hwnd,
                         _ => std::ptr::null_mut(),
                     };
                     if crate::dragout::begin(view, &files) {

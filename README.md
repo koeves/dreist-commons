@@ -66,7 +66,7 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 
 ## Limitations
 
-- **Drags out of the window**: macOS only.
+- **Drags out of the window**: macOS and Windows only.
 - **Drops into the window**: macOS and Windows only.
 - **REX files**: macOS only.
 
