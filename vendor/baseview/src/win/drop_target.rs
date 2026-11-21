@@ -7,7 +7,7 @@ use std::rc::{Rc, Weak};
 use winapi::shared::guiddef::{IsEqualIID, REFIID};
 use winapi::shared::minwindef::{DWORD, WPARAM};
 use winapi::shared::ntdef::{HRESULT, ULONG};
-use winapi::shared::windef::POINTL;
+use winapi::shared::windef::{POINT, POINTL};
 use winapi::shared::winerror::{E_NOINTERFACE, E_UNEXPECTED, S_OK};
 use winapi::shared::wtypes::DVASPECT_CONTENT;
 use winapi::um::objidl::{IDataObject, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
@@ -17,7 +17,7 @@ use winapi::um::oleidl::{
 };
 use winapi::um::shellapi::{DragQueryFileW, HDROP};
 use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
-use winapi::um::winuser::CF_HDROP;
+use winapi::um::winuser::{ScreenToClient, CF_HDROP};
 use winapi::Interface;
 
 use crate::{DropData, DropEffect, Event, EventStatus, MouseEvent, PhyPoint, Point};
@@ -27,6 +27,11 @@ use super::WindowState;
 // These function pointers have to be stored in a (const) variable before they can be transmuted
 // Transmuting is needed because winapi has a bug where the pt parameter has an incorrect
 // type `*const POINTL`
+#[link(name = "ole32")]
+extern "system" {
+    fn ReleaseStgMedium(medium: *mut STGMEDIUM);
+}
+
 const DRAG_ENTER_PTR: unsafe extern "system" fn(
     this: *mut IDropTarget,
     pDataObj: *const IDataObject,
@@ -93,8 +98,10 @@ impl DropTarget {
             let mut window = crate::Window::new(window_state.create_window());
 
             let event = Event::Mouse(event);
-            let event_status =
-                window_state.handler_mut().as_mut().unwrap().on_event(&mut window, event);
+            // A drag out of this window runs a modal loop inside the handler: no drops on itself.
+            let event_status = window_state
+                .with_handler(|h| h.on_event(&mut window, event))
+                .unwrap_or(EventStatus::Ignored);
 
             if let Some(pdwEffect) = pdwEffect {
                 match event_status {
@@ -113,7 +120,10 @@ impl DropTarget {
             return;
         };
 
-        let phy_point = PhyPoint::new(pt.x, pt.y);
+        // OLE gives the pointer in screen coordinates.
+        let mut point = POINT { x: pt.x, y: pt.y };
+        unsafe { ScreenToClient(window_state.hwnd, &mut point) };
+        let phy_point = PhyPoint::new(point.x, point.y);
         self.drag_position = phy_point.to_logical(&window_state.window_info());
     }
 
@@ -135,10 +145,13 @@ impl DropTarget {
                 return;
             }
 
-            let hdrop = *(*medium.u).hGlobal() as HDROP;
+            // winapi declares the medium's union as a pointer to it; the field holds the handle
+            // itself.
+            let hdrop = medium.u as HDROP;
 
             let item_count = DragQueryFileW(hdrop, 0xFFFFFFFF, null_mut(), 0);
             if item_count == 0 {
+                ReleaseStgMedium(&mut medium);
                 self.drop_data = DropData::None;
                 return;
             }
@@ -155,6 +168,7 @@ impl DropTarget {
                 paths.push(OsString::from_wide(&buffer[..characters as usize]).into())
             }
 
+            ReleaseStgMedium(&mut medium);
             self.drop_data = DropData::Files(paths);
         }
     }

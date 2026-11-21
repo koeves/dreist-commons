@@ -361,6 +361,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 if let Some(files) = self.app.app().drag_out.take() {
                     let view = match window.raw_window_handle() {
                         rwh05::RawWindowHandle::AppKit(h) => h.ns_view,
+                        rwh05::RawWindowHandle::Win32(h) => h.hwnd,
                         _ => std::ptr::null_mut(),
                     };
                     if crate::dragout::begin(view, &files) {
@@ -484,6 +485,11 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 let ui = app.ui_scale.max(0.25) as f64;
                 app.resize((l.width / ui).round() as i32, (l.height / ui).round() as i32);
                 app.dirty = true;
+            }
+            // Windows lost the window's pixels (shown, uncovered): only a full
+            // frame puts them all back.
+            Event::Window(WindowEvent::Exposed) => {
+                self.app.app().dirty = true;
             }
             _ => return EventStatus::Ignored,
         }

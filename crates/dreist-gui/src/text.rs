@@ -14,7 +14,8 @@ use crate::ctrl::FxMap;
 use crate::style::{FontSpec, Shorten};
 
 /// Glyph fallbacks for characters Dreist's fonts lack.
-const FALLBACKS: [&str; 3] = ["Arial Unicode", "Apple Symbols", "DejaVu Sans"];
+/// `seguisym` is Windows' Segoe UI Symbol (its file name).
+const FALLBACKS: [&str; 4] = ["Arial Unicode", "Apple Symbols", "DejaVu Sans", "seguisym"];
 
 /// The app's icon font (`<family>.ttf` in the UI folder's `Fonts`): same
 /// code points as the skins' icon captions.
@@ -83,7 +84,8 @@ impl Fonts {
 
     fn load(&self, family: &str, bold: bool) -> Option<Font> {
         let family = if dreist_formats::legacy::ICON_FAMILIES.contains(&family) { icon_family() } else { family };
-        let names: Vec<String> = if bold { vec![format!("{family} Bold.ttf"), format!("{family}-Bold.ttf"), format!("{family}.ttf")] } else { vec![format!("{family}.ttf")] };
+        let names: Vec<String> =
+            if bold { vec![format!("{family} Bold.ttf"), format!("{family}-Bold.ttf"), format!("{family}bd.ttf"), format!("{family}.ttf")] } else { vec![format!("{family}.ttf")] };
         for d in &self.dirs {
             for n in &names {
                 if let Ok(bytes) = std::fs::read(d.join(n)) {
