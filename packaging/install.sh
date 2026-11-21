@@ -1,5 +1,6 @@
 #!/bin/sh
-# Install the app next to this script (standalone app, VST3, CLAP) on Linux
+# Install the app next to this script (standalone app, VST3, CLAP, Audio
+# Unit on macOS) on Linux
 # or macOS, or remove it. packaging/install.ps1 does the same on Windows.
 #
 #   ./install.sh                         install for this user
@@ -13,8 +14,9 @@
 # Next to this script, each part installed when present:
 #   Linux: <App>.vst3, <App>-CLAP/ (<App>.clap + Resources/),
 #          <App>-App/ (<App>, Resources/, <app>.desktop, icons/)
-#   macOS: <App>.vst3, <App>.clap, <App>.app (Apple Silicon, Intel or
-#          universal; a build for the other kind of Mac is refused)
+#   macOS: <App>.vst3, <App>.clap, <App>.component, <App>.app (Apple
+#          Silicon, Intel or universal; a build for the other kind of Mac
+#          is refused)
 #
 # The install locations are listed in packaging/README.md; settings and
 # content are left alone. DESTDIR=<dir> stages the same layout under <dir>
@@ -52,10 +54,10 @@ done
 
 # The app's name comes from the parts next to this script.
 if [ -z "$app" ]; then
-    for p in "$here"/*.vst3 "$here"/*.clap "$here"/*.app "$here"/*-CLAP "$here"/*-App; do
+    for p in "$here"/*.vst3 "$here"/*.clap "$here"/*.component "$here"/*.app "$here"/*-CLAP "$here"/*-App; do
         [ -e "$p" ] || continue
         n=$(basename "$p")
-        n=${n%.vst3}; n=${n%.clap}; n=${n%.app}; n=${n%-CLAP}; n=${n%-App}
+        n=${n%.vst3}; n=${n%.clap}; n=${n%.component}; n=${n%.app}; n=${n%-CLAP}; n=${n%-App}
         if [ -z "$app" ]; then
             app=$n
         elif [ "$app" != "$n" ]; then
@@ -106,6 +108,7 @@ case "$os:$scope" in
     Darwin:user)
         vst3_dir=$HOME/Library/Audio/Plug-Ins/VST3
         clap_dir=$HOME/Library/Audio/Plug-Ins/CLAP
+        au_dir=$HOME/Library/Audio/Plug-Ins/Components
         # /Applications when this user may write there (admins), else ~/Applications.
         if [ -w "$destdir/Applications" ]; then app_dir=/Applications; else app_dir=$HOME/Applications; fi
         settings="$HOME/Library/Application Support/$app"
@@ -113,6 +116,7 @@ case "$os:$scope" in
     Darwin:system)
         vst3_dir=/Library/Audio/Plug-Ins/VST3
         clap_dir=/Library/Audio/Plug-Ins/CLAP
+        au_dir=/Library/Audio/Plug-Ins/Components
         app_dir=/Applications
         # shellcheck disable=SC2088 # shown as is: every user's own folder
         settings="~/Library/Application Support/$app"
@@ -144,6 +148,7 @@ bin_final=${bin_dir:-}
 if [ -n "$destdir" ]; then
     vst3_dir=$destdir$vst3_dir
     clap_dir=$destdir$clap_dir
+    [ "$os" = Darwin ] && au_dir=$destdir$au_dir
     app_dir=$destdir$app_dir
     [ "$os" = Linux ] && {
         bin_dir=$destdir$bin_dir
@@ -161,7 +166,13 @@ show() {
 }
 
 refresh() {
-    [ "$os" = Linux ] && [ -z "$destdir" ] || return 0
+    [ -z "$destdir" ] || return 0
+    # macOS: hosts see a changed Audio Unit once the component registry
+    # restarts (it does so on its own when next needed).
+    if [ "$os" = Darwin ]; then
+        killall -9 AudioComponentRegistrar >/dev/null 2>&1 || true
+        return 0
+    fi
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q "$desktop_dir" 2>/dev/null || true
     fi
@@ -178,7 +189,7 @@ remove() {
             rm -f "$icon_dir/${s}x$s/apps/$bin.png"
         done
     else
-        rm -rf "$vst3_dir/$app.vst3" "$clap_dir/$app.clap" "$app_dir/$app.app"
+        rm -rf "$vst3_dir/$app.vst3" "$clap_dir/$app.clap" "$au_dir/$app.component" "$app_dir/$app.app"
     fi
 }
 
@@ -214,6 +225,8 @@ else
     magic="cffaedfe cafebabe"
     vst3_bin=$vst3/Contents/MacOS/$app
     clap_bin=$clap/Contents/MacOS/$app
+    au=$here/$app.component
+    au_bin=$au/Contents/MacOS/$app
     app_bin=$appsrc/Contents/MacOS/$app
 fi
 check_build() {
@@ -247,8 +260,9 @@ check_arch() {
 found=0
 [ -d "$vst3" ] && { check_build "${vst3_bin:-$vst3/Contents}"; found=1; }
 [ -d "$clap" ] && { check_build "$clap_bin"; found=1; }
+[ -n "${au:-}" ] && [ -d "$au" ] && { check_build "$au_bin"; found=1; }
 [ -d "$appsrc" ] && { check_build "$app_bin"; found=1; }
-for f in "$vst3_bin" "$clap_bin" "$app_bin"; do
+for f in "$vst3_bin" "$clap_bin" "${au_bin:-}" "$app_bin"; do
     [ -f "$f" ] && check_arch "$f"
 done
 if [ "$found" = 0 ]; then
@@ -276,6 +290,10 @@ if [ -d "$clap" ]; then
     if [ "$os" = Linux ]; then dest=$clap_dir; else dest=$clap_dir/$app.clap; fi
     place "$clap" "$dest"
     echo "CLAP: $(show "$dest")"
+fi
+if [ -n "${au:-}" ] && [ -d "$au" ]; then
+    place "$au" "$au_dir/$app.component"
+    echo "Audio Unit: $(show "$au_dir/$app.component")"
 fi
 if [ -d "$appsrc" ]; then
     if [ "$os" = Linux ]; then
