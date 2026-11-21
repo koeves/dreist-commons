@@ -7,7 +7,7 @@ use std::rc::{Rc, Weak};
 use winapi::shared::guiddef::{IsEqualIID, REFIID};
 use winapi::shared::minwindef::{DWORD, WPARAM};
 use winapi::shared::ntdef::{HRESULT, ULONG};
-use winapi::shared::windef::POINTL;
+use winapi::shared::windef::{POINT, POINTL};
 use winapi::shared::winerror::{E_NOINTERFACE, E_UNEXPECTED, S_OK};
 use winapi::shared::wtypes::DVASPECT_CONTENT;
 use winapi::um::objidl::{IDataObject, FORMATETC, STGMEDIUM, TYMED_HGLOBAL};
@@ -17,7 +17,7 @@ use winapi::um::oleidl::{
 };
 use winapi::um::shellapi::{DragQueryFileW, HDROP};
 use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
-use winapi::um::winuser::CF_HDROP;
+use winapi::um::winuser::{ScreenToClient, CF_HDROP};
 use winapi::Interface;
 
 use crate::{DropData, DropEffect, Event, EventStatus, MouseEvent, PhyPoint, Point};
@@ -113,7 +113,10 @@ impl DropTarget {
             return;
         };
 
-        let phy_point = PhyPoint::new(pt.x, pt.y);
+        // OLE gives the pointer in screen coordinates.
+        let mut point = POINT { x: pt.x, y: pt.y };
+        unsafe { ScreenToClient(window_state.hwnd, &mut point) };
+        let phy_point = PhyPoint::new(point.x, point.y);
         self.drag_position = phy_point.to_logical(&window_state.window_info());
     }
 

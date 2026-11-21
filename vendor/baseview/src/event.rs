@@ -111,6 +111,9 @@ pub enum MouseEvent {
 #[derive(Debug, Clone)]
 pub enum WindowEvent {
     Resized(WindowInfo),
+    /// The window's contents were lost and have to be drawn again in full (Windows only: a
+    /// window shown, uncovered or restored).
+    Exposed,
     Focused,
     Unfocused,
     WillClose,

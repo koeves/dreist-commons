@@ -485,6 +485,11 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 app.resize((l.width / ui).round() as i32, (l.height / ui).round() as i32);
                 app.dirty = true;
             }
+            // Windows lost the window's pixels (shown, uncovered): only a full
+            // frame puts them all back.
+            Event::Window(WindowEvent::Exposed) => {
+                self.app.app().dirty = true;
+            }
             _ => return EventStatus::Ignored,
         }
         self.apply_cursor(window);
