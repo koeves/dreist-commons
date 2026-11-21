@@ -98,8 +98,10 @@ impl DropTarget {
             let mut window = crate::Window::new(window_state.create_window());
 
             let event = Event::Mouse(event);
-            let event_status =
-                window_state.handler_mut().as_mut().unwrap().on_event(&mut window, event);
+            // A drag out of this window runs a modal loop inside the handler: no drops on itself.
+            let event_status = window_state
+                .with_handler(|h| h.on_event(&mut window, event))
+                .unwrap_or(EventStatus::Ignored);
 
             if let Some(pdwEffect) = pdwEffect {
                 match event_status {
