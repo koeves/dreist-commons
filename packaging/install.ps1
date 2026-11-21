@@ -5,6 +5,7 @@
 #   .\install.ps1 --user                  install for this user only
 #   .\install.ps1 --uninstall             remove a system-wide install
 #   .\install.ps1 --uninstall --user      remove an install for this user
+#   .\install.ps1 --uninstall --purge     also remove this user's diagnostics logs
 #   .\install.ps1 --app <Name> --uninstall    remove without the files at hand
 #   (--system, the default here, is accepted as on Linux and macOS)
 #
@@ -18,6 +19,7 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $scope = 'system'
 $action = 'install'
+$purge = $false
 $app = $null
 $argv = @($args)
 
@@ -32,6 +34,7 @@ function Show-Usage {
 for ($i = 0; $i -lt $argv.Count; $i++) {
     switch -Exact ($argv[$i]) {
         '--uninstall' { $action = 'uninstall' }
+        '--purge' { $purge = $true }
         '--system' { $scope = 'system' }
         '--user' { $scope = 'user' }
         '--app' {
@@ -95,9 +98,17 @@ function Remove-Install {
     Remove-Part $shortcut
 }
 
+# The diagnostics logs (dreist_engine::diag), this user's.
+$logs = Join-Path $env:LOCALAPPDATA "$app\Logs"
+
 if ($action -eq 'uninstall') {
     Remove-Install
-    "$app removed (settings in $settings and content kept)"
+    if ($purge) {
+        Remove-Part $logs
+        "$app removed with its logs (settings in $settings and content kept)"
+    } else {
+        "$app removed (settings in $settings, logs in $logs and content kept)"
+    }
     exit 0
 }
 

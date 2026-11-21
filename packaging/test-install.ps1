@@ -79,6 +79,23 @@ try {
     Gone 'Start menu entry' $link
     if ($r.Out -match 'removed') { Ok 'message' } else { Bad "message: $($r.Out)" }
 
+    '== uninstall --purge also removes the logs'
+    Run $dist @('--user') | Out-Null
+    $logs = Join-Path $env:LOCALAPPDATA "$app\Logs"
+    New-Item -ItemType Directory -Force -Path $logs | Out-Null
+    New-Item -ItemType File -Force -Path (Join-Path $logs 'fake.log') | Out-Null
+    $r = Run $dist @('--user', '--uninstall')
+    Has 'logs kept without --purge' (Join-Path $logs 'fake.log')
+    if ($r.Out -match 'logs in') { Ok 'says where the logs stay' } else { Bad "message: $($r.Out)" }
+    Run $dist @('--user') | Out-Null
+    $r = Run $dist @('--user', '--uninstall', '--purge')
+    if ($r.Code -ne 0) { Bad '--purge exits 0' }
+    Gone 'logs' $logs
+    Gone 'VST3' $vst3
+    if ($r.Out -match 'with its logs') { Ok 'message' } else { Bad "message: $($r.Out)" }
+    $parent = Join-Path $env:LOCALAPPDATA $app
+    if ((Test-Path -LiteralPath $parent) -and -not (Get-ChildItem -LiteralPath $parent)) { Remove-Item -LiteralPath $parent }
+
     '== uninstall by name, with nothing next to the script'
     Run $dist @('--user') | Out-Null
     $bare = Join-Path $work 'bare'

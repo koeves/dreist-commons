@@ -1,8 +1,9 @@
 #!/bin/sh
 # Check packaging/install.sh on this system (Linux or macOS) with a fake app,
 # in a scratch home folder and DESTDIR, so nothing real is touched:
-# install, reinstall over an older version, a refused incomplete build,
-# --system staging and uninstall.
+# install, reinstall over an older version, a refused incomplete build, a
+# refused build for the other kind of Mac, --system staging, uninstall and
+# --purge.
 #
 #   packaging/test-install.sh
 # shellcheck disable=SC2015 # ok and bad always succeed
@@ -89,6 +90,27 @@ if HOME=$H XDG_DATA_HOME='' XDG_CONFIG_HOME='' DESTDIR=$R sh "$work/broken/insta
 grep -q "Not a complete build" "$work/err" && ok "says why" || bad "error: $(cat "$work/err")"
 has "install untouched" "$vst3/marker"
 
+if [ "$os" = Darwin ]; then
+    echo "== a build for the other kind of Mac changes nothing"
+    machine=$(uname -m)
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ] && machine=arm64
+    other=x86_64
+    [ "$machine" = arm64 ] || other=arm64
+    # A thin Mach-O header: 64-bit magic, then the CPU type (arm64 0c, x86_64 07).
+    macho() {
+        if [ "$1" = arm64 ]; then printf '\317\372\355\376\014\000\000\001 rest' >"$2"; else printf '\317\372\355\376\007\000\000\001 rest' >"$2"; fi
+    }
+    cp -R "$dist" "$work/other"
+    macho "$other" "$work/other/$app.clap/Contents/MacOS/$app"
+    if HOME=$H DESTDIR=$R sh "$work/other/install.sh" >/dev/null 2>"$work/err"; then bad "refuses the other architecture"; else ok "refuses the other architecture"; fi
+    grep -q "use the $app-<version>-macOS-" "$work/err" && ok "names the right archive" || bad "error: $(cat "$work/err")"
+    has "install untouched" "$vst3/marker"
+    cp -R "$dist" "$work/own"
+    macho "$machine" "$work/own/$app.clap/Contents/MacOS/$app"
+    printf '\312\376\272\276 rest' >"$work/own/$app.app/Contents/MacOS/$app"
+    HOME=$H DESTDIR=$R sh "$work/own/install.sh" >/dev/null 2>&1 && ok "installs this Mac's and universal builds" || bad "this Mac's build refused"
+fi
+
 echo "== wrong options"
 if run --bogus >/dev/null 2>&1; then bad "unknown option fails"; else ok "unknown option fails"; fi
 run --help | grep -q -- "--uninstall" && ok "help lists the options" || bad "help"
@@ -101,6 +123,20 @@ gone "CLAP" "$clap"
 gone "app" "$appd"
 [ "$os" = Linux ] && gone "command link" "$link" && gone "launcher" "$desk"
 grep -q "removed" "$work/out" && ok "message" || bad "message: $(cat "$work/out")"
+
+echo "== uninstall --purge also removes the logs"
+run >/dev/null 2>&1
+if [ "$os" = Linux ]; then logs=$R$H/.local/state/$app; else logs=$R$H/Library/Logs/$app; fi
+mkdir -p "$logs"
+: >"$logs/fake.log"
+run --uninstall >"$work/out" 2>&1
+has "logs kept without --purge" "$logs/fake.log"
+grep -q "logs in" "$work/out" && ok "says where the logs stay" || bad "message: $(cat "$work/out")"
+run >/dev/null 2>&1
+run --uninstall --purge >"$work/out" 2>&1 || bad "--purge exits 0"
+gone "logs" "$logs"
+gone "VST3" "$vst3"
+grep -q "with its logs" "$work/out" && ok "message" || bad "message: $(cat "$work/out")"
 
 echo "== uninstall by name, with nothing next to the script"
 run >/dev/null 2>&1

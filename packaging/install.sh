@@ -5,6 +5,7 @@
 #   ./install.sh                         install for this user
 #   sudo ./install.sh --system           install for all users
 #   ./install.sh --uninstall             remove an install for this user
+#   ./install.sh --uninstall --purge     also remove this user's diagnostics logs
 #   sudo ./install.sh --uninstall --system   remove a system-wide install
 #   ./install.sh --app <Name> --uninstall    remove without the files at hand
 #   (--user, the default here, is accepted as on Windows)
@@ -12,7 +13,8 @@
 # Next to this script, each part installed when present:
 #   Linux: <App>.vst3, <App>-CLAP/ (<App>.clap + Resources/),
 #          <App>-App/ (<App>, Resources/, <app>.desktop, icons/)
-#   macOS: <App>.vst3, <App>.clap, <App>.app
+#   macOS: <App>.vst3, <App>.clap, <App>.app (Apple Silicon, Intel or
+#          universal; a build for the other kind of Mac is refused)
 #
 # The install locations are listed in packaging/README.md; settings and
 # content are left alone. DESTDIR=<dir> stages the same layout under <dir>
@@ -23,6 +25,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 scope=user
 action=install
+purge=0
 app=
 args="$*"
 
@@ -33,6 +36,7 @@ usage() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --uninstall) action=uninstall ;;
+        --purge) purge=1 ;;
         --system) scope=system ;;
         --user) scope=user ;;
         --app)
@@ -120,6 +124,20 @@ case "$os:$scope" in
 esac
 sizes="48 64 128 256 512"
 
+# The diagnostics logs (dreist_engine::diag), per user: under sudo, the
+# user's who ran it.
+user_home=$HOME
+if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = 0 ]; then
+    user_home=$(eval echo "~$SUDO_USER")
+fi
+if [ "$os" = Linux ]; then
+    state=${XDG_STATE_HOME:-$user_home/.local/state}
+    case "$state" in /*) ;; *) state=$user_home/.local/state ;; esac
+    logs=$state/$app
+else
+    logs=$user_home/Library/Logs/$app
+fi
+
 # Where the app runs from (links and launchers), and where files are written.
 app_final=${app_dir:-}
 bin_final=${bin_dir:-}
@@ -167,7 +185,12 @@ remove() {
 if [ "$action" = uninstall ]; then
     remove
     refresh
-    echo "$app removed (settings in $(show "$settings") and content kept)"
+    if [ "$purge" = 1 ]; then
+        rm -rf "$destdir$logs"
+        echo "$app removed with its logs (settings in $(show "$settings") and content kept)"
+    else
+        echo "$app removed (settings in $(show "$settings"), logs in $(show "$logs") and content kept)"
+    fi
     exit 0
 fi
 
@@ -201,10 +224,33 @@ check_build() {
     echo "Not a complete build, nothing changed: $1" >&2
     exit 1
 }
+# macOS: a build for one architecture (the Apple Silicon or Intel archive)
+# must be this Mac's; a universal build fits both. Under Rosetta the Mac is
+# still Apple Silicon.
+if [ "$os" = Darwin ]; then
+    machine=$(uname -m)
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ] && machine=arm64
+fi
+mac_name() { if [ "$1" = arm64 ]; then echo "Apple Silicon"; else echo Intel; fi; }
+check_arch() {
+    [ "$os" = Darwin ] || return 0
+    case $(od -An -tx1 -N8 "$1" 2>/dev/null | tr -d ' \n' || true) in
+        cffaedfe0c000001) arch=arm64 ;;
+        cffaedfe07000001) arch=x86_64 ;;
+        *) return 0 ;;
+    esac
+    [ "$arch" = "$machine" ] && return 0
+    want=$(mac_name "$machine" | tr -d ' ')
+    echo "This build is for $(mac_name "$arch") Macs, this Mac is $(mac_name "$machine"): use the $app-<version>-macOS-$want archive; nothing changed" >&2
+    exit 1
+}
 found=0
 [ -d "$vst3" ] && { check_build "${vst3_bin:-$vst3/Contents}"; found=1; }
 [ -d "$clap" ] && { check_build "$clap_bin"; found=1; }
 [ -d "$appsrc" ] && { check_build "$app_bin"; found=1; }
+for f in "$vst3_bin" "$clap_bin" "$app_bin"; do
+    [ -f "$f" ] && check_arch "$f"
+done
 if [ "$found" = 0 ]; then
     echo "Nothing to install for $os next to this script ($here)" >&2
     exit 2

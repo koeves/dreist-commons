@@ -3,11 +3,14 @@
 //! See the dreist-re GUI notes.
 
 pub mod app;
+#[cfg(feature = "window")]
+pub mod clipboard;
 pub mod collapse;
 pub mod colour;
 pub mod ctrl;
 pub mod cursor;
 pub mod dragout;
+pub mod edit;
 pub mod menu;
 pub mod menubar;
 pub mod meter;
@@ -76,9 +79,11 @@ pub fn render_region(
     if aligned && w > 0 && h > 0 {
         // Drawn with a margin and copied back without it: a shape crossing
         // a pixmap's edge gets wrong coverage in the edge pixels.
-        const MARGIN: i32 = 4;
-        let (px0, py0) = ((x0 - MARGIN).max(0), (y0 - MARGIN).max(0));
-        let (px1, py1) = ((x1 + MARGIN).min(root.rect.w), (y1 + MARGIN).min(root.rect.h));
+        // The margin keeps the pixmap's corner on a whole device pixel at
+        // fractional scales too (shapes keep their place between pixels).
+        let margin = device_grid(scale).map_or(4, |k| k * ((4 + k - 1) / k));
+        let (px0, py0) = ((x0 - margin).max(0), (y0 - margin).max(0));
+        let (px1, py1) = ((x1 + margin).min(root.rect.w), (y1 + margin).min(root.rect.h));
         let (tw, th) = (((px1 - px0) as f32 * scale).ceil() as u32, ((py1 - py0) as f32 * scale).ceil() as u32);
         let Some(mut tmp) = tiny_skia::Pixmap::new(tw, th) else { return };
         tmp.fill(tiny_skia::Color::from_rgba8(back.r, back.g, back.b, 255));
@@ -210,6 +215,39 @@ pub fn render_full_into(
     }
 }
 
+/// The smallest step of root coordinates whose multiples lie on whole
+/// device pixels at `scale` (1 at whole scales, 4 at 1.25, 2 at 1.5);
+/// `None` when no step up to 20 does.
+pub fn device_grid(scale: f32) -> Option<i32> {
+    (1..=20).find(|&k| (k as f32 * scale).fract() == 0.0)
+}
+
+/// `r` grown to [`device_grid`] lines (and cut to `root`): at a fractional
+/// scale its repaint then starts on whole device pixels, as
+/// [`render_region`] needs to give a full render's pixels.
+pub fn device_aligned(root: &Ctrl, scale: f32, r: ctrl::Rect) -> ctrl::Rect {
+    let Some(k) = device_grid(scale).filter(|&k| k > 1) else { return r };
+    let (x0, y0) = (r.x.max(0).div_euclid(k) * k, r.y.max(0).div_euclid(k) * k);
+    let (x1, y1) = (((r.x + r.w).max(0) + k - 1).div_euclid(k) * k, ((r.y + r.h).max(0) + k - 1).div_euclid(k) * k);
+    let (x1, y1) = (x1.min(root.rect.w.max(x0)), y1.min(root.rect.h.max(y0)));
+    ctrl::Rect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// The device pixels that the root-coordinate rectangle `r` touches in a
+/// frame of `root` at `scale` (`(x, y, w, h)`, inside the frame); `None`
+/// when it lies outside.
+pub fn device_cover(root: &Ctrl, scale: f32, r: ctrl::Rect) -> Option<(u32, u32, u32, u32)> {
+    let (x0, y0) = (r.x.max(0), r.y.max(0));
+    let (x1, y1) = ((r.x + r.w).min(root.rect.w), (r.y + r.h).min(root.rect.h));
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (fw, fh) = ((root.rect.w.max(1) as f32 * scale).ceil(), (root.rect.h.max(1) as f32 * scale).ceil());
+    let (dx0, dy0) = ((x0 as f32 * scale).floor(), (y0 as f32 * scale).floor());
+    let (dx1, dy1) = ((x1 as f32 * scale).ceil().min(fw), (y1 as f32 * scale).ceil().min(fh));
+    (dx1 > dx0 && dy1 > dy0).then_some((dx0 as u32, dy0 as u32, (dx1 - dx0) as u32, (dy1 - dy0) as u32))
+}
+
 /// The device-pixel rectangle of the root-coordinate rectangle `r` in a
 /// frame of `root` at `scale`, when it lies on whole device pixels (any
 /// integer scale): `(x, y, w, h)`.
@@ -256,4 +294,42 @@ pub fn render_menu_over(skin: &Skin, fonts: &mut text::Fonts, scale: f32, menu: 
         menu.draw(&skin.styles, &mut p);
     }
     copy_device_rect(frame, &mut tmp, d, true);
+}
+
+#[cfg(test)]
+mod device_tests {
+    use super::*;
+
+    fn root() -> Ctrl {
+        Ctrl { rect: Rect::new(0, 0, 101, 50), ..Ctrl::default() }
+    }
+
+    #[test]
+    fn fractional_scales_have_a_device_grid() {
+        assert_eq!(device_grid(1.0), Some(1));
+        assert_eq!(device_grid(2.0), Some(1));
+        assert_eq!(device_grid(1.5), Some(2));
+        assert_eq!(device_grid(1.25), Some(4));
+        assert_eq!(device_grid(1.75), Some(4));
+    }
+
+    /// Damage grows to the grid, inside the root; whole scales leave it.
+    #[test]
+    fn damage_grows_to_the_device_grid() {
+        let r = Rect::new(5, 6, 10, 3);
+        assert_eq!(device_aligned(&root(), 2.0, r), r);
+        assert_eq!(device_aligned(&root(), 1.5, r), Rect::new(4, 6, 12, 4));
+        assert_eq!(device_aligned(&root(), 1.25, r), Rect::new(4, 4, 12, 8));
+        assert_eq!(device_aligned(&root(), 1.25, Rect::new(97, 47, 10, 10)), Rect::new(96, 44, 5, 6));
+        assert_eq!(device_aligned(&root(), 1.5, Rect::new(-3, -3, 4, 4)), Rect::new(0, 0, 2, 2));
+    }
+
+    /// Presenting covers every device pixel a rectangle touches.
+    #[test]
+    fn presented_pixels_cover_the_damage() {
+        assert_eq!(device_cover(&root(), 2.0, Rect::new(5, 6, 10, 3)), Some((10, 12, 20, 6)));
+        assert_eq!(device_cover(&root(), 1.5, Rect::new(5, 6, 10, 3)), Some((7, 9, 16, 5)));
+        assert_eq!(device_cover(&root(), 1.5, Rect::new(95, 45, 20, 20)), Some((142, 67, 10, 8)));
+        assert_eq!(device_cover(&root(), 1.5, Rect::new(200, 0, 5, 5)), None);
+    }
 }

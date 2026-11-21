@@ -221,12 +221,43 @@ unsafe fn create_view_class() -> &'static Class {
     add_simple_mouse_class_method!(class, mouseExited, MouseEvent::CursorLeft);
 
     add_simple_keyboard_class_method!(class, keyDown);
+    class.add_method(
+        sel!(performKeyEquivalent:),
+        perform_key_equivalent as extern "C" fn(&Object, Sel, id) -> BOOL,
+    );
     add_simple_keyboard_class_method!(class, keyUp);
     add_simple_keyboard_class_method!(class, flagsChanged);
 
     class.add_ivar::<*mut c_void>(BASEVIEW_STATE_IVAR);
 
     class.register()
+}
+
+/// Dreist patch: with `Window::set_key_equivalents` on and the view first
+/// responder, a key with command goes to the handler as a key press before
+/// the menus see it; a captured one is not passed on.
+extern "C" fn perform_key_equivalent(this: &Object, _sel: Sel, event: id) -> BOOL {
+    let Some(state) = (unsafe { WindowState::try_from_view(this) }) else { return NO };
+    if !state.window_inner.key_equivalents.get() {
+        return NO;
+    }
+    let first: bool = unsafe {
+        let window: id = msg_send![this, window];
+        if window.is_null() {
+            return NO;
+        }
+        let first_responder: id = msg_send![window, firstResponder];
+        let same: BOOL = msg_send![this, isEqual: first_responder];
+        same == YES
+    };
+    if !first {
+        return NO;
+    }
+    let Some(key_event) = state.process_native_key_event(event) else { return NO };
+    match state.trigger_event(Event::Keyboard(key_event)) {
+        EventStatus::Captured => YES,
+        _ => NO,
+    }
 }
 
 extern "C" fn property_yes(_this: &Object, _sel: Sel) -> BOOL {

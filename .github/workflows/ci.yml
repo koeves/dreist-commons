@@ -23,9 +23,9 @@ env:
 
 # Tests that need an app's UI or factory assets skip without them; Dreist's
 # CI runs this suite against its assets.
-# Pull requests into dev run the fast checks (Linux); macOS and Windows run
-# on the release pull request (into main) and in the release. A skipped job
-# counts as passed for the branch rules.
+# Pull requests into dev run the fast checks (Linux); macOS (Apple Silicon and
+# Intel) and Windows run on the release pull request (into main) and in the
+# release. A skipped job counts as passed for the branch rules.
 jobs:
   changes:
     # Whether a pull request changes more than Markdown: a docs-only pull
@@ -111,6 +111,27 @@ jobs:
         run: cargo clippy --locked -p dreist-host --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --locked --workspace
+      - name: Test (window)
+        run: cargo test --locked -p dreist-gui --features window
+      - name: Test (host)
+        run: cargo test --locked -p dreist-host --all-features
+
+  macos-intel:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    # The full suite on Intel (x86_64): the apps ship universal macOS binaries.
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        # The effect fingerprints hash float output, which differs on x86_64:
+        # they are checked on Apple Silicon above, here non-fatal.
+        run: cargo test --locked --workspace -- --skip effects_match_fingerprints
+      - name: Effect fingerprints (platform-dependent)
+        continue-on-error: true
+        run: cargo test --locked -p dreist-dsp --test fx_harness effects_match_fingerprints
       - name: Test (window)
         run: cargo test --locked -p dreist-gui --features window
       - name: Test (host)
