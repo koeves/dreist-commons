@@ -6,7 +6,8 @@ name: Release on main
 # overrides it), the merge commit is tagged `vX.Y.Z` and release.yml
 # publishes it with the changelog section as its notes. Nothing is released
 # when no commit since the tag is releasable. Afterwards dev is
-# fast-forwarded to main (.github/release/sync-dev.sh).
+# fast-forwarded to main (.github/release/sync-dev.sh), and the issues the
+# released pull requests close are closed (.github/release/close-issues.sh).
 on:
   push:
     branches: [main]
@@ -64,6 +65,27 @@ jobs:
     permissions:
       contents: write
       pull-requests: write # release.yml -> commits.yml (release-version)
+
+  issues:
+    # The issues the released pull requests close ("Closes #N"): GitHub
+    # ignores the keywords on pull requests into dev
+    # (.github/release/close-issues.sh).
+    needs: [version, release]
+    if: needs.version.outputs.tag != '' && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Close the released issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: .github/release/close-issues.sh "$TAG"
 
   dev:
     # dev follows main with the DEV_SYNC_KEY deploy key (the dev ruleset's
