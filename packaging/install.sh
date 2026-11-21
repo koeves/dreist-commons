@@ -19,7 +19,8 @@
 # The install locations are listed in packaging/README.md; settings and
 # content are left alone. DESTDIR=<dir> stages the same layout under <dir>
 # (for packages and tests): no root needed, links and launchers point to the
-# final locations.
+# final locations. On Linux, PREFIX=/usr puts a --system install's VST3,
+# command, launcher and icons under /usr instead of /usr/local (packages).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -94,12 +95,13 @@ case "$os:$scope" in
         settings=${XDG_CONFIG_HOME:-$HOME/.config}/$app
         ;;
     Linux:system)
-        vst3_dir=/usr/local/lib/vst3
+        prefix=${PREFIX:-/usr/local}
+        vst3_dir=$prefix/lib/vst3
         clap_dir=/usr/lib/clap/$app
         app_dir=/opt/$app
-        bin_dir=/usr/local/bin
-        desktop_dir=/usr/local/share/applications
-        icon_dir=/usr/local/share/icons/hicolor
+        bin_dir=$prefix/bin
+        desktop_dir=$prefix/share/applications
+        icon_dir=$prefix/share/icons/hicolor
         # shellcheck disable=SC2088 # shown as is: every user's own folder
         settings="~/.config/$app"
         ;;

@@ -153,10 +153,16 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           command -v shellcheck >/dev/null || brew install shellcheck
-          shellcheck packaging/install.sh packaging/test-install.sh
+          shellcheck packaging/*.sh
       - name: Test (install.sh)
         if: runner.os != 'Windows'
         run: sh packaging/test-install.sh
+      - name: Test (.deb and apt repository)
+        if: runner.os == 'Linux'
+        run: sh packaging/test-packages.sh
+      - name: Test (Homebrew cask)
+        if: runner.os == 'macOS'
+        run: sh packaging/cask.sh Fake 1.0.0 0000000000000000000000000000000000000000000000000000000000000000 1111111111111111111111111111111111111111111111111111111111111111 koeves/fake | ruby -c
       - name: Test (install.ps1)
         if: runner.os == 'Windows'
         shell: pwsh
