@@ -13,23 +13,12 @@
 The shared crates of [Dreist](https://github.com/koeves/dreist) (a Rust rebuild of FXpansion Geist2)
 and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 
-## Highlights
+## Features
 
 - **One engine, two apps**: each app plugs in its names, resources, file family and effect nodes through an app profile.
-- **Own editor per app**: panels, dialogs, settings and the effect menu live in each app.
+- **Own editor per app**: panels, dialogs, settings and the effect menu live in each app; the parts both share are in `dreist-editor-core`.
 - **Opens every family**: `.geist*`, `.dreist*` and `.einst*` files load in both apps.
-
-## Contents
-
-- [Crates](#crates)
-- [App profile](#app-profile)
-- [Platforms](#platforms)
-- [Limitations](#limitations)
-- [Diagnostics](#diagnostics)
-- [Development](#development)
-- [Contributing](#contributing)
-- [Related projects](#related-projects)
-- [Licence](#licence)
+- **Diagnostics**: every app and plugin keeps a log (`dreist_engine::diag`) and exports a shareable copy without the user name and private paths.
 
 ## Crates
 
@@ -64,22 +53,16 @@ dreist_dsp::fx::install_factory(NodeFactory { .. });   // optional: the app's ow
 - **File families**: `LEGACY` (`.geist*`), `DREIST` (`.dreist*`), `EINST` (`.einst*`).
 - **Default**: without an installed profile, `BASE` (Dreist's) applies.
 
+## Using it in an app
+
+- **Submodule**: Dreist and Einst include this repository at `commons`, pinned to a release tag.
+- **Dependencies**: the crates by path (`commons/crates/...`) and `vendor/` as `[patch]` entries.
+
 ## Platforms
 
 - **macOS**: 11 or newer, Apple Silicon or Intel.
 - **Windows**: 10 or newer, x64.
 - **Linux**: x86_64, glibc 2.39 or newer (Ubuntu 24.04, Fedora 40); X11, Wayland through XWayland.
-- **Linux backends**: X11 windows (baseview, softbuffer), ALSA audio and MIDI (cpal, midir), XDG portal file dialogs (rfd).
-
-Build setup:
-
-- **macOS**: Xcode Command Line Tools (`xcode-select --install`) and Rust through [rustup](https://rustup.rs).
-- **Windows**: Rust through rustup (MSVC), Visual Studio Build Tools with "Desktop development with C++", and LLVM (`winget install LLVM.LLVM`).
-- **Linux**: Rust through rustup and these packages (Debian / Ubuntu names):
-
-```bash
-sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev
-```
 
 ## Limitations
 
@@ -87,41 +70,19 @@ sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-de
 - **Drops into the window**: macOS and Windows only.
 - **REX files**: macOS only.
 
-## Diagnostics
-
-Every app and plugin keeps a diagnostics log (`dreist_engine::diag`), and the main menu exports it as one file to share.
-
-- **Log**: `~/Library/Logs/<App>/<app>.log` (macOS), `$XDG_STATE_HOME/<App>/<app>.log` (Linux), `%LOCALAPPDATA%\<App>\Logs\<app>.log` (Windows); 5 MB, three older files kept, 20 MB at most.
-- **Shared**: one log per app; with several plugin instances in a host, the first one's audio thread reports, and a writer that finds the log rotated by another follows it.
-- **Memory**: about 27 KB fixed and up to about 100 KB for the last 600 lines an export holds.
-- **Thread**: one per process, waking every 100 ms while playing or in a debug run and every second otherwise.
-- **Audio thread**: block timing, the song position and late blocks go through atomics only, without locks or allocations.
-- **Line format**: `<UTC time> +<seconds>s <kind> key=value ...`, values with spaces in double quotes.
-- **Kinds**: `start` (system, versions, pid), `audio` (format, host, sample rate, block size), `stats` (DSP load %, worst block %, late blocks, memory, output peak), `late` and `slow` blocks (song position, timing), `summary`.
-- **Stats**: every second while playing or after a late block, else once a minute.
-- **Export**: "Export diagnostics" writes `<app>-diagnostics-<time>.txt` next to the log and shows it, keeping the newest five; "Copy diagnostics" puts the same text on the clipboard.
-- **Cleanup**: rotation caps the log, older exports go, the `<app>-debug.log` files of earlier debug runs go at start; `install.sh --uninstall --purge` removes the folder.
-- **Export format**: `# system`, `# audio`, `# run`, `# settings` and `# log` sections of `key=value` or log lines.
-- **Redaction**: paths outside the app's settings and log folders become `<path>`, the login name `<user>`.
-- **Debug runs**: `--debug` echoes the log to stderr (`--debug-json`: JSON lines) with stats every second; `--play`, `--duration`, `--until-end` and `--fail-on-late` drive playback tests.
-
-## Development
+## Building and testing
 
 ```bash
 cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --features dreist-gui/window -- -D warnings
 cargo fmt --all --check
-UPDATE_GOLDEN=1 cargo test ...     # rewrite goldens; explain every change in the commit
 ```
 
-- **UI for tests**: drawn from a Dreist checkout next to this one (`../dreist`; `DREIST_UI` / `DREIST_RESOURCES` override).
-- **Skipped tests**: those needing the UI skip without it; Dreist's CI runs them against its assets.
-- **Content tests**: skip without the factory content (`DREIST_CONTENT` sets its location).
-
-## Contributing
-
-- Commits, checks, branches and releases: [CONTRIBUTING.md](CONTRIBUTING.md).
-- Dreist and Einst include this repository as a submodule at `commons`.
+- **Tools**: Rust through [rustup](https://rustup.rs); on macOS the Xcode Command Line Tools, on Windows Visual Studio Build Tools (C++) and LLVM.
+- **Linux packages** (Debian / Ubuntu): `sudo apt-get install build-essential clang libclang-dev pkg-config libasound2-dev libjack-jackd2-dev libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev libgl1-mesa-dev`.
+- **UI and content for tests**: taken from a Dreist checkout next to this one (`../dreist`; `DREIST_UI`, `DREIST_RESOURCES` and `DREIST_CONTENT` override); tests that need them skip without.
+- **Goldens**: `UPDATE_GOLDEN=1 cargo test ...` rewrites them; explain every change in the commit.
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Related projects
 
