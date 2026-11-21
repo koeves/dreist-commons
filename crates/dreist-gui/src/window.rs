@@ -107,6 +107,8 @@ struct Handler<T: WindowApp> {
     pace: std::time::Duration,
     drawn_at: std::time::Instant,
     input: bool,
+    /// What the last full frame took to draw (see [`resize_pace`]).
+    full_cost: std::time::Duration,
 }
 
 /// The share of a core that frames nobody asked for (meters, playheads,
@@ -120,6 +122,21 @@ const SLOWEST_FRAME: std::time::Duration = std::time::Duration::from_millis(100)
 /// [`SLOWEST_FRAME`]). The audio thread shares the cores with these frames.
 fn pace(cost: std::time::Duration) -> std::time::Duration {
     let spaced = cost.div_f64(ANIMATION_SHARE);
+    if spaced <= std::time::Duration::from_micros(16_667) { std::time::Duration::ZERO } else { spaced.min(SLOWEST_FRAME) }
+}
+
+/// The share of a core a live sizer drag's frames may take: every step is a
+/// new window size and so a full frame, and the pointer moves faster than
+/// large frames draw, so unpaced frames keep a core busy (and the audio
+/// thread waiting for one on small machines).
+const RESIZE_SHARE: f64 = 0.5;
+
+/// The least time between two frames drawn during a sizer drag, when a full
+/// frame takes `full_cost`: none while they fit in [`RESIZE_SHARE`] of a core
+/// at the display rate, else what keeps them within it (at most
+/// [`SLOWEST_FRAME`]). The window itself follows the pointer at once.
+fn resize_pace(full_cost: std::time::Duration) -> std::time::Duration {
+    let spaced = full_cost.div_f64(RESIZE_SHARE);
     if spaced <= std::time::Duration::from_micros(16_667) { std::time::Duration::ZERO } else { spaced.min(SLOWEST_FRAME) }
 }
 
@@ -193,8 +210,16 @@ impl<T: WindowApp> Handler<T> {
             self.stats.held += 1;
             return;
         }
+        // During a sizer drag the window follows the pointer at once, but its
+        // full frames wait their turn (see [`resize_pace`]); the last one
+        // pending is drawn as soon as it may be, or when the drag ends.
+        if self.app.app().live_resizing() && self.drawn_at.elapsed() < resize_pace(self.full_cost) {
+            self.stats.held += 1;
+            return;
+        }
         self.input = false;
         self.drawn_at = std::time::Instant::now();
+        let drawn_at = self.drawn_at;
         let ui = self.app.app().ui_scale.max(0.25);
         self.app.render(scale * ui);
         // The device pixels the frame changed, when not all of them (every
@@ -254,6 +279,7 @@ impl<T: WindowApp> Handler<T> {
             None => {
                 convert(&mut buf, pm.data());
                 let _ = buf.present();
+                self.full_cost = drawn_at.elapsed();
             }
         }
         self.physical = (w, h);
@@ -574,6 +600,7 @@ fn build<T: WindowApp>(app: T) -> impl FnOnce(&mut Window) -> Handler<T> + Send 
             pace: std::time::Duration::ZERO,
             drawn_at: std::time::Instant::now(),
             input: true,
+            full_cost: std::time::Duration::ZERO,
         }
     }
 }
@@ -646,5 +673,16 @@ mod tests {
         assert_eq!(pace(Duration::from_millis(8)), Duration::from_millis(32));
         assert_eq!(pace(Duration::from_millis(20)), Duration::from_millis(80));
         assert_eq!(pace(Duration::from_millis(60)), SLOWEST_FRAME);
+    }
+
+    /// Frames during a sizer drag follow the pointer while they are cheap;
+    /// costly ones are spaced to half a core, no slower than ten a second.
+    #[test]
+    fn costly_resize_frames_are_spaced() {
+        assert_eq!(resize_pace(Duration::ZERO), Duration::ZERO);
+        assert_eq!(resize_pace(Duration::from_millis(8)), Duration::ZERO);
+        assert_eq!(resize_pace(Duration::from_millis(15)), Duration::from_millis(30));
+        assert_eq!(resize_pace(Duration::from_millis(33)), Duration::from_millis(66));
+        assert_eq!(resize_pace(Duration::from_millis(80)), SLOWEST_FRAME);
     }
 }
