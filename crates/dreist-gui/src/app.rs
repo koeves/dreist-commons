@@ -951,9 +951,7 @@ impl App {
             self.v2_set(p, v, false, &mut out);
             return out;
         }
-        let r = c.rect.w / 2;
-        let (dx, dy) = (r - (mx as i32 - ox), r - (my as i32 - oy));
-        let centre = c.rect.w == c.rect.h && (dx * dx + dy * dy) as u32 <= (r * r) as u32;
+        let centre = crate::cursor::knob_centre(c, mx - ox as f32, my - oy as f32);
         let base = c.attr_f32("baseValue", 0.0);
         let end = base + c.value * 2.0 - 1.0;
         let alt = self.mods.alt;
@@ -2821,6 +2819,32 @@ mod tests {
         assert!(app.ctrl(&[0]).unwrap().attr("dragEnd").is_some());
         app.mouse_move(30.0, 221.0);
         assert_eq!(app.ctrl(&[0]).unwrap().attr("dragEnd"), None);
+    }
+
+    /// With a source selected, a drag that starts on the depth ring around
+    /// an unmodulated knob's track adds modulation (the depth); one on the
+    /// track moves the base.
+    #[test]
+    fn transmod_knob_ring_drags_add_a_depth() {
+        let mut k = v2_ctrl("CtrlTransmodKnob", "T", crate::ctrl::Rect::new(10, 200, 40, 40), 0.5);
+        k.set_attr("editingDepth", "true".into());
+        k.set_attr("baseValue", "0.5".into());
+        k.set_attr("modDepth", "0".into());
+        // The ring at the top (track 30 px across, centre (30, 220)).
+        let mut app = v2_app(vec![k.clone()]);
+        app.mouse_move(30.0, 202.0);
+        app.mouse_down(MouseButton::Left);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragPart"), None);
+        app.mouse_move(30.0, 162.0);
+        let c = app.ctrl(&[0]).unwrap();
+        assert!(c.value > 0.5, "the depth grew: {}", c.value);
+        assert!((c.attr_f32("baseValue", 0.0) - 0.5).abs() < 1e-6, "the base stayed");
+        app.mouse_up(MouseButton::Left);
+        // The track: the base.
+        let mut app = v2_app(vec![k]);
+        app.mouse_move(30.0, 210.0);
+        app.mouse_down(MouseButton::Left);
+        assert_eq!(app.ctrl(&[0]).unwrap().attr("dragPart"), Some("primary"));
     }
 
     #[test]
