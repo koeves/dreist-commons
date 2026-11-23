@@ -9,6 +9,7 @@ Install scripts the apps ship in their release archives: `install.sh` (Linux, ma
 - macOS: a build for the other kind of Mac (Apple Silicon or Intel) is refused and the right archive named; Rosetta counts as Apple Silicon.
 - Settings, content and the diagnostics logs stay on uninstall; `--purge` removes the logs of the user running it.
 - `DESTDIR=<dir>` (install.sh) stages the layout under `<dir>` for packages and tests.
+- `PREFIX=/usr` (install.sh, Linux `--system`) puts the VST3, command, launcher and icons under `/usr` for packages.
 
 ## Locations
 
@@ -56,7 +57,15 @@ One archive per system, `<App>-v<version>-<system>.zip` (Linux `.tar.gz`, keepin
 | `Windows` | `<App>.vst3`, `<App>-CLAP\` (`<App>.clap`, `Resources\`), `<App>-App\` (`<App>.exe`, `Resources\`) |
 | `Linux` | `<App>.vst3`, `<App>-CLAP/` (`<App>.clap`, `Resources/`), `<App>-App/` (`<App>`, `Resources/`, `<app>.desktop`, `icons/`) |
 
+## Packages
+
+- **Homebrew** (macOS): `cask.sh` writes the cask for the Apple Silicon and Intel archives (Homebrew picks the Mac's); the apps' release workflow pushes it to `koeves/homebrew-tap`.
+- **apt** (Debian, Ubuntu): `deb.sh` builds a `.deb` from the Linux archive (`--system` layout under `/usr`, the app in `/opt/<App>`); `apt-publish.sh` adds it to the signed repository tree in `koeves/apt`.
+- **Release secrets** (each app repository): `HOMEBREW_TAP_TOKEN` and `APT_REPO_TOKEN`, fine-grained tokens with contents write access to `koeves/homebrew-tap` and `koeves/apt`, and `APT_GPG_PRIVATE_KEY`, the armored signing key.
+- **Without a secret** the release skips that step.
+
 ## Tests
 
     sh packaging/test-install.sh        # Linux, macOS: fake app in a scratch home and DESTDIR
     pwsh packaging/test-install.ps1     # Windows: installs a fake app for real (CI runners)
+    sh packaging/test-packages.sh       # Debian / Ubuntu: .deb and signed apt repository, fake app
