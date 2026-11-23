@@ -45,20 +45,14 @@ impl Cursor {
 /// centre circle (square knobs only, [re:db47c7]) / slider over
 /// its main track (drag mode [re:654080]: x < w − round(w·realModDim),
 /// `realModDim` 0.25 when the skin leaves it out, [re:c41e95])
-/// → alt ? 1 (Primary) : 3 (Both); elsewhere 2 (Secondary).
+/// → alt ? 1 (Primary) : 3 (Both); elsewhere 2 (Secondary). The knob's
+/// centre circle is its track, `w − w·realModDim` across, so the depth ring
+/// drawn around it takes the depth drags (see [`knob_centre`]).
 pub fn transmod(c: &crate::ctrl::Ctrl, x: f32, y: f32, alt: bool) -> Option<Cursor> {
     let modulated = c.attr("editingDepth") == Some("true");
     let (w, h) = (c.rect.w, c.rect.h);
     let inner = match c.class.as_str() {
-        "CtrlTransmodKnob" => {
-            if w != h {
-                false
-            } else {
-                let r = w / 2;
-                let (dx, dy) = (r - x as i32, r - y as i32);
-                (dx * dx + dy * dy) as u32 <= (r * r) as u32
-            }
-        }
+        "CtrlTransmodKnob" => knob_centre(c, x, y),
         "CtrlTransmodSlider" => {
             let strip = (w as f32 * c.attr_f32("realModDim", 0.25)).round() as i32;
             (x as i32) < (w - strip).max(0) && (y as i32) < h && x >= 0.0 && y >= 0.0
@@ -73,6 +67,19 @@ pub fn transmod(c: &crate::ctrl::Ctrl, x: f32, y: f32, alt: bool) -> Option<Curs
         "TransmodSecondary"
     };
     Some(Cursor::image(name))
+}
+
+/// Whether (`x`, `y`) (control-relative) is inside a square transmod knob's
+/// centre circle: its track, `w − w·realModDim` across, as the renderer
+/// draws it. The ring outside it (the modulation zone) edits the depth.
+pub fn knob_centre(c: &crate::ctrl::Ctrl, x: f32, y: f32) -> bool {
+    let (w, h) = (c.rect.w as f32, c.rect.h as f32);
+    if c.rect.w != c.rect.h {
+        return false;
+    }
+    let r = (w - w * c.attr_f32("realModDim", 0.25)) * 0.5;
+    let (dx, dy) = (x - w * 0.5, y - h * 0.5);
+    dx * dx + dy * dy <= r * r
 }
 
 /// Hot spot of a named image cursor ([re:f09031], default (2, 2)).
@@ -220,6 +227,10 @@ mod tests {
         assert_eq!(transmod(&k, 16.0, 16.0, false), Some(Cursor::image("TransmodBoth")));
         assert_eq!(transmod(&k, 16.0, 16.0, true), Some(Cursor::image("TransmodPrimary")));
         assert_eq!(transmod(&k, 0.0, 0.0, false), Some(Cursor::image("TransmodSecondary")));
+        // The depth ring (outside the 24 px track) edits the depth.
+        assert_eq!(transmod(&k, 16.0, 2.0, false), Some(Cursor::image("TransmodSecondary")));
+        assert_eq!(transmod(&k, 29.0, 16.0, false), Some(Cursor::image("TransmodSecondary")));
+        assert_eq!(transmod(&k, 16.0, 5.0, false), Some(Cursor::image("TransmodBoth")));
         let mut s = Ctrl { class: "CtrlTransmodSlider".into(), rect: Rect::new(0, 0, 20, 128), ..Ctrl::default() };
         s.set_attr("editingDepth", "true".into());
         assert_eq!(transmod(&s, 5.0, 50.0, false), Some(Cursor::image("TransmodBoth")));
