@@ -283,6 +283,9 @@ struct EngineRt {
     /// live notes read; set by 0xd9 while the pattern is off. None = the
     /// default step.
     dummy: Vec<Option<dreist_dsp::voice::Lanes>>,
+    /// The current pattern and pattern power the document gave the
+    /// engine; a rebuild whose document changes them applies them.
+    doc_state: (usize, bool),
 }
 
 struct AuxRt {
@@ -1377,7 +1380,13 @@ impl Dreist {
         swap(&mut self.songrec, &mut old.songrec);
         self.scenes.adopt(&mut old.scenes);
         self.host.values = old.host.values;
-        for (n, o) in self.engines.iter_mut().zip(old.engines.iter_mut()) {
+        // Pattern and power the new document changed (another project, a
+        // kit in an empty slot), applied once the run-time state is in.
+        let mut changed = [None; ENGINES];
+        for (e, (n, o)) in self.engines.iter_mut().zip(old.engines.iter_mut()).enumerate() {
+            if n.doc_state != o.doc_state {
+                changed[e] = Some(n.doc_state);
+            }
             swap(&mut n.state, &mut o.state);
             if n.state.current_pattern >= n.patterns.len() {
                 n.state.current_pattern = 0;
@@ -1436,6 +1445,13 @@ impl Dreist {
         swap(&mut self.midi_log, &mut old.midi_log);
         self.meters.merge(&old.meters);
         self.mods_triggered |= old.mods_triggered;
+        for (e, c) in changed.into_iter().enumerate() {
+            let Some((pattern, power)) = c else { continue };
+            if pattern != self.engines[e].state.current_pattern && pattern < self.engines[e].patterns.len() {
+                self.select_pattern(e, pattern, false);
+            }
+            self.msg_power(e, power);
+        }
     }
 
     /// Render one host block (any length) into `left`/`right` (overwritten).
@@ -2573,6 +2589,7 @@ fn empty_engine() -> EngineRt {
         route: Route::Parent,
         one_shot: [true; TRACKS],
         pad_mode: PadMode::Normal,
+        doc_state: (0, false),
         mute: false,
         solo: false,
         links: Box::new([[false; TRACKS]; TRACKS]),
@@ -2645,6 +2662,7 @@ fn load_engine(e: &dreist_formats::Engine, samples: &Path, sr: f32, solo_eng: bo
         current_pad: es.and_then(|s| s.attr("padSelAnchor")).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0).clamp(0, 63) as usize,
         ..EngineState::default()
     };
+    let doc_state = (state.current_pattern, state.pattern_power);
     let num = n.u32("TempoNumerator").unwrap_or(1).max(1) as f64;
     let den = n.u32("TempoDenominator").unwrap_or(1).max(1) as f64;
     EngineRt {
@@ -2673,6 +2691,7 @@ fn load_engine(e: &dreist_formats::Engine, samples: &Path, sr: f32, solo_eng: bo
         solo: n.bool("Solo").unwrap_or(false),
         links,
         dummy: vec![None; TRACKS],
+        doc_state,
     }
 }
 
@@ -2905,6 +2924,28 @@ mod tests {
         let mut new = Dreist::empty(44_100.0, RenderOptions::default());
         new.adopt(&mut old);
         assert_eq!((new.step_writes.len(), new.midi_log.len(), new.mods_triggered, new.meters.master), (1, 1, 0b100, [0.5, 0.25]));
+    }
+
+    /// A rebuild takes the pattern and power its document changed: a kit
+    /// loaded into an empty slot plays without toggling the slot's power,
+    /// also while the transport runs.
+    #[test]
+    fn adopt_takes_changed_pattern_power() {
+        let build = |xml: &str| Dreist::from_document(&dreist_formats::Node::parse(xml).unwrap(), std::path::Path::new("."), 44_100.0, RenderOptions::default(), &mut Default::default()).unwrap();
+        let mut old = build(r#"<root version="3000"><Engine name="Engine0" /></root>"#);
+        old.start();
+        let mut new = build(r#"<root version="3000"><Engine name="Engine0" /><Engine name="Engine2"><EngineState name="EngineState" CurrentPattern="1" /></Engine></root>"#);
+        new.adopt(&mut old);
+        assert_eq!(new.engine_pattern_state(2), Some((1, true, true)));
+        // Another project's power off arrives too.
+        let mut next = build(r#"<root version="3000"><Engine name="Engine0"><EngineState name="EngineState" PatternPower="false" /></Engine></root>"#);
+        next.adopt(&mut new);
+        assert_eq!(next.engine_pattern_state(0).map(|s| s.1), Some(false));
+        // Run-time changes the document does not hold survive a rebuild.
+        let mut same = build(r#"<root version="3000"><Engine name="Engine0"><EngineState name="EngineState" PatternPower="false" /></Engine></root>"#);
+        next.msg_power(0, true);
+        same.adopt(&mut next);
+        assert_eq!(same.engine_pattern_state(0).map(|s| s.1), Some(true));
     }
 
     #[test]
