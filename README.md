@@ -40,7 +40,7 @@ and [Einst](https://github.com/koeves/einst) (a rebuild of Geist v1).
 - **`nih_log`**: nih-plug's logger, with `std::io::IsTerminal` in place of the unmaintained `atty`.
 - **`signalsmith-stretch`**: a fixed phase-randomisation seed, the same on every platform.
 
-`packaging/` holds the install scripts the apps ship in their release archives, one behaviour on every system ([packaging/README.md](packaging/README.md)).
+`packaging/` holds the install scripts the apps ship in their release archives, one behaviour on every system, and the Audio Unit build for macOS ([packaging/README.md](packaging/README.md)).
 
 ## App profile
 

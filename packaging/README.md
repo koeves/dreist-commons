@@ -1,8 +1,9 @@
 # Packaging
 
 Install scripts the apps ship in their release archives: `install.sh` (Linux, macOS) and `install.ps1` (Windows).
+The Audio Unit build for macOS is in `auv2/`.
 
-- Each script installs the standalone app, VST3 and CLAP that sit next to it, and finds the app's name from them.
+- Each script installs the standalone app, VST3, CLAP and (macOS) Audio Unit that sit next to it, and finds the app's name from them.
 - The same options everywhere: `--user`, `--system` (all users), `--uninstall`, `--purge` (with `--uninstall`: the diagnostics logs too), `--app <Name>` (uninstall without the files), `--help`.
 - Default: all users on Windows (administrator PowerShell), this user on Linux and macOS.
 - Every part is checked to be a complete build before anything installed is touched; a reinstall replaces the old version whole.
@@ -20,6 +21,7 @@ This table is the definition; the scripts, package manifests and app READMEs fol
 |---|---|---|
 | VST3 | `~/Library/Audio/Plug-Ins/VST3/<App>.vst3` | `/Library/Audio/Plug-Ins/VST3/<App>.vst3` |
 | CLAP | `~/Library/Audio/Plug-Ins/CLAP/<App>.clap` | `/Library/Audio/Plug-Ins/CLAP/<App>.clap` |
+| Audio Unit | `~/Library/Audio/Plug-Ins/Components/<App>.component` | `/Library/Audio/Plug-Ins/Components/<App>.component` |
 | App | `/Applications/<App>.app` (`~/Applications` without write access) | `/Applications/<App>.app` |
 | Settings | `~/Library/Application Support/<App>` | same, per user |
 
@@ -52,11 +54,24 @@ One archive per system, `<App>-v<version>-<system>.zip` (Linux `.tar.gz`, keepin
 
 | System | Next to the script |
 |---|---|
-| `macOS-AppleSilicon`, `macOS-Intel` | `<App>.vst3`, `<App>.clap`, `<App>.app` |
+| `macOS-AppleSilicon`, `macOS-Intel` | `<App>.vst3`, `<App>.clap`, `<App>.component`, `<App>.app` |
 | `Windows` | `<App>.vst3`, `<App>-CLAP\` (`<App>.clap`, `Resources\`), `<App>-App\` (`<App>.exe`, `Resources\`) |
 | `Linux` | `<App>.vst3`, `<App>-CLAP/` (`<App>.clap`, `Resources/`), `<App>-App/` (`<App>`, `Resources/`, `<app>.desktop`, `icons/`) |
+
+## Audio Unit
+
+`auv2/build.sh` wraps an app's CLAP as an AUv2 `.component` for Logic Pro and other Audio Unit hosts.
+
+- Built with [clap-wrapper](https://github.com/free-audio/clap-wrapper) v0.18.0 (MIT), Apple's [AudioUnitSDK](https://github.com/apple/AudioUnitSDK) 1.1.0 (Apache-2.0) and the [CLAP SDK](https://github.com/free-audio/clap) 1.2.10 (MIT), each fetched at a pinned commit.
+- The `.component` carries the app's `.clap` in `Contents/PlugIns` and runs it from there.
+- AU type `aumu` (instrument), manufacturer `Drst` (Dreist), one subtype per app.
+- Universal like the CLAP it wraps, signed ad-hoc or with `--sign <identity>` (hardened runtime and timestamp).
+- Needs Xcode's command line tools, CMake and git.
+
+    packaging/auv2/build.sh --clap target/bundled/<App>.clap --subtype <code> --bundle-id <id>
 
 ## Tests
 
     sh packaging/test-install.sh        # Linux, macOS: fake app in a scratch home and DESTDIR
+    packaging/auv2/test.sh              # macOS: a test CLAP as a universal Audio Unit, installed and checked with auval
     pwsh packaging/test-install.ps1     # Windows: installs a fake app for real (CI runners)

@@ -156,7 +156,8 @@ jobs:
   packaging:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    # The apps' install scripts (packaging/), with a fake app on every system.
+    # The apps' install scripts (packaging/), with a fake app on every system,
+    # and the Audio Unit build on macOS.
     # Linux only on pull requests into dev.
     strategy:
       fail-fast: false
@@ -173,6 +174,13 @@ jobs:
       - name: Test (install.sh)
         if: runner.os != 'Windows'
         run: sh packaging/test-install.sh
+      - name: Audio Unit (auval)
+        # A test CLAP with the apps' buses, wrapped as a universal AUv2,
+        # installed and checked with auval (packaging/auv2/test.sh).
+        if: runner.os == 'macOS'
+        run: |
+          shellcheck packaging/auv2/build.sh packaging/auv2/test.sh
+          packaging/auv2/test.sh
       - name: Test (install.ps1)
         if: runner.os == 'Windows'
         shell: pwsh
