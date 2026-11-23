@@ -4,9 +4,13 @@
 
 pub mod command;
 pub mod fxtext;
+pub mod knob;
 pub mod options;
+pub mod sampling;
 pub mod swing;
 pub mod tabs;
 pub mod timeline;
 pub mod transmodvis;
+pub mod uistate;
 pub mod undo;
+pub mod zoomslider;
