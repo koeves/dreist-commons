@@ -319,10 +319,101 @@ impl<T: WindowApp> Handler<T> {
         }
     }
 
+    /// A key from the window or the host: `Some` when the key goes back to
+    /// the host as that status, `None` when the editor used it.
+    fn keyboard(&mut self, k: keyboard_types::KeyboardEvent) -> Option<EventStatus> {
+        if k.state != keyboard_types::KeyState::Down {
+            return Some(if self.app.app().is_editing() { EventStatus::Captured } else { EventStatus::Ignored });
+        }
+        match &k.key {
+            keyboard_types::Key::Character(s) => {
+                let cmd = self.app.app().mods.cmd;
+                let capture = self.app.captures_keys();
+                // [re:f26c4b]: a text box being edited takes the
+                // editing shortcuts and lets no other one through.
+                if cmd && self.app.app().is_editing() {
+                    if let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) {
+                        self.edit_shortcut(&key);
+                    }
+                    return Some(EventStatus::Captured);
+                }
+                if cmd || !self.app.app().is_editing() {
+                    let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) else {
+                        return Some(if capture { EventStatus::Captured } else { EventStatus::Ignored });
+                    };
+                    let ev = self.app.app().shortcut(&key);
+                    if ev.is_empty() {
+                        return Some(if capture { EventStatus::Captured } else { EventStatus::Ignored });
+                    }
+                    self.dispatch(ev);
+                    return Some(if cmd || capture { EventStatus::Captured } else { EventStatus::Ignored });
+                }
+                if !self.app.app().key_text(s) {
+                    return Some(EventStatus::Ignored);
+                }
+            }
+            keyboard_types::Key::Escape if self.app.app().escape() => {}
+            other if !self.app.app().is_editing() => {
+                let key = match other {
+                    keyboard_types::Key::Backspace | keyboard_types::Key::Delete => "delete",
+                    keyboard_types::Key::ArrowLeft => "left",
+                    keyboard_types::Key::ArrowRight => "right",
+                    keyboard_types::Key::ArrowUp => "up",
+                    keyboard_types::Key::ArrowDown => "down",
+                    keyboard_types::Key::Enter => "enter",
+                    _ => return Some(if self.app.captures_keys() { EventStatus::Captured } else { EventStatus::Ignored }),
+                };
+                let ev = self.app.app().shortcut(key);
+                self.dispatch(ev);
+            }
+            other => {
+                let name = match other {
+                    keyboard_types::Key::Enter => "Enter",
+                    keyboard_types::Key::Escape => "Escape",
+                    keyboard_types::Key::Backspace => "Backspace",
+                    keyboard_types::Key::Delete => "Delete",
+                    keyboard_types::Key::ArrowLeft => "Left",
+                    keyboard_types::Key::ArrowRight => "Right",
+                    keyboard_types::Key::Home => "Home",
+                    keyboard_types::Key::End => "End",
+                    keyboard_types::Key::Tab => "Tab",
+                    _ => "",
+                };
+                let (ev, used) = self.app.app().key_named(name);
+                self.dispatch(ev);
+                if !used {
+                    return Some(EventStatus::Ignored);
+                }
+            }
+        }
+        None
+    }
+
+    /// The keys the host passed the editor instead of the window
+    /// ([`crate::hostkeys`]), and whether it should pass the next ones.
+    fn host_keys(&mut self) {
+        let keys = self.app.app().host_keys.clone();
+        for key in keys.take() {
+            if let Some(k) = host_keyboard_event(key) {
+                self.input = true;
+                self.app.app().mods = mods_from(k.modifiers, cfg!(target_os = "macos"));
+                self.keyboard(k);
+            }
+        }
+        keys.set_editing(self.app.app().is_editing());
+    }
+
     /// Ask for the tooltip of the control under the pointer.
     fn tooltip(&mut self) {
         let path = self.app.app().tooltip_target();
         self.app.event(&UiEvent::ToolTip { path });
+    }
+}
+
+/// A closed window takes no more keys from the host.
+impl<T: WindowApp> Drop for Handler<T> {
+    fn drop(&mut self) {
+        self.app.app().host_keys.set_editing(false);
     }
 }
 
@@ -332,6 +423,7 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         // A text box being edited takes the keys with command ahead of
         // the menus ([re:f26c4b]).
         window.set_key_equivalents(self.app.app().is_editing());
+        self.host_keys();
         self.frame(window);
         self.stats.frames += 1;
         self.stats.busy += started.elapsed();
@@ -396,69 +488,8 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
                 self.tooltip();
             }
             Event::Keyboard(k) => {
-                if k.state != keyboard_types::KeyState::Down {
-                    return if self.app.app().is_editing() { EventStatus::Captured } else { EventStatus::Ignored };
-                }
-                match &k.key {
-                    keyboard_types::Key::Character(s) => {
-                        let cmd = self.app.app().mods.cmd;
-                        let capture = self.app.captures_keys();
-                        // [re:f26c4b]: a text box being edited takes the
-                        // editing shortcuts and lets no other one through.
-                        if cmd && self.app.app().is_editing() {
-                            if let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) {
-                                self.edit_shortcut(&key);
-                            }
-                            return EventStatus::Captured;
-                        }
-                        if cmd || !self.app.app().is_editing() {
-                            let Some(key) = shortcut_key(s, k.code, k.location, k.modifiers) else {
-                                return if capture { EventStatus::Captured } else { EventStatus::Ignored };
-                            };
-                            let ev = self.app.app().shortcut(&key);
-                            if ev.is_empty() {
-                                return if capture { EventStatus::Captured } else { EventStatus::Ignored };
-                            }
-                            self.dispatch(ev);
-                            return if cmd || capture { EventStatus::Captured } else { EventStatus::Ignored };
-                        }
-                        if !self.app.app().key_text(s) {
-                            return EventStatus::Ignored;
-                        }
-                    }
-                    keyboard_types::Key::Escape if self.app.app().escape() => {}
-                    other if !self.app.app().is_editing() => {
-                        let key = match other {
-                            keyboard_types::Key::Backspace | keyboard_types::Key::Delete => "delete",
-                            keyboard_types::Key::ArrowLeft => "left",
-                            keyboard_types::Key::ArrowRight => "right",
-                            keyboard_types::Key::ArrowUp => "up",
-                            keyboard_types::Key::ArrowDown => "down",
-                            keyboard_types::Key::Enter => "enter",
-                            _ => return if self.app.captures_keys() { EventStatus::Captured } else { EventStatus::Ignored },
-                        };
-                        let ev = self.app.app().shortcut(key);
-                        self.dispatch(ev);
-                    }
-                    other => {
-                        let name = match other {
-                            keyboard_types::Key::Enter => "Enter",
-                            keyboard_types::Key::Escape => "Escape",
-                            keyboard_types::Key::Backspace => "Backspace",
-                            keyboard_types::Key::Delete => "Delete",
-                            keyboard_types::Key::ArrowLeft => "Left",
-                            keyboard_types::Key::ArrowRight => "Right",
-                            keyboard_types::Key::Home => "Home",
-                            keyboard_types::Key::End => "End",
-                            keyboard_types::Key::Tab => "Tab",
-                            _ => "",
-                        };
-                        let (ev, used) = self.app.app().key_named(name);
-                        self.dispatch(ev);
-                        if !used {
-                            return EventStatus::Ignored;
-                        }
-                    }
+                if let Some(status) = self.keyboard(k) {
+                    return status;
                 }
             }
             Event::Mouse(MouseEvent::DragEntered { position, data, .. } | MouseEvent::DragMoved { position, data, .. }) => {
@@ -496,6 +527,63 @@ impl<T: WindowApp> WindowHandler for Handler<T> {
         self.apply_cursor(window);
         EventStatus::Captured
     }
+}
+
+/// A key the host passed ([`crate::hostkeys::HostKey`]) as the window's
+/// key event, or `None` for a key the editor has no use for.
+fn host_keyboard_event(key: crate::hostkeys::HostKey) -> Option<keyboard_types::KeyboardEvent> {
+    use crate::hostkeys::{modifier, vk};
+    use keyboard_types::{Code, Key, KeyState, KeyboardEvent, Location, Modifiers};
+    let mut modifiers = Modifiers::empty();
+    let mac = cfg!(target_os = "macos");
+    for (bit, m) in [
+        (modifier::SHIFT, Modifiers::SHIFT),
+        (modifier::ALT, Modifiers::ALT),
+        (modifier::COMMAND, if mac { Modifiers::META } else { Modifiers::CONTROL }),
+        (modifier::CONTROL, if mac { Modifiers::CONTROL } else { Modifiers::META }),
+    ] {
+        if key.modifiers & bit != 0 {
+            modifiers |= m;
+        }
+    }
+    let named = match key.key_code {
+        vk::BACK => Some((Key::Backspace, Code::Backspace)),
+        vk::TAB => Some((Key::Tab, Code::Tab)),
+        vk::RETURN | vk::ENTER => Some((Key::Enter, Code::Enter)),
+        vk::ESCAPE => Some((Key::Escape, Code::Escape)),
+        vk::END => Some((Key::End, Code::End)),
+        vk::HOME => Some((Key::Home, Code::Home)),
+        vk::LEFT => Some((Key::ArrowLeft, Code::ArrowLeft)),
+        vk::UP => Some((Key::ArrowUp, Code::ArrowUp)),
+        vk::RIGHT => Some((Key::ArrowRight, Code::ArrowRight)),
+        vk::DOWN => Some((Key::ArrowDown, Code::ArrowDown)),
+        vk::DELETE => Some((Key::Delete, Code::Delete)),
+        vk::SPACE => Some((Key::Character(" ".into()), Code::Space)),
+        _ => None,
+    };
+    let (key_value, code) = match named {
+        Some(n) => n,
+        None => {
+            // Ctrl+letter can arrive as its control code.
+            let c = match key.character {
+                0 => return None,
+                c @ 1..=26 => u16::from(b'a') + c - 1,
+                c => c,
+            };
+            let ch = char::decode_utf16([c]).next()?.ok()?;
+            if ch.is_control() {
+                return None;
+            }
+            let lower = ch.to_ascii_lowercase();
+            let code = match lower {
+                'a'..='z' => format!("Key{}", lower.to_ascii_uppercase()).parse().unwrap_or(Code::Unidentified),
+                '0'..='9' => format!("Digit{lower}").parse().unwrap_or(Code::Unidentified),
+                _ => Code::Unidentified,
+            };
+            (Key::Character(ch.to_string()), code)
+        }
+    };
+    Some(KeyboardEvent { state: if key.down { KeyState::Down } else { KeyState::Up }, key: key_value, code, location: Location::Standard, modifiers, repeat: false, is_composing: false })
 }
 
 /// The app's modifier set for the platform's keys: the shortcut modifier
@@ -667,6 +755,30 @@ mod tests {
         // The keypad's digits are not the page keys.
         assert_eq!(key("1", Code::Numpad1, Location::Numpad, M::empty()), None);
         assert_eq!(key("1", Code::Digit1, Location::Standard, M::empty()).as_deref(), Some("1"));
+    }
+
+    /// The host's VST3 keys become the window's key events: characters
+    /// (Ctrl+letter also as its control code), editing keys, modifiers.
+    #[test]
+    fn host_keys_become_key_events() {
+        use crate::hostkeys::{HostKey, modifier, vk};
+        use keyboard_types::{Code, Key, KeyState, Modifiers as M};
+        let ev = |character: u16, key_code, modifiers| host_keyboard_event(HostKey { down: true, character, key_code, modifiers });
+        let a = ev('A' as u16, 0, modifier::SHIFT).unwrap();
+        assert_eq!((a.key, a.code, a.modifiers, a.state), (Key::Character("A".into()), Code::KeyA, M::SHIFT, KeyState::Down));
+        let cmd = if cfg!(target_os = "macos") { M::META } else { M::CONTROL };
+        let c = ev(3, 0, modifier::COMMAND).unwrap();
+        assert_eq!((c.key, c.code, c.modifiers), (Key::Character("c".into()), Code::KeyC, cmd));
+        assert_eq!(ev('7' as u16, 0, 0).unwrap().code, Code::Digit7);
+        assert_eq!(ev('\u{e9}' as u16, 0, 0).unwrap().key, Key::Character("\u{e9}".into()));
+        assert_eq!(ev(0, vk::BACK, 0).unwrap().key, Key::Backspace);
+        assert_eq!(ev(0, vk::RETURN, 0).unwrap().key, Key::Enter);
+        assert_eq!(ev(0, vk::ENTER, 0).unwrap().key, Key::Enter);
+        assert_eq!(ev(0, vk::LEFT, modifier::SHIFT).unwrap().modifiers, M::SHIFT);
+        assert_eq!(ev(' ' as u16, vk::SPACE, 0).unwrap().key, Key::Character(" ".into()));
+        // A modifier key alone, or a key without a character, is no event.
+        assert!(ev(0, 50, modifier::SHIFT).is_none());
+        assert!(ev(0x7f, 0, 0).is_none());
     }
 
     /// Cheap frames are drawn every display frame; costly ones are spaced
