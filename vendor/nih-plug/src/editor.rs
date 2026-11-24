@@ -86,6 +86,15 @@ pub trait Editor: Send {
         let _ = (width, height);
         false
     }
+
+    /// A key the host passes to the editor instead of the editor's window (VST3
+    /// `IPlugView::onKeyDown` / `onKeyUp`): `character` is the UTF-16 character or 0, `key_code`
+    /// the VST3 virtual key code and `modifiers` the VST3 key modifier bits. Returns true when the
+    /// editor used the key, so the host does not act on it as well.
+    fn host_key(&self, down: bool, character: u16, key_code: i16, modifiers: i16) -> bool {
+        let _ = (down, character, key_code, modifiers);
+        false
+    }
 }
 
 /// A raw window handle for platform and GUI framework agnostic editors. This implements

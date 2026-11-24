@@ -347,20 +347,32 @@ impl<P: Vst3Plugin> IPlugView for WrapperView<P> {
 
     unsafe fn on_key_down(
         &self,
-        _key: vst3_sys::base::char16,
-        _key_code: i16,
-        _modifiers: i16,
+        key: vst3_sys::base::char16,
+        key_code: i16,
+        modifiers: i16,
     ) -> tresult {
-        kNotImplemented
+        catch_gui_panic("IPlugView::onKeyDown", kResultFalse, || {
+            if self.editor.lock().host_key(true, key as u16, key_code, modifiers) {
+                kResultOk
+            } else {
+                kResultFalse
+            }
+        })
     }
 
     unsafe fn on_key_up(
         &self,
-        _key: vst3_sys::base::char16,
-        _key_code: i16,
-        _modifiers: i16,
+        key: vst3_sys::base::char16,
+        key_code: i16,
+        modifiers: i16,
     ) -> tresult {
-        kNotImplemented
+        catch_gui_panic("IPlugView::onKeyUp", kResultFalse, || {
+            if self.editor.lock().host_key(false, key as u16, key_code, modifiers) {
+                kResultOk
+            } else {
+                kResultFalse
+            }
+        })
     }
 
     unsafe fn get_size(&self, size: *mut ViewRect) -> tresult {

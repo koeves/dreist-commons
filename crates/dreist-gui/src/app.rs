@@ -169,6 +169,9 @@ pub struct App {
     /// Files for an OS drag out of the window ([re:6367bf]),
     /// taken by the window.
     pub drag_out: Option<Vec<std::path::PathBuf>>,
+    /// Keys the plugin host passes to the editor instead of its window
+    /// (taken by the window each frame).
+    pub host_keys: std::sync::Arc<crate::hostkeys::HostKeys>,
     /// The current drag already left the window.
     drag_left: bool,
     /// Menu slider item being dragged.
@@ -282,6 +285,7 @@ impl App {
             press_at: (0.0, 0.0),
             dragging: false,
             drag_out: None,
+            host_keys: Default::default(),
             drag_left: false,
             menu_slider: None,
             left_held: false,

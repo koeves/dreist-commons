@@ -6,6 +6,8 @@
 #   allocating the length the stream claims up front (random or foreign
 #   data aborted the host on the failed allocation).
 # - CLAP state load asks the host to rescan the parameter values.
+# - VST3 `IPlugView::onKeyDown` / `onKeyUp` go to `Editor::host_key` (hosts
+#   such as Live on Windows pass the editor its keys that way).
 
 [package]
 name = "nih_plug"

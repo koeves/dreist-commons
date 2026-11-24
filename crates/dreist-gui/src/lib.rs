@@ -11,6 +11,7 @@ pub mod ctrl;
 pub mod cursor;
 pub mod dragout;
 pub mod edit;
+pub mod hostkeys;
 pub mod menu;
 pub mod menubar;
 pub mod meter;
